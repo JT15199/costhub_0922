@@ -3,7 +3,7 @@ import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Tag, mes
 import type { TableRowSelection } from 'antd/es/table/interface';
 import { PlusOutlined, EditOutlined, DeleteOutlined, DownloadOutlined, UploadOutlined, HistoryOutlined, SearchOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
-import { getParts, savePart, deletePart, getCategories, getPriceHistory } from '../db';
+import { getParts, savePart, deletePart, getCategories, getPriceHistory, getMainCategories } from '../db';
 import { MAIN_CATEGORIES, SUB_CATEGORIES, CATEGORY_COLORS } from '../constants';
 
 export default function PartsLibrary() {
@@ -19,8 +19,10 @@ export default function PartsLibrary() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyData, setHistoryData] = useState<any[]>([]);
   const [historyName, setHistoryName] = useState('');
+  const [mainCats, setMainCats] = useState(MAIN_CATEGORIES);
   const [form] = Form.useForm();
 
+  useEffect(() => { (async () => { try { setMainCats(await getMainCategories()); } catch(e) {} })(); }, []);
   const load = useCallback(async () => {
     setLoading(true);
     try { const d = await getParts(search, typeFilter, mainCat); setParts(d); setCategories(await getCategories()); } catch (e) { console.error(e); }
@@ -68,7 +70,7 @@ export default function PartsLibrary() {
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
           <Space wrap>
             <Input prefix={<SearchOutlined />} placeholder="搜索..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: 200 }} allowClear />
-            <Select placeholder="大类" value={mainCat || undefined} onChange={v => setMainCat(v || '')} allowClear style={{ width: 110 }} options={MAIN_CATEGORIES.map(c => ({ label: c, value: c }))} />
+            <Select placeholder="大类" value={mainCat || undefined} onChange={v => setMainCat(v || '')} allowClear style={{ width: 110 }} options={mainCats.map(c => ({ label: c, value: c }))} />
             <Select placeholder="子类" value={typeFilter || undefined} onChange={v => setTypeFilter(v || '')} allowClear style={{ width: 130 }} options={categories.map(c => ({ label: c, value: c }))} />
           </Space>
           <Space>
@@ -88,7 +90,7 @@ export default function PartsLibrary() {
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item label="大类" name="main_category">
-                <Select options={MAIN_CATEGORIES.map(c => ({ label: c, value: c }))} onChange={(v) => { const subs = SUB_CATEGORIES[v] || []; form.setFieldValue('sub_category', subs[0] || ''); form.setFieldValue('category', v); }} />
+                <Select options={mainCats.map(c => ({ label: c, value: c }))} onChange={(v) => { const subs = SUB_CATEGORIES[v] || []; form.setFieldValue('sub_category', subs[0] || ''); form.setFieldValue('category', v); }} />
               </Form.Item>
             </Col>
             <Col span={12}>

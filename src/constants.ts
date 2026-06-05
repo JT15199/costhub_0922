@@ -26,3 +26,13 @@ export const PROJECT_STATUSES = ['进行中','已完成','暂停'];
 export const PROJECT_TYPES = ['在研','已完成'];
 export const MEASURE_STATUSES = ['待执行','执行中','已完成','已取消'];
 export const BRAND_RED = '#CF0A2C';
+
+const EXTRA_COLORS = ['#6366F1', '#EC4899', '#14B8A6', '#F97316', '#8B5CF6', '#06B6D4', '#E11D48', '#CA8A04', '#7C3AED', '#0891B2'];
+let colorIdx = 0;
+export function getCategoryColor(cat: string): string {
+  if (CATEGORY_COLORS[cat]) return CATEGORY_COLORS[cat];
+  const c = EXTRA_COLORS[colorIdx % EXTRA_COLORS.length];
+  CATEGORY_COLORS[cat] = c;
+  colorIdx++;
+  return c;
+}

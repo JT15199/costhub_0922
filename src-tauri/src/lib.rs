@@ -121,6 +121,14 @@ pub fn run() {
                     remark TEXT DEFAULT '',
                     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS project_targets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    domain TEXT NOT NULL,
+                    target_cost REAL DEFAULT 0,
+                    remark TEXT DEFAULT '',
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+                );
                 CREATE TABLE IF NOT EXISTS project_measures (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     project_id INTEGER NOT NULL,
@@ -149,6 +157,18 @@ pub fn run() {
                     key TEXT PRIMARY KEY, value TEXT DEFAULT ''
                 );
             ",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 2,
+            description: "add project_targets table",
+            sql: "CREATE TABLE IF NOT EXISTS project_targets (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, domain TEXT NOT NULL, target_cost REAL DEFAULT 0, remark TEXT DEFAULT '', FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE);",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 3,
+            description: "add ref_project_id to project_boms",
+            sql: "ALTER TABLE project_boms ADD COLUMN ref_project_id INTEGER DEFAULT 0;",
             kind: MigrationKind::Up,
         },
     ];

@@ -17,17 +17,18 @@ body { font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe
   border-right: 1px solid var(--border); position: relative; z-index: 10;
 }
 .sidebar-logo {
-  padding: 22px 20px; background: linear-gradient(135deg, var(--brand) 0%, #A00822 100%);
-  position: relative; overflow: hidden;
+  padding: 20px 16px; background: #FFF; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px;
 }
-.sidebar-logo::before {
-  content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
-  background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 70%);
-  animation: logoPulse 4s ease-in-out infinite;
+.sidebar-logo .logo-img {
+  width: 36px; height: 36px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--brand) 0%, #E6103A 100%);
+  display: flex; align-items: center; justify-content: center;
+  color: #FFF; font-weight: 700; font-size: 14px;
+  flex-shrink: 0;
 }
-@keyframes logoPulse { 0%,100% { transform: scale(1); opacity: 0.4; } 50% { transform: scale(1.15); opacity: 0.8; } }
-.sidebar-logo h1 { color: #FFF; font-size: 16px; font-weight: 700; letter-spacing: 1px; position: relative; z-index: 1; }
-.sidebar-logo span { color: rgba(255,255,255,0.7); font-size: 10px; position: relative; z-index: 1; }
+.sidebar-logo h1 { color: var(--text); font-size: 15px; font-weight: 700; letter-spacing: 0.5px; }
+.sidebar-logo span { color: var(--text-secondary); font-size: 10px; }
 .sidebar-nav { flex: 1; padding: 8px 0; overflow-y: auto; }
 .nav-item {
   display: flex; align-items: center; gap: 10px; margin: 1px 8px;
@@ -85,3 +86,17 @@ body { font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe
 
 @keyframes fadeInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 .fade-in-up { animation: fadeInUp 0.35s cubic-bezier(0.4,0,0.2,1) forwards; }
+
+/* Tech accents */
+.content-card { position: relative; }
+.content-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(207,10,44,0.15), transparent); border-radius: var(--radius) var(--radius) 0 0; opacity: 0; transition: opacity 0.3s; }
+.content-card:hover::before { opacity: 1; }
+
+.stat-card::before { content: ''; position: absolute; inset: 0; border-radius: var(--radius); background: linear-gradient(135deg, transparent 60%, rgba(207,10,44,0.03)); pointer-events: none; }
+
+/* Module grouping cards */
+.module-group { background: linear-gradient(180deg, #FAFBFC 0%, #FFF 100%); border: 1px solid #E8ECF1; border-radius: 10px; overflow: hidden; margin-bottom: 12px; }
+.module-group-header { background: linear-gradient(90deg, #F8FAFC, #FFF); padding: 8px 14px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #E8ECF1; }
+
+/* Chart glow */
+.chart-glow { filter: drop-shadow(0 4px 12px rgba(207,10,44,0.06)); }

@@ -46,6 +46,16 @@ export async function savePart(data: any) {
 export async function deletePart(id: number) { await (await getDb()).execute('DELETE FROM parts WHERE id = ?', [id]); }
 export async function getPriceHistory(partId: number) { return (await getDb()).select<any[]>('SELECT * FROM part_price_history WHERE part_id = ? ORDER BY changed_at DESC', [partId]); }
 export async function getCategories() { return (await (await getDb()).select<{ category: string }[]>('SELECT DISTINCT category FROM parts ORDER BY category')).map(x => x.category); }
+export async function getMainCategories(): Promise<string[]> {
+  const d = await getDb();
+  const r = await d.select<{ mc: string }[]>('SELECT DISTINCT main_category as mc FROM parts UNION SELECT DISTINCT domain as mc FROM project_targets ORDER BY mc');
+  const defaults = ['硬件类', '结构类', '电源类', '线材类', '包材类', '加工费类', '软件类', '其他'];
+  return [...new Set([...defaults, ...r.map(x => x.mc)])];
+}
+export async function getSubCategories(mainCat: string): Promise<string[]> {
+  const r = await (await getDb()).select<{ sc: string }[]>('SELECT DISTINCT sub_category as sc FROM parts WHERE main_category = ? ORDER BY sc', [mainCat]);
+  return r.map(x => x.sc).filter(Boolean);
+}
 
 // ==================== Projects ====================
 export async function getProjects(status = '', projectType = '') {
@@ -89,11 +99,14 @@ export async function copyProject(id: number, newCode: string, newName: string) 
 export async function getProjectBOMs(projectId: number) {
   return (await getDb()).select<any[]>(`SELECT pb.*, p.name as part_name, p.model as part_model, p.cost as part_cost, p.main_category, p.sub_category, p.category FROM project_boms pb JOIN parts p ON pb.part_id = p.id WHERE pb.project_id = ? ORDER BY pb.module_name, p.main_category, p.sub_category, p.name`, [projectId]);
 }
-export async function addBOMItem(projectId: number, partId: number, quantity = 1, moduleName = '', remark = '') {
-  await (await getDb()).execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark) VALUES (?,?,?,?,?)', [projectId, partId, moduleName, quantity, remark]);
+export async function addBOMItem(projectId: number, partId: number, quantity = 1, moduleName = '', remark = '', refProjectId = 0) {
+  await (await getDb()).execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, ref_project_id) VALUES (?,?,?,?,?,?)', [projectId, partId, moduleName, quantity, remark, refProjectId]);
 }
 export async function updateBOMItem(id: number, quantity: number, moduleName: string, remark: string) {
   await (await getDb()).execute('UPDATE project_boms SET quantity=?, module_name=?, remark=? WHERE id=?', [quantity, moduleName, remark, id]);
+}
+export async function updateBOMRefProject(moduleName: string, projectId: number, refProjectId: number) {
+  await (await getDb()).execute('UPDATE project_boms SET ref_project_id=? WHERE project_id=? AND module_name=?', [refProjectId, projectId, moduleName]);
 }
 export async function deleteBOMItem(id: number) { await (await getDb()).execute('DELETE FROM project_boms WHERE id = ?', [id]); }
 
@@ -207,6 +220,15 @@ export async function saveMeasure(data: any) {
   else { const r = await d.execute('INSERT INTO project_measures (project_id, main_category, measure, status, due_date, owner, remark) VALUES (?,?,?,?,?,?,?)', [data.project_id, data.main_category, data.measure, data.status, data.due_date || '', data.owner || '', data.remark || '']); return r.lastInsertId; }
 }
 export async function deleteMeasure(id: number) { await (await getDb()).execute('DELETE FROM project_measures WHERE id = ?', [id]); }
+
+// ==================== Project Targets ====================
+export async function getTargets(projectId: number) { return (await getDb()).select<any[]>('SELECT * FROM project_targets WHERE project_id = ? ORDER BY domain', [projectId]); }
+export async function saveTarget(data: any) {
+  const d = await getDb();
+  if (data.id) { await d.execute('UPDATE project_targets SET domain=?, target_cost=?, remark=? WHERE id=?', [data.domain, data.target_cost || 0, data.remark || '', data.id]); return data.id; }
+  else { const r = await d.execute('INSERT INTO project_targets (project_id, domain, target_cost, remark) VALUES (?,?,?,?)', [data.project_id, data.domain, data.target_cost || 0, data.remark || '']); return r.lastInsertId; }
+}
+export async function deleteTarget(id: number) { await (await getDb()).execute('DELETE FROM project_targets WHERE id = ?', [id]); }
 
 // ==================== Dashboard ====================
 export async function getDashboardStats() {

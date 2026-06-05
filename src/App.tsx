@@ -4,7 +4,6 @@ import PartsLibrary from './pages/PartsLibrary';
 import ModuleLibrary from './pages/ModuleLibrary';
 import Projects from './pages/Projects';
 import Competitors from './pages/Competitors';
-import CostControl from './pages/CostControl';
 import Compare from './pages/Compare';
 import Reports from './pages/Reports';
 
@@ -14,7 +13,6 @@ const NAV = [
   { key: 'modules', label: '模块库', icon: '📦' },
   { key: 'projects', label: '项目管理', icon: '📋' },
   { key: 'competitors', label: '竞品管理', icon: '🏭' },
-  { key: 'cost', label: '成本管控', icon: '💰' },
   { key: 'compare', label: '对比分析', icon: '📈' },
   { key: 'reports', label: '成本报告', icon: '📄' },
 ];
@@ -44,7 +42,6 @@ export default function App() {
       case 'modules': return <ModuleLibrary {...p} />;
       case 'projects': return <Projects {...p} />;
       case 'competitors': return <Competitors {...p} />;
-      case 'cost': return <CostControl {...p} />;
       case 'compare': return <Compare {...p} />;
       case 'reports': return <Reports {...p} />;
       default: return <Dashboard {...p} />;
@@ -54,7 +51,10 @@ export default function App() {
   return (
     <>
       <aside className="sidebar">
-        <div className="sidebar-logo"><h1>显示器成本管理</h1><span>Monitor Cost Manager</span></div>
+        <div className="sidebar-logo">
+          <div className="logo-img">MC</div>
+          <div><h1>显示器成本管理</h1><span>Monitor Cost Manager</span></div>
+        </div>
         <nav className="sidebar-nav">
           {NAV.map(item => (
             <div key={item.key} className={`nav-item ${active === item.key ? 'active' : ''}`} onClick={() => setActive(item.key)}>

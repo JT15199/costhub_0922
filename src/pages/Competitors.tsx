@@ -3,7 +3,7 @@ import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, Tag, mes
 import type { TableRowSelection } from 'antd/es/table/interface';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ImportOutlined, CheckOutlined, CloseOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
-import { getCompetitors, saveCompetitor, deleteCompetitor, getCompetitorBOMs, addCompetitorBOMItem, updateCompetitorBOMItem, deleteCompetitorBOMItem, getCompetitorParts, saveCompetitorPart, deleteCompetitorPart, getProjects, getModules, getModuleItems } from '../db';
+import { getCompetitors, saveCompetitor, deleteCompetitor, getCompetitorBOMs, addCompetitorBOMItem, updateCompetitorBOMItem, deleteCompetitorBOMItem, getCompetitorParts, saveCompetitorPart, deleteCompetitorPart, getProjects, getModules, getModuleItems, getMainCategories } from '../db';
 import { TIERS, MAIN_CATEGORIES, SUB_CATEGORIES, CATEGORY_COLORS } from '../constants';
 
 export default function Competitors() {
@@ -30,8 +30,8 @@ export default function Competitors() {
   const [refModItems, setRefModItems] = useState<Record<number, any[]>>({});
   const [compEntries, setCompEntries] = useState<Record<string, { qty: number; cost: number; enabled: boolean }>>({});
   const [refProjectList, setRefProjectList] = useState<any[]>([]);
-
-  useEffect(() => { (async () => setComps(await getCompetitors()))(); }, []);
+  const [mainCats, setMainCats] = useState(MAIN_CATEGORIES);
+  useEffect(() => { (async () => { setComps(await getCompetitors()); try { setMainCats(await getMainCategories()); } catch(e) {} })(); }, []);
   const loadBOM = async (cid: number) => { setBoms(await getCompetitorBOMs(cid)); setBomSel([]); setEditMap({}); };
   const loadCParts = async () => { setCparts(await getCompetitorParts()); setCpartSel([]); };
   const selectComp = (cid: number) => { setSelectedCid(cid); loadBOM(cid); loadCParts(); };
@@ -268,7 +268,7 @@ export default function Competitors() {
 
       <Modal title={cpartEdit?.id ? '编辑竞品器件' : '新增竞品器件'} open={cpartModal} onOk={async () => { const v = await cpartForm.validateFields(); await saveCompetitorPart({ ...cpartEdit, ...v, main_category: v.main_category || '硬件类' }); setCpartModal(false); setCpartEdit(null); cpartForm.resetFields(); loadCParts(); message.success('已保存'); }} onCancel={() => { setCpartModal(false); setCpartEdit(null); }} width={550} destroyOnClose>
         <Form form={cpartForm} layout="vertical" initialValues={{ main_category: '硬件类', cost: 0 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' }}><Form.Item label="大类" name="main_category"><Select options={MAIN_CATEGORIES.map(c => ({ label: c, value: c }))} onChange={(v) => cpartForm.setFieldValue('sub_category', (SUB_CATEGORIES[v] || [])[0] || '')} /></Form.Item><Form.Item label="子类" name="sub_category"><Select options={(SUB_CATEGORIES[cpartForm.getFieldValue('main_category')] || []).map(c => ({ label: c, value: c }))} showSearch /></Form.Item></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' }}><Form.Item label="大类" name="main_category"><Select options={mainCats.map(c => ({ label: c, value: c }))} onChange={(v) => cpartForm.setFieldValue('sub_category', (SUB_CATEGORIES[v] || [])[0] || '')} /></Form.Item><Form.Item label="子类" name="sub_category"><Select options={(SUB_CATEGORIES[cpartForm.getFieldValue('main_category')] || []).map(c => ({ label: c, value: c }))} showSearch /></Form.Item></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' }}><Form.Item label="名称" name="name" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="型号" name="model" rules={[{ required: true }]}><Input /></Form.Item></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' }}><Form.Item label="成本(¥)" name="cost"><InputNumber min={0} precision={4} style={{ width: '100%' }} prefix="¥" /></Form.Item><Form.Item label="规格" name="specs"><Input /></Form.Item></div>
           <Form.Item label="备注" name="remark"><Input /></Form.Item>

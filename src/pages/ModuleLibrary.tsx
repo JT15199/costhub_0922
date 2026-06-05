@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { Table, Button, Select, Space, Modal, Form, Input, InputNumber, Tag, message, Popconfirm, Tooltip } from 'antd';
 import { PlusOutlined, CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, AppstoreOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
-import { getProjects, getModules, getModuleItems, saveModule, deleteModule, saveModuleItem, deleteModuleItem, addBOMItem, getParts } from '../db';
+import { getProjects, getModules, getModuleItems, saveModule, deleteModule, saveModuleItem, deleteModuleItem, addBOMItem, getParts, getMainCategories } from '../db';
 import { MAIN_CATEGORIES, SUB_CATEGORIES, CATEGORY_COLORS } from '../constants';
 
 export default function ModuleLibrary() {
-  const [allMods, setAllMods] = useState<any[]>([]);       // all modules across all projects
+  const [allMods, setAllMods] = useState<any[]>([]);
+  const [mainCats, setMainCats] = useState(MAIN_CATEGORIES);
+  useEffect(() => { (async () => { try { setMainCats(await getMainCategories()); } catch(e) {} })(); }, []);
   const [modGroups, setModGroups] = useState<any[]>([]);    // grouped by name: {name, projects: [{project, module, cost, count}]}
   const [activeModName, setActiveModName] = useState<string | null>(null);
   const [activeGroup, setActiveGroup] = useState<any>(null);
@@ -245,7 +247,7 @@ export default function ModuleLibrary() {
         <Form form={form} layout="vertical" initialValues={{ main_category: '硬件类', sub_category: '', quantity: 1, cost: 0 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0 12px' }}>
             <Form.Item label="大类" name="main_category" rules={[{ required: true }]}>
-              <Select options={MAIN_CATEGORIES.map(c => ({ label: c, value: c }))} onChange={(v) => form.setFieldValue('sub_category', (SUB_CATEGORIES[v] || [])[0] || '')} />
+              <Select options={mainCats.map(c => ({ label: c, value: c }))} onChange={(v) => form.setFieldValue('sub_category', (SUB_CATEGORIES[v] || [])[0] || '')} />
             </Form.Item>
             <Form.Item label="子类" name="sub_category"><Select options={(SUB_CATEGORIES[form.getFieldValue('main_category')] || []).map(c => ({ label: c, value: c }))} showSearch /></Form.Item>
             <Form.Item label="数量" name="quantity"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
