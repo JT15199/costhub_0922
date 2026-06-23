@@ -1,0 +1,8 @@
+{
+  "semi": ["error", "always"],
+  "trailingComma": ["error", "es5"],
+  "singleQuote": ["error", "avoid"],
+  "printWidth": 120,
+  "tabWidth": 2,
+  "useTabs": false
+}
