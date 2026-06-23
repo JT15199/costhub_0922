@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, Tag, message, Popconfirm, Tabs, Row, Col, Collapse, Checkbox, Tooltip, Upload } from 'antd';
 import type { TableRowSelection } from 'antd/es/table/interface';
-import { PlusOutlined, EditOutlined, DeleteOutlined, ImportOutlined, CheckOutlined, CloseOutlined, DownloadOutlined, UploadOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, ImportOutlined, CheckOutlined, CloseOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
-import { getCompetitors, saveCompetitor, deleteCompetitor, getCompetitorBOMs, addCompetitorBOMItem, updateCompetitorBOMItem, deleteCompetitorBOMItem, getCompetitorParts, saveCompetitorPart, deleteCompetitorPart, getProjects, getModules, getModuleItems, getMainCategories, updateCompetitorOrder } from '../db';
-import { TIERS, MAIN_CATEGORIES, SUB_CATEGORIES, getCategoryColor } from '../constants';
+import { getCompetitors, saveCompetitor, deleteCompetitor, getCompetitorBOMs, addCompetitorBOMItem, updateCompetitorBOMItem, deleteCompetitorBOMItem, getCompetitorParts, saveCompetitorPart, deleteCompetitorPart, getProjects, getModules, getModuleItems, getMainCategories } from '../db';
+import { TIERS, MAIN_CATEGORIES, SUB_CATEGORIES, CATEGORY_COLORS } from '../constants';
 
-export default function Competitors(props: any) {
-  const { highlightId, clearHighlight } = props;
+export default function Competitors() {
   const [comps, setComps] = useState<any[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
@@ -29,52 +28,11 @@ export default function Competitors(props: any) {
   const [refProjectId, setRefProjectId] = useState<number | null>(null);
   const [refModules, setRefModules] = useState<any[]>([]);
   const [refModItems, setRefModItems] = useState<Record<number, any[]>>({});
-
-  // 处理全局搜索的高亮：自动选中竞品并切换详情
-  useEffect(() => {
-    if (highlightId && highlightId.type === 'competitor' && highlightId.id) {
-      (async () => {
-        try {
-          // 选中该竞品
-          setSelectedCid(highlightId.id);
-          // 加载 BOM
-          const bomData = await getCompetitorBOMs(highlightId.id);
-          setBoms(bomData);
-          const cpartData = await getCompetitorParts();
-          setCparts(cpartData);
-          // 清除高亮状态
-          if (clearHighlight) {
-            setTimeout(() => clearHighlight(), 500);
-          }
-        } catch(e) {
-          console.error('Failed to load competitor:', e);
-        }
-      })();
-    }
-  }, [highlightId, clearHighlight]);
   const [compEntries, setCompEntries] = useState<Record<string, { qty: number; cost: number; enabled: boolean }>>({});
   const [refProjectList, setRefProjectList] = useState<any[]>([]);
   const [mainCats, setMainCats] = useState(MAIN_CATEGORIES);
-  useEffect(() => { loadComps(); }, []);
-  const loadComps = async () => {
-    setComps(await getCompetitors());
-    try { setMainCats(await getMainCategories()); } catch(e) {}
-  };
-  const moveCompetitor = async (index: number, direction: -1 | 1) => {
-    const list = [...comps];
-    const targetIndex = index + direction;
-    if (targetIndex < 0 || targetIndex >= list.length) return;
-    [list[index], list[targetIndex]] = [list[targetIndex], list[index]];
-    setComps(list);
-    await updateCompetitorOrder(list.map(c => c.id));
-  };
-  const loadBOM = async (cid: number) => {
-    setBoms(await getCompetitorBOMs(cid));
-    setBomSel([]);
-    setEditMap({});
-    // 同时重新加载竞品列表以更新总成本
-    loadComps();
-  };
+  useEffect(() => { (async () => { setComps(await getCompetitors()); try { setMainCats(await getMainCategories()); } catch(e) {} })(); }, []);
+  const loadBOM = async (cid: number) => { setBoms(await getCompetitorBOMs(cid)); setBomSel([]); setEditMap({}); };
   const loadCParts = async () => { setCparts(await getCompetitorParts()); setCpartSel([]); };
   const selectComp = (cid: number) => { setSelectedCid(cid); loadBOM(cid); loadCParts(); };
 
@@ -131,17 +89,14 @@ export default function Competitors(props: any) {
     { title: '市场价(¥)', dataIndex: 'market_price', width: 110, align: 'right' as const, render: (v: number) => v?.toLocaleString() },
     { title: 'BOM成本(¥)', dataIndex: 'bom_cost', width: 110, align: 'right' as const, render: (v: number) => v?.toLocaleString() },
     { title: '平台费率', dataIndex: 'platform_fee_rate', width: 80, render: (v: number) => `${v}%` },
-    { title: '操作', width: 160, render: (_: any, r: any, index: number) => (
-      <Space size="small">
-        <Tooltip title="上移"><Button type="link" size="small" icon={<ArrowUpOutlined />} disabled={index === 0} onClick={(e) => { e.stopPropagation(); moveCompetitor(index, -1); }} /></Tooltip>
-        <Tooltip title="下移"><Button type="link" size="small" icon={<ArrowDownOutlined />} disabled={index === comps.length - 1} onClick={(e) => { e.stopPropagation(); moveCompetitor(index, 1); }} /></Tooltip>
-        <Button type="link" size="small" icon={<EditOutlined />} onClick={() => { setEditing(r); form.setFieldsValue(r); setModalOpen(true); }} /><Popconfirm title="删除？" onConfirm={async () => { await deleteCompetitor(r.id); setComps(await getCompetitors()); }}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space>
+    { title: '操作', width: 120, render: (_: any, r: any) => (
+      <Space size="small"><Button type="link" size="small" icon={<EditOutlined />} onClick={() => { setEditing(r); form.setFieldsValue(r); setModalOpen(true); }} /><Popconfirm title="删除？" onConfirm={async () => { await deleteCompetitor(r.id); setComps(await getCompetitors()); }}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space>
     )},
   ];
   const cpartCols = [
-    { title: '大类', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={getCategoryColor(v)}>{v}</Tag> },
+    { title: '大类', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={CATEGORY_COLORS[v]}>{v}</Tag> },
     { title: '子类', dataIndex: 'sub_category', width: 100, ellipsis: true }, { title: '名称', dataIndex: 'name' }, { title: '型号', dataIndex: 'model', width: 140, ellipsis: true },
-    { title: '成本', dataIndex: 'cost', width: 100, align: 'right' as const, render: (v: number) => v?.toFixed(2) },
+    { title: '成本', dataIndex: 'cost', width: 100, align: 'right' as const, render: (v: number) => v?.toFixed(4) },
     { title: '操作', width: 90, render: (_: any, r: any) => (
       <Space size="small"><Button type="link" size="small" onClick={() => { setCpartEdit(r); cpartForm.setFieldsValue(r); setCpartModal(true); }}>编辑</Button><Popconfirm title="删除？" onConfirm={async () => { await deleteCompetitorPart(r.id); loadCParts(); }}><Button type="link" size="small" danger>删除</Button></Popconfirm></Space>
     )},
@@ -149,7 +104,7 @@ export default function Competitors(props: any) {
 
   return (
     <div>
-      <div className="page-title"><span className="emoji">🏭</span> 竞品管理</div>
+      <div className="page-title">🏭 竞品管理</div>
       <div className="content-card">
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}><Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditing(null); form.resetFields(); setModalOpen(true); }}>新增竞品</Button></div>
         <Table dataSource={comps} columns={compCols} rowKey="id" size="middle" onRow={(r) => ({ onClick: () => selectComp(r.id), style: { cursor: 'pointer', background: selectedCid === r.id ? '#FFF1F0' : undefined } })} pagination={{ pageSize: 10 }} />
@@ -195,7 +150,7 @@ export default function Competitors(props: any) {
                                 ) : <span style={{ color: '#CCC', fontSize: 10 }}>—</span>}
                               </div>
                               <div style={{ textAlign: 'center', fontSize: 10, color: '#2563EB' }}>{item.our_quantity || '—'}</div>
-                              <div style={{ textAlign: 'right', fontSize: 9, color: '#2563EB', fontFamily: 'monospace' }}>{item.our_cost ? `¥${Number(item.our_cost).toFixed(2)}` : '—'}</div>
+                              <div style={{ textAlign: 'right', fontSize: 9, color: '#2563EB', fontFamily: 'monospace' }}>{item.our_cost ? `¥${Number(item.our_cost).toFixed(4)}` : '—'}</div>
 
                               {/* Competitor cells: inline editable when editMap has this id */}
                               {isEditing ? (
@@ -210,14 +165,14 @@ export default function Competitors(props: any) {
                                 </div>
                               )}
                               {isEditing ? (
-                                <InputNumber size="small" value={ed.qty} min={0} step={0.1} precision={2} onChange={v => updateEdit(item.id, 'qty', v || 0)} style={{ width: '100%' }} />
+                                <InputNumber size="small" value={ed.qty} min={1} onChange={v => updateEdit(item.id, 'qty', v || 1)} style={{ width: '100%' }} />
                               ) : (
                                 <div style={{ textAlign: 'center', fontWeight: 600, fontSize: 11 }}>{item.quantity}</div>
                               )}
                               {isEditing ? (
-                                <InputNumber size="small" value={ed.cost} min={0} precision={2} onChange={v => updateEdit(item.id, 'cost', v || 0)} style={{ width: '100%' }} prefix="¥" />
+                                <InputNumber size="small" value={ed.cost} min={0} precision={4} onChange={v => updateEdit(item.id, 'cost', v || 0)} style={{ width: '100%' }} prefix="¥" />
                               ) : (
-                                <div style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: '#CF0A2C', fontSize: 10 }}>¥{Number(item.estimated_cost).toFixed(2)}</div>
+                                <div style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: '#CF0A2C', fontSize: 10 }}>¥{Number(item.estimated_cost).toFixed(4)}</div>
                               )}
                               <div style={{ textAlign: 'center' }}>
                                 {isEditing ? (
@@ -282,9 +237,9 @@ export default function Competitors(props: any) {
                           <Checkbox checked={entry.enabled} onChange={e => setCompEntries(p => ({ ...p, [key]: { ...p[key], enabled: e.target.checked } }))} />
                           <div><div style={{ fontSize: 12 }}>{item.part_name}</div><div style={{ fontSize: 10, color: '#999' }}>{item.part_model}</div></div>
                           <div style={{ textAlign: 'center', fontSize: 12 }}>{item.quantity}</div>
-                          <div style={{ textAlign: 'right', fontSize: 11, color: '#2563EB' }}>¥{Number(item.cost).toFixed(2)}</div>
-                          <div><InputNumber size="small" min={0} step={0.1} precision={2} value={entry.qty} onChange={v => setCompEntries(p => ({ ...p, [key]: { ...p[key], qty: v || 0 } }))} style={{ width: '100%' }} /></div>
-                          <div><InputNumber size="small" min={0} precision={2} value={entry.cost} onChange={v => setCompEntries(p => ({ ...p, [key]: { ...p[key], cost: v || 0 } }))} prefix="¥" style={{ width: '100%' }} /></div>
+                          <div style={{ textAlign: 'right', fontSize: 11, color: '#2563EB' }}>¥{Number(item.cost).toFixed(4)}</div>
+                          <div><InputNumber size="small" min={0} value={entry.qty} onChange={v => setCompEntries(p => ({ ...p, [key]: { ...p[key], qty: v || 0 } }))} style={{ width: '100%' }} /></div>
+                          <div><InputNumber size="small" min={0} precision={4} value={entry.cost} onChange={v => setCompEntries(p => ({ ...p, [key]: { ...p[key], cost: v || 0 } }))} prefix="¥" style={{ width: '100%' }} /></div>
                         </div>
                       );
                     })}
@@ -299,15 +254,15 @@ export default function Competitors(props: any) {
       <Modal title={editing?.id ? '编辑竞品' : '新增竞品'} open={modalOpen} onOk={async () => { const v = await form.validateFields(); await saveCompetitor({ ...editing, ...v }); setModalOpen(false); setEditing(null); form.resetFields(); setComps(await getCompetitors()); message.success('已保存'); }} onCancel={() => { setModalOpen(false); setEditing(null); }} width={500}>
         <Form form={form} layout="vertical" initialValues={{ tier: '主流级', market_price: 0, bom_cost: 0, platform_fee_rate: 0 }}>
           <Row gutter={16}><Col span={12}><Form.Item label="品牌 *" name="brand" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item label="型号 *" name="model" rules={[{ required: true }]}><Input /></Form.Item></Col></Row>
-          <Row gutter={16}><Col span={8}><Form.Item label="档位" name="tier"><Select options={TIERS.map(t => ({ label: t, value: t }))} /></Form.Item></Col><Col span={8}><Form.Item label="市场价(¥)" name="market_price"><InputNumber min={0} precision={2} style={{ width: '100%' }} /></Form.Item></Col><Col span={8}><Form.Item label="平台费率(%)" name="platform_fee_rate"><InputNumber min={0} max={100} style={{ width: '100%' }} /></Form.Item></Col></Row>
-          <Form.Item label="BOM成本(¥)" name="bom_cost"><InputNumber min={0} precision={2} style={{ width: '100%' }} /></Form.Item><Form.Item label="备注" name="remark"><Input /></Form.Item>
+          <Row gutter={16}><Col span={8}><Form.Item label="档位" name="tier"><Select options={TIERS.map(t => ({ label: t, value: t }))} /></Form.Item></Col><Col span={8}><Form.Item label="市场价(¥)" name="market_price"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col><Col span={8}><Form.Item label="平台费率(%)" name="platform_fee_rate"><InputNumber min={0} max={100} style={{ width: '100%' }} /></Form.Item></Col></Row>
+          <Form.Item label="BOM成本(¥)" name="bom_cost"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item><Form.Item label="备注" name="remark"><Input /></Form.Item>
         </Form>
       </Modal>
 
       <Modal title="手动添加" open={bomModal} onOk={async () => { const v = await bomForm.validateFields(); await addCompetitorBOMItem(selectedCid!, v.part_name, v.part_model || '', v.estimated_cost || 0, v.quantity || 1, v.module_name || ''); setBomModal(false); bomForm.resetFields(); loadBOM(selectedCid!); message.success('已添加'); }} onCancel={() => setBomModal(false)} width={450}>
         <Form form={bomForm} layout="vertical" initialValues={{ quantity: 1, estimated_cost: 0 }}>
           <Row gutter={16}><Col span={12}><Form.Item label="器件名称" name="part_name" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item label="型号" name="part_model"><Input /></Form.Item></Col></Row>
-          <Row gutter={16}><Col span={8}><Form.Item label="模块" name="module_name"><Input placeholder="如: LCM模块" /></Form.Item></Col><Col span={8}><Form.Item label="数量" name="quantity"><InputNumber min={0} step={0.1} precision={2} style={{ width: '100%' }} /></Form.Item></Col><Col span={8}><Form.Item label="单价(¥)" name="estimated_cost"><InputNumber min={0} precision={2} style={{ width: '100%' }} prefix="¥" /></Form.Item></Col></Row>
+          <Row gutter={16}><Col span={8}><Form.Item label="模块" name="module_name"><Input placeholder="如: LCM模块" /></Form.Item></Col><Col span={8}><Form.Item label="数量" name="quantity"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item></Col><Col span={8}><Form.Item label="单价(¥)" name="estimated_cost"><InputNumber min={0} precision={4} style={{ width: '100%' }} prefix="¥" /></Form.Item></Col></Row>
         </Form>
       </Modal>
 
@@ -315,7 +270,7 @@ export default function Competitors(props: any) {
         <Form form={cpartForm} layout="vertical" initialValues={{ main_category: '硬件类', cost: 0 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' }}><Form.Item label="大类" name="main_category"><Select options={mainCats.map(c => ({ label: c, value: c }))} onChange={(v) => cpartForm.setFieldValue('sub_category', (SUB_CATEGORIES[v] || [])[0] || '')} /></Form.Item><Form.Item label="子类" name="sub_category"><Select options={(SUB_CATEGORIES[cpartForm.getFieldValue('main_category')] || []).map(c => ({ label: c, value: c }))} showSearch /></Form.Item></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' }}><Form.Item label="名称" name="name" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="型号" name="model" rules={[{ required: true }]}><Input /></Form.Item></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' }}><Form.Item label="成本(¥)" name="cost"><InputNumber min={0} precision={2} style={{ width: '100%' }} prefix="¥" /></Form.Item><Form.Item label="规格" name="specs"><Input /></Form.Item></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' }}><Form.Item label="成本(¥)" name="cost"><InputNumber min={0} precision={4} style={{ width: '100%' }} prefix="¥" /></Form.Item><Form.Item label="规格" name="specs"><Input /></Form.Item></div>
           <Form.Item label="备注" name="remark"><Input /></Form.Item>
         </Form>
       </Modal>

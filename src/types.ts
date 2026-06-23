@@ -50,26 +50,3 @@ export interface DashboardStats {
   category_distribution: { category: string; count: number }[];
   recent_parts: Part[];
 }
-
-export interface CostSnapshot {
-  id?: number;
-  project_id: number;
-  snapshot_type: string; // 'auto' | 'manual'
-  snapshot_date: string;
-  total_cost: number;
-  bom_cost: number;
-  fee_rate: number;
-  profit_rate: number;
-  final_price: number;
-  cost_breakdown: string; // JSON字符串
-  parts_count: number;
-  remark: string;
-  created_at?: string;
-}
-
-export interface CostSnapshotComparison {
-  snapshot1: CostSnapshot;
-  snapshot2: CostSnapshot;
-  totalChange: number;
-  breakdownDiff: Record<string, { old: number; new: number; change: number }>;
-}

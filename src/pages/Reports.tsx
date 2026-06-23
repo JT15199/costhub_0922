@@ -1,41 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Table, Select, Button, Space, Row, Col, message, Card, Statistic, Tag, Dropdown } from 'antd';
-import { DownloadOutlined, FileExcelOutlined, FileTextOutlined, FilePdfOutlined } from '@ant-design/icons';
-import type { MenuProps } from 'antd';
+import { Table, Select, Button, Space, Row, Col, message, Card, Statistic, Tag } from 'antd';
+import { DownloadOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import * as XLSX from 'xlsx';
 import { getProjects, getProject, getProjectBOMs } from '../db';
-import { getCategoryColor } from '../constants';
-
-// 导出工具函数
-const exportToCSV = (data: any[], filename: string) => {
-  const headers = Object.keys(data[0] || {});
-  const csvContent = [
-    headers.join(','),
-    ...data.map(row => headers.map(h => `"${row[h] ?? ''}"`).join(','))
-  ].join('\n');
-  const blob = new Blob(['﻿' + csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `${filename}.csv`;
-  link.click();
-  message.success('已导出CSV');
-};
-
-const exportToJSON = (data: any[], filename: string) => {
-  const jsonContent = JSON.stringify(data, null, 2);
-  const blob = new Blob([jsonContent], { type: 'application/json' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `${filename}.json`;
-  link.click();
-  message.success('已导出JSON');
-};
-
-const exportToPDF = () => {
-  window.print();
-  message.info('已调用打印功能，请选择保存为PDF');
-};
+import { CATEGORY_COLORS } from '../constants';
 
 export default function Reports() {
   const [projects, setProjects] = useState<any[]>([]);
@@ -69,7 +38,6 @@ export default function Reports() {
   const byCat: Record<string, number> = {};
   boms.forEach(b => { byCat[b.main_category] = (byCat[b.main_category] || 0) + (b.part_cost || 0) * b.quantity; });
 
-  // 成本结构饼图
   const pieOption = {
     tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
     series: [{
@@ -77,39 +45,22 @@ export default function Reports() {
       itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
       label: { show: false },
       emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
-      data: Object.entries(byCat).map(([k, v]) => ({ name: k, value: v, itemStyle: { color: getCategoryColor(k) } })),
+      data: Object.entries(byCat).map(([k, v]) => ({ name: k, value: v, itemStyle: { color: CATEGORY_COLORS[k] || '#64748B' } })),
     }],
   };
 
-  // 玫瑰图
-  const roseOption = {
-    tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
-    legend: { bottom: 10, textStyle: { fontSize: 11 } },
-    series: [{
-      type: 'pie',
-      radius: ['20%', '65%'],
-      center: ['50%', '45%'],
-      roseType: 'area',
-      itemStyle: { borderRadius: 6 },
-      label: { show: true, formatter: '{b}\n{d}%', fontSize: 11 },
-      data: Object.entries(byCat).map(([k, v]) => ({ name: k, value: v, itemStyle: { color: getCategoryColor(k) } })),
-    }],
-  };
-
-  // 瀑布图
-  const waterfallOption = {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: (p: any) => `${p[0].name}<br/>成本: <b>¥${p[0].value.toFixed(2)}</b>` },
+  const barOption = {
+    tooltip: { trigger: 'axis' },
     xAxis: { type: 'category', data: Object.keys(byCat), axisLabel: { rotate: 30, fontSize: 11 } },
     yAxis: { type: 'value', name: '成本 (¥)' },
     series: [{
-      type: 'bar',
-      data: Object.entries(byCat).map(([k, v]) => ({ value: v, itemStyle: { color: getCategoryColor(k), borderRadius: [6, 6, 0, 0] } })),
+      type: 'bar', barWidth: '55%',
+      data: Object.entries(byCat).map(([k, v]) => ({ value: v, itemStyle: { color: CATEGORY_COLORS[k] || '#64748B', borderRadius: [6, 6, 0, 0] } })),
       label: { show: true, position: 'top', formatter: (p: any) => `¥${p.value.toFixed(0)}`, fontSize: 10 },
     }],
-    grid: { top: 20, right: 20, bottom: 60, left: 60 },
+    grid: { top: 10, right: 20, bottom: 60, left: 60 },
   };
 
-  // 对比柱状图
   const compareBarOption = {
     tooltip: { trigger: 'axis' },
     legend: { data: [project?.code || '项目A', project2?.code || '项目B'], bottom: 0 },
@@ -122,50 +73,30 @@ export default function Reports() {
     grid: { top: 10, right: 20, bottom: 40, left: 60 },
   };
 
-  // 导出菜单项
-  const exportMenuItems: MenuProps['items'] = [
-    { key: 'excel', icon: <FileExcelOutlined />, label: '导出 Excel (.xlsx)', onClick: () => exportSingle('excel') },
-    { key: 'csv', icon: <FileTextOutlined />, label: '导出 CSV', onClick: () => exportSingle('csv') },
-    { key: 'json', icon: <FileTextOutlined />, label: '导出 JSON', onClick: () => exportSingle('json') },
-    { key: 'pdf', icon: <FilePdfOutlined />, label: '打印/保存PDF', onClick: exportToPDF },
-  ];
-
-  const exportSingle = (format: string) => {
-    const data = boms.map(b => ({
+  const exportSingle = () => {
+    const ws = XLSX.utils.json_to_sheet(boms.map(b => ({
       大类: b.main_category, 类型: b.category, 名称: b.part_name, 型号: b.part_model,
       单价: b.part_cost, 数量: b.quantity, 小计: (b.part_cost || 0) * b.quantity, 备注: b.remark,
-    }));
-    const filename = `${project?.code || 'report'}_成本报告`;
-    switch (format) {
-      case 'excel':
-        const ws = XLSX.utils.json_to_sheet(data);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'BOM明细');
-        XLSX.writeFile(wb, `${filename}.xlsx`);
-        message.success('已导出Excel');
-        break;
-      case 'csv':
-        exportToCSV(data, filename);
-        break;
-      case 'json':
-        exportToJSON(data, filename);
-        break;
-    }
+    })));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'BOM明细');
+    XLSX.writeFile(wb, `${project?.code || 'report'}_成本报告.xlsx`);
+    message.success('已导出');
   };
 
   const bomCols = [
-    { title: '大类', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={getCategoryColor(v)}>{v}</Tag> },
+    { title: '大类', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={CATEGORY_COLORS[v]}>{v}</Tag> },
     { title: '类型', dataIndex: 'category', width: 90 },
     { title: '名称', dataIndex: 'part_name' },
     { title: '型号', dataIndex: 'part_model' },
-    { title: '单价(¥)', dataIndex: 'part_cost', width: 100, align: 'right' as const, render: (v: number) => v?.toFixed(2) },
+    { title: '单价(¥)', dataIndex: 'part_cost', width: 100, align: 'right' as const, render: (v: number) => v?.toFixed(4) },
     { title: '数量', dataIndex: 'quantity', width: 60, align: 'center' as const },
     { title: '小计(¥)', key: 'sub', width: 100, align: 'right' as const, render: (_: any, r: any) => <b>{((r.part_cost || 0) * r.quantity).toFixed(2)}</b> },
   ];
 
   return (
     <div>
-      <div className="page-title"><span className="emoji">📄</span> 成本报告</div>
+      <div className="page-title">📄 成本报告</div>
       <div className="content-card" style={{ marginBottom: 16 }}>
         <Space wrap>
           <Select value={reportType} onChange={v => { setReportType(v); setProject(null); setProject2(null); }} style={{ width: 160 }}
@@ -189,26 +120,18 @@ export default function Reports() {
               屏幕: {[project.screen_size, project.resolution, project.refresh_rate, project.panel_type].filter(Boolean).join(' / ')}
             </p>
             <Row gutter={16} style={{ marginTop: 16 }}>
-              <Col span={6}><Card size="small"><Statistic title="BOM总成本" value={total} precision={2} prefix="¥" valueStyle={{ color: '#CF0A2C' }} /></Card></Col>
-              <Col span={6}><Card size="small"><Statistic title="器件数" value={boms.length} /></Card></Col>
-              <Col span={6}><Card size="small"><Statistic title="大类数" value={Object.keys(byCat).length} /></Card></Col>
-              <Col span={6}><Card size="small"><Statistic title="平均单价" value={total / boms.length || 0} precision={2} prefix="¥" /></Card></Col>
+              <Col span={8}><Card size="small"><Statistic title="BOM总成本" value={total} precision={2} prefix="¥" valueStyle={{ color: '#CF0A2C' }} /></Card></Col>
+              <Col span={8}><Card size="small"><Statistic title="器件数" value={boms.length} /></Card></Col>
             </Row>
           </div>
 
           <Row gutter={16} style={{ marginBottom: 16 }}>
-            <Col span={8}><div className="content-card"><div className="card-header"><h3>成本结构饼图</h3></div><ReactECharts option={pieOption} style={{ height: 280 }} /></div></Col>
-            <Col span={8}><div className="content-card"><div className="card-header"><h3>成本玫瑰图</h3></div><ReactECharts option={roseOption} style={{ height: 280 }} /></div></Col>
-            <Col span={8}><div className="content-card"><div className="card-header"><h3>成本瀑布图</h3></div><ReactECharts option={waterfallOption} style={{ height: 280 }} /></div></Col>
+            <Col span={12}><div className="content-card"><div className="card-header"><h3>成本结构</h3></div><ReactECharts option={pieOption} style={{ height: 320 }} /></div></Col>
+            <Col span={12}><div className="content-card"><div className="card-header"><h3>大类成本</h3></div><ReactECharts option={barOption} style={{ height: 320 }} /></div></Col>
           </Row>
 
           <div className="content-card">
-            <div className="card-header">
-              <h3>BOM 明细</h3>
-              <Dropdown menu={{ items: exportMenuItems }} placement="bottomRight">
-                <Button icon={<DownloadOutlined />}>导出报告</Button>
-              </Dropdown>
-            </div>
+            <div className="card-header"><h3>BOM 明细</h3><Button icon={<DownloadOutlined />} onClick={exportSingle}>导出Excel</Button></div>
             <Table dataSource={boms} columns={bomCols} rowKey="id" size="small" pagination={{ pageSize: 20 }} />
           </div>
         </>
@@ -219,10 +142,9 @@ export default function Reports() {
           <div className="content-card" style={{ marginBottom: 16 }}>
             <h2 style={{ color: '#CF0A2C' }}>项目对比: {project.code} vs {project2.code}</h2>
             <Row gutter={16} style={{ marginTop: 16 }}>
-              <Col span={6}><Card size="small"><Statistic title={`${project.code} BOM成本`} value={total} precision={2} prefix="¥" /></Card></Col>
-              <Col span={6}><Card size="small"><Statistic title={`${project2.code} BOM成本`} value={total2} precision={2} prefix="¥" /></Card></Col>
-              <Col span={6}><Card size="small"><Statistic title="差异" value={total - total2} precision={2} prefix="¥" valueStyle={{ color: total > total2 ? '#CF0A2C' : '#10B981' }} /></Card></Col>
-              <Col span={6}><Card size="small"><Statistic title="差异比例" value={Math.abs(total - total2) / total * 100 || 0} precision={1} suffix="%" valueStyle={{ color: '#FF9500' }} /></Card></Col>
+              <Col span={8}><Card size="small"><Statistic title={`${project.code} BOM成本`} value={total} precision={2} prefix="¥" /></Card></Col>
+              <Col span={8}><Card size="small"><Statistic title={`${project2.code} BOM成本`} value={total2} precision={2} prefix="¥" /></Card></Col>
+              <Col span={8}><Card size="small"><Statistic title="差异" value={total - total2} precision={2} prefix="¥" valueStyle={{ color: total > total2 ? '#CF0A2C' : '#10B981' }} /></Card></Col>
             </Row>
           </div>
           <div className="content-card">

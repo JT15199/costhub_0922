@@ -1,7 +1,7 @@
 [package]
 name = "monitor-cost-manager"
-version = "2.2.0"
-description = "显示器成本管理系统 v2.2"
+version = "1.0.0"
+description = "显示器成本管理系统"
 authors = ["MonitorCost"]
 license = ""
 repository = ""

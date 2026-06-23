@@ -7,11 +7,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Dependencies
 node_modules
-.pnpm-store
-
-# Build outputs
 dist
 dist-ssr
 *.local
@@ -27,20 +23,12 @@ dist-ssr
 *.sln
 *.sw?
 
-# Tauri
-src-tauri/target
-src-tauri/WixTools
-src-tauri/Cargo.lock
+# Rust / Tauri
+src-tauri/target/
+src-tauri/icons/
 
-# Environment files
-.env
-.env.local
-.env.*.local
-
-# Database (optional - uncomment if you don't want to track database)
-# *.db
-# monitor_cost.db
-
-# OS files
-Thumbs.db
-Desktop.ini
+# Database
+*.db
+*.db-shm
+*.db-wal
+monitor_cost.db

@@ -3,18 +3,17 @@ import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Tag, mes
 import type { TableRowSelection } from 'antd/es/table/interface';
 import { PlusOutlined, EditOutlined, DeleteOutlined, DownloadOutlined, UploadOutlined, HistoryOutlined, SearchOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
-import { getParts, savePart, deletePart, getPriceHistory, getMainCategories, getSubCategories } from '../db';
-import { MAIN_CATEGORIES, SUB_CATEGORIES, getCategoryColor } from '../constants';
+import { getParts, savePart, deletePart, getCategories, getPriceHistory, getMainCategories } from '../db';
+import { MAIN_CATEGORIES, SUB_CATEGORIES, CATEGORY_COLORS } from '../constants';
 
-export default function PartsLibrary(props: any) {
-  const { highlightId, clearHighlight } = props;
+export default function PartsLibrary() {
   const [parts, setParts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selKeys, setSelKeys] = useState<React.Key[]>([]);
   const [search, setSearch] = useState('');
   const [mainCat, setMainCat] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
-  const [subCategories, setSubCategories] = useState<string[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -23,53 +22,10 @@ export default function PartsLibrary(props: any) {
   const [mainCats, setMainCats] = useState(MAIN_CATEGORIES);
   const [form] = Form.useForm();
 
-  useEffect(() => { (async () => { try { setMainCats(await getMainCategories()); } catch(e) { console.error('加载分类失败:', e); } })(); }, []);
-  // 当大类变化时，加载对应的子类
-  useEffect(() => {
-    (async () => {
-      try {
-        if (mainCat) {
-          // 从数据库获取该大类下的实际子类
-          const dbSubs = await getSubCategories(mainCat);
-          // 合并 constants.ts 的预设子类，保持完整
-          const presetSubs = SUB_CATEGORIES[mainCat] || [];
-          setSubCategories([...new Set([...presetSubs, ...dbSubs])].sort());
-        } else {
-          // 未选大类时，获取所有子类
-          const allDbSubs = await getSubCategories('');
-          setSubCategories(allDbSubs);
-        }
-      } catch(e) {
-        console.error('加载子类失败:', e);
-        // fallback 到 constants.ts 的预设子类
-        if (mainCat) {
-          setSubCategories(SUB_CATEGORIES[mainCat] || []);
-        } else {
-          setSubCategories([]);
-        }
-      }
-    })();
-  }, [mainCat]);
-
-  // 处理全局搜索的高亮：自动选中对应的器件行
-  useEffect(() => {
-    if (highlightId && highlightId.type === 'part' && highlightId.id) {
-      // 清空搜索条件，确保能看到该器件
-      setSearch('');
-      setMainCat('');
-      setTypeFilter('');
-      // 选中对应的器件
-      setSelKeys([highlightId.id]);
-      // 清除高亮状态
-      if (clearHighlight) {
-        setTimeout(() => clearHighlight(), 500);
-      }
-    }
-  }, [highlightId, clearHighlight]);
-
+  useEffect(() => { (async () => { try { setMainCats(await getMainCategories()); } catch(e) {} })(); }, []);
   const load = useCallback(async () => {
     setLoading(true);
-    try { const d = await getParts(search, typeFilter, mainCat); setParts(d); } catch (e) { console.error(e); }
+    try { const d = await getParts(search, typeFilter, mainCat); setParts(d); setCategories(await getCategories()); } catch (e) { console.error(e); }
     setLoading(false);
   }, [search, typeFilter, mainCat]);
   useEffect(() => { load(); }, [load]);
@@ -92,7 +48,7 @@ export default function PartsLibrary(props: any) {
 
   const cols = [
     { title: 'ID', dataIndex: 'id', width: 55 },
-    { title: '大类', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={getCategoryColor(v)}>{v}</Tag> },
+    { title: '大类', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={CATEGORY_COLORS[v]}>{v}</Tag> },
     { title: '子类', dataIndex: 'sub_category', width: 100 },
     { title: '名称', dataIndex: 'name', ellipsis: true },
     { title: '型号', dataIndex: 'model', ellipsis: true },
@@ -109,13 +65,13 @@ export default function PartsLibrary(props: any) {
 
   return (
     <div>
-      <div className="page-title"><span className="emoji">🔧</span> 器件库</div>
+      <div className="page-title">🔧 器件库</div>
       <div className="content-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
           <Space wrap>
             <Input prefix={<SearchOutlined />} placeholder="搜索..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: 200 }} allowClear />
             <Select placeholder="大类" value={mainCat || undefined} onChange={v => setMainCat(v || '')} allowClear style={{ width: 110 }} options={mainCats.map(c => ({ label: c, value: c }))} />
-            <Select placeholder="子类" value={typeFilter || undefined} onChange={v => setTypeFilter(v || '')} allowClear style={{ width: 130 }} options={subCategories.map(c => ({ label: c, value: c }))} />
+            <Select placeholder="子类" value={typeFilter || undefined} onChange={v => setTypeFilter(v || '')} allowClear style={{ width: 130 }} options={categories.map(c => ({ label: c, value: c }))} />
           </Space>
           <Space>
             <Upload beforeUpload={(f) => { const r = new FileReader(); r.onload = (e) => { const wb = XLSX.read(e.target?.result, { type: 'binary' }); const data = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]); (async () => { let n = 0; for (const d of data) { const name = d['名称'] || d['name'] || d['器件名称']; if (!name) continue; await savePart({ main_category: d['大类'] || d['main_category'] || '硬件类', sub_category: d['子类'] || d['sub_category'] || '', category: d['大类'] || d['main_category'] || '硬件类', name: String(name).trim(), model: String(d['型号'] || d['model'] || '').trim(), cost: parseFloat(d['成本'] || d['cost'] || d['价格'] || '0') || 0, specs: d['规格'] || d['specs'] || '', projects: d['项目'] || d['projects'] || '', remark: d['备注'] || d['remark'] || '' }); n++; } message.success(`导入 ${n} 条`); load(); })(); }; r.readAsBinaryString(f); return false; }} showUploadList={false}><Button icon={<UploadOutlined />}>导入Excel</Button></Upload>
@@ -147,7 +103,7 @@ export default function PartsLibrary(props: any) {
             <Col span={12}><Form.Item label="名称" name="name" rules={[{ required: true }]}><Input /></Form.Item></Col>
             <Col span={12}><Form.Item label="型号" name="model" rules={[{ required: true }]}><Input /></Form.Item></Col>
           </Row>
-          <Form.Item label="成本" name="cost"><InputNumber style={{ width: '100%' }} min={0} precision={2} prefix="¥" /></Form.Item>
+          <Form.Item label="成本" name="cost"><InputNumber style={{ width: '100%' }} min={0} precision={4} prefix="¥" /></Form.Item>
           <Form.Item label="规格参数" name="specs"><Input.TextArea rows={2} /></Form.Item>
           <Row gutter={16}>
             <Col span={12}><Form.Item label="使用项目" name="projects"><Input placeholder="逗号分隔" /></Form.Item></Col>
@@ -158,7 +114,7 @@ export default function PartsLibrary(props: any) {
 
       <Modal title={`价格历史 - ${historyName}`} open={historyOpen} onCancel={() => setHistoryOpen(false)} footer={null} width={600}>
         <Table dataSource={historyData} rowKey="id" size="small" pagination={false}
-          columns={[{ title: '旧价', dataIndex: 'old_cost', render: (v: number) => v?.toFixed(2) }, { title: '新价', dataIndex: 'new_cost', render: (v: number) => v?.toFixed(2) }, { title: '变动', key: 'd', render: (_: any, r: any) => <span style={{ color: r.new_cost > r.old_cost ? '#EF4444' : '#10B981' }}>{(r.new_cost - r.old_cost).toFixed(2)}</span> }, { title: '时间', dataIndex: 'changed_at' }]} />
+          columns={[{ title: '旧价', dataIndex: 'old_cost', render: (v: number) => v?.toFixed(4) }, { title: '新价', dataIndex: 'new_cost', render: (v: number) => v?.toFixed(4) }, { title: '变动', key: 'd', render: (_: any, r: any) => <span style={{ color: r.new_cost > r.old_cost ? '#EF4444' : '#10B981' }}>{(r.new_cost - r.old_cost).toFixed(4)}</span> }, { title: '时间', dataIndex: 'changed_at' }]} />
       </Modal>
     </div>
   );

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "显示器成本管理_v2.2",
-  "version": "2.2.0",
+  "productName": "显示器成本管理",
+  "version": "1.0.0",
   "identifier": "com.monitor.cost.manager",
   "build": {
     "frontendDist": "../dist",

@@ -3,7 +3,7 @@ import { Table, Button, Select, Space, Modal, Form, Input, InputNumber, Tag, mes
 import { PlusOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { getProjects, getProjectBOMs, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure } from '../db';
-import { MAIN_CATEGORIES, MEASURE_STATUSES, getCategoryColor } from '../constants';
+import { MAIN_CATEGORIES, MEASURE_STATUSES, CATEGORY_COLORS } from '../constants';
 
 export default function CostControl() {
   const [projects, setProjects] = useState<any[]>([]);
@@ -37,7 +37,7 @@ export default function CostControl() {
     yAxis: { type: 'value', name: '成本 (¥)' },
     series: [{
       type: 'bar', barWidth: '55%',
-      data: Object.entries(byCategory).map(([k, v]) => ({ value: v, itemStyle: { color: getCategoryColor(k), borderRadius: [6, 6, 0, 0] } })),
+      data: Object.entries(byCategory).map(([k, v]) => ({ value: v, itemStyle: { color: CATEGORY_COLORS[k] || '#64748B', borderRadius: [6, 6, 0, 0] } })),
       label: { show: true, position: 'top', formatter: (p: any) => `¥${(p.value as number).toFixed(0)}`, fontSize: 10 },
     }],
     grid: { top: 20, right: 20, bottom: 60, left: 60 },
@@ -57,7 +57,7 @@ export default function CostControl() {
 
   return (
     <div>
-      <div className="page-title"><span className="emoji">💰</span> 成本管控</div>
+      <div className="page-title">💰 成本管控</div>
 
       <div className="content-card" style={{ marginBottom: 16 }}>
         <Space>
@@ -87,7 +87,7 @@ export default function CostControl() {
           <Row gutter={16}>
             <Col span={12}>
               <div className="content-card">
-                <div className="card-header"><h3><span className="emoji">🎯</span> 降本措施</h3><Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setMeasureModal(true)}>添加</Button></div>
+                <div className="card-header"><h3>🎯 降本措施</h3><Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setMeasureModal(true)}>添加</Button></div>
                 <Table dataSource={measures} rowKey="id" size="small" pagination={false} columns={[
                   { title: '大类', dataIndex: 'main_category', width: 80 },
                   { title: '措施', dataIndex: 'measure' },
@@ -99,7 +99,7 @@ export default function CostControl() {
             </Col>
             <Col span={12}>
               <div className="content-card">
-                <div className="card-header"><h3><span className="emoji">📊</span> 成本测算</h3><Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setReviewModal(true)}>添加</Button></div>
+                <div className="card-header"><h3>📊 成本测算</h3><Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setReviewModal(true)}>添加</Button></div>
                 <Table dataSource={reviews} rowKey="id" size="small" pagination={false} columns={[
                   { title: '阶段', dataIndex: 'stage' }, { title: '成本(¥)', dataIndex: 'reviewed_cost', render: (v: number) => v?.toFixed(2) },
                   { title: '测算人', dataIndex: 'reviewer' }, { title: '时间', dataIndex: 'reviewed_at', width: 140 },
