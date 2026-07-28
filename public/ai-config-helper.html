@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>AI配置助手</title>
+    <style>
+        body { font-family: Arial; padding: 20px; max-width: 600px; margin: 0 auto; }
+        .success { color: green; font-weight: bold; }
+        .error { color: red; }
+        button { padding: 10px 20px; margin: 5px; font-size: 16px; }
+        pre { background: #f5f5f5; padding: 10px; overflow: auto; }
+    </style>
+</head>
+<body>
+    <h1>AI配置诊断助手</h1>
+
+    <div id="status">
+        <h2>1. 检查Ollama状态</h2>
+        <button onclick="checkOllama()">检查服务</button>
+        <pre id="ollamaStatus"></pre>
+    </div>
+
+    <div id="config">
+        <h2>2. 当前配置</h2>
+        <pre id="currentConfig"></pre>
+        <button onclick="clearConfig()">清除旧配置</button>
+        <button onclick="setCorrectConfig()">设置正确配置</button>
+    </div>
+
+    <div id="test">
+        <h2>3. 测试连接</h2>
+        <button onclick="testConnection()">测试模型响应</button>
+        <pre id="testResult"></pre>
+    </div>
+
+    <div id="guide">
+        <h2>4. 完成后回到AI版本</h2>
+        <button onclick="goBack()">返回AI设置页面</button>
+    </div>
+
+    <script>
+        // 显示当前配置
+        function showCurrentConfig() {
+            const config = localStorage.getItem('ai_config');
+            document.getElementById('currentConfig').textContent =
+                config ? JSON.stringify(JSON.parse(config), null, 2) : '无配置';
+        }
+        showCurrentConfig();
+
+        // 检查Ollama
+        async function checkOllama() {
+            try {
+                const resp = await fetch('http://localhost:11434/api/tags');
+                const data = await resp.json();
+                const models = data.models.map(m => m.name).join(', ');
+                document.getElementById('ollamaStatus').innerHTML =
+                    '<span class="success">✓ Ollama运行正常</span>\n可用模型: ' + models;
+            } catch (err) {
+                document.getElementById('ollamaStatus').innerHTML =
+                    '<span class="error">✗ Ollama服务未运行</span>\n请运行: ollama serve';
+            }
+        }
+        checkOllama();
+
+        // 清除旧配置
+        function clearConfig() {
+            localStorage.removeItem('ai_config');
+            localStorage.removeItem('ai_status');
+            localStorage.removeItem('ai_failure_count');
+            showCurrentConfig();
+            alert('✓ 已清除旧配置');
+        }
+
+        // 设置正确配置（关键：使用完整模型名 qwythos-9b:latest）
+        function setCorrectConfig() {
+            const correctConfig = {
+                enabled: true,
+                ollamaUrl: 'http://localhost:11434',
+                model: 'qwythos-9b:latest',  // 注意：完整名称包含:latest
+                timeout: 60000,
+                autoApplyHighConfidence: false,
+                highConfidenceThreshold: 0.90
+            };
+            localStorage.setItem('ai_config', JSON.stringify(correctConfig));
+            showCurrentConfig();
+            alert('✓ 已设置正确配置（qwythos-9b:latest）');
+        }
+
+        // 测试连接
+        async function testConnection() {
+            const startTime = Date.now();
+            document.getElementById('testResult').textContent = '正在测试...';
+
+            try {
+                const config = JSON.parse(localStorage.getItem('ai_config') || '{}');
+                const model = config.model || 'qwythos-9b:latest';
+
+                const resp = await fetch('http://localhost:11434/api/generate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        model: model,
+                        prompt: 'a',
+                        stream: false,
+                        options: { num_predict: 10 }
+                    })
+                });
+
+                const data = await resp.json();
+                const duration = Date.now() - startTime;
+
+                document.getElementById('testResult').innerHTML =
+                    '<span class="success">✓ 连接成功!</span>\n' +
+                    '模型: ' + model + '\n' +
+                    '响应时间: ' + duration + 'ms\n' +
+                    '响应内容: ' + data.response.substring(0, 50);
+            } catch (err) {
+                document.getElementById('testResult').innerHTML =
+                    '<span class="error">✗ 连接失败</span>\n错误: ' + err.message;
+            }
+        }
+
+        // 返回AI设置页面
+        function goBack() {
+            window.location.href = 'http://localhost:5176/ai.html';
+        }
+    </script>
+</body>
+</html>

@@ -1,12 +1,12 @@
-# CostHub - 成本管理平台 v2.3.2
+# 显示器成本管理系统 v2.2
 
 ## 项目概述
 
-这是一个用于管理电子产品成本的桌面应用程序（原名"显示器成本管理系统"），基于 Tauri + React + TypeScript + SQLite 构建，提供器件库、项目管理、竞品分析、成本对比等功能。未来计划扩展到PC、平板等其他电子整机产品线。
+这是一个用于管理显示器产品成本的桌面应用程序，基于 Tauri + React + TypeScript + SQLite 构建，提供器件库、项目管理、竞品分析、成本对比等功能。
 
-**版本**: 2.3.2
-**产品名称**: CostHub v2.3.2
-**标识符**: com.costhub.app
+**版本**: 2.2.0
+**产品名称**: 显示器成本管理_v2.2
+**标识符**: com.monitor.cost.manager
 
 ## 技术架构
 
@@ -22,7 +22,7 @@
 - **框架**: Tauri 2.x
 - **数据库**: SQLite (tauri-plugin-sql)
 - **语言**: Rust (edition 2021)
-- **数据库文件**: costhub.db (位于 exe 同目录，兼容旧文件名 costhub.db)
+- **数据库文件**: monitor_cost.db (位于 exe 同目录)
 
 ### 主要依赖
 ```json
@@ -55,13 +55,6 @@
   - 价格历史追踪
   - 批量导入导出（支持 Excel）
   - 搜索和筛选
-  - **供应商管理** (v2.3.1+)：
-    - 多供应商报价管理（简化字段：供应商名称、价格、份额、状态、备注）
-    - 份额比例分配（0-100%，自动归一化）
-    - 加权成本自动计算：`加权成本 = Σ(启用供应商价格 × 份额比例)`
-    - 供应商价格变动记录（修改价格时强制输入变动原因）
-    - 价格历史追踪（查看历史价格变动）
-    - 成本变动追溯（器件成本变化 → 影响的项目列表）
 
 ### 3. 模块库 (ModuleLibrary)
 - **文件**: `src/pages/ModuleLibrary.tsx`
@@ -70,19 +63,6 @@
   - 模块内器件组合
   - 模块成本计算
   - 模块复用和引用
-  - **模块分类管理** (v2.3.4 新增)：
-    - 支持自定义模块分类（如"电源类"、"显示类"、"音频类"等）
-    - 分类筛选器（可与项目筛选同时使用）
-    - 模块卡片显示分类标签
-    - 编辑表单支持选择现有分类或输入新分类
-  - **模块批量分类** (v2.3.5 新增)：
-    - 分组卡片右上角"设置分类"按钮
-    - 批量为所有同名模块设置分类
-    - 新建同名模块自动继承分类
-    - 保持同名模块分类一致性
-  - **虚拟模块过滤** (v2.3.4 新增)：
-    - 自动过滤在研项目中的虚拟模块
-    - 模块库仅显示正式模块，避免混乱
 
 ### 4. 项目管理 (Projects)
 - **文件**: `src/pages/Projects.tsx` (约 85KB，功能最丰富)
@@ -95,13 +75,6 @@
   - 降本措施跟踪
   - 项目分组管理
   - 项目排序（拖拽排序）
-  - **整机供应商管理** (v2.3.2 新增)：
-    - ODM项目整机供应商报价管理
-    - 多供应商整机报价对比
-    - 份额比例分配
-    - 加权报价自动计算
-    - 报价变动记录（修改报价时强制输入原因）
-    - 报价历史追踪
   - BOM引用和差异分析
   - 软删除机制
 
@@ -204,91 +177,15 @@ interface Competitor {
 }
 ```
 
-#### PartSupplier (器件供应商) - v2.3.1 新增
-```typescript
-interface PartSupplier {
-  id?: number;
-  part_id: number;
-  supplier_name: string;    // 供应商名称
-  price: number;            // 供应商报价
-  share_ratio: number;      // 份额比例 (0-100)
-  is_active: number;        // 是否启用
-  remark: string;
-  created_at?: string;
-  updated_at?: string;
-}
-```
-
-#### PartSupplierPriceHistory (供应商价格历史) - v2.3.1 新增
-```typescript
-interface PartSupplierPriceHistory {
-  id?: number;
-  supplier_id: number;
-  old_price: number;
-  new_price: number;
-  changed_at?: string;
-  change_reason: string;    // 变价原因
-}
-```
-
-#### ProjectSupplier (整机供应商) - v2.3.2 新增
-```typescript
-interface ProjectSupplier {
-  id?: number;
-  project_id: number;
-  supplier_name: string;    // 供应商名称
-  quoted_price: number;     // 整机报价
-  share_ratio: number;      // 份额比例 (0-100)
-  is_active: number;        // 是否启用
-  remark: string;
-  created_at?: string;
-  updated_at?: string;
-}
-```
-
-#### ProjectSupplierPriceHistory (整机供应商价格历史) - v2.3.2 新增
-```typescript
-interface ProjectSupplierPriceHistory {
-  id?: number;
-  supplier_id: number;
-  old_price: number;
-  new_price: number;
-  changed_at?: string;
-  change_reason: string;
-}
-```
-
-#### CostChangeLog (成本变动日志) - v2.3.2 新增
-```typescript
-interface CostChangeLog {
-  id?: number;
-  change_type: string;      // 变动类型
-  ref_type: string;         // 关联类型
-  ref_id: number;
-  ref_name: string;         // 器件名称或项目名称
-  supplier_name?: string;
-  old_value: number;
-  new_value: number;
-  change_reason: string;
-  impact_scope: string;     // JSON格式：影响范围
-  changed_at?: string;
-}
-```
-
 ### 数据库表结构（详见 src-tauri/src/lib.rs）
 
 完整表结构包括：
 - `parts` - 器件表
 - `projects` - 项目表
-- `modules` - 模块表 (v2.3.4+ 新增 category 字段用于分类)
+- `modules` - 模块表
 - `module_items` - 模器件项表
 - `project_boms` - 项目BOM表
 - `part_price_history` - 器件价格历史表
-- `part_suppliers` - 器件供应商表 (v2.3.1+)
-- `part_supplier_price_history` - 供应商价格历史表 (v2.3.1+)
-- `project_suppliers` - 项目整机供应商表 (v2.3.2+)
-- `project_supplier_price_history` - 整机供应商价格历史表 (v2.3.2+)
-- `cost_change_log` - 成本变动日志表 (v2.3.2+)
 - `competitors` - 竞品表
 - `competitor_boms` - 竞品BOM表
 - `competitor_parts` - 竞品器件表
@@ -382,8 +279,8 @@ npm run tauri build
 
 ### 发布产物
 - **位置**: `src-tauri/target/release/`
-- **主执行文件**: `costhub.exe` (免安装版本)
-- **数据库文件**: `costhub.db` (自动创建，与 exe 同目录)
+- **主执行文件**: `monitor-cost-manager.exe` (免安装版本)
+- **数据库文件**: `monitor_cost.db` (自动创建，与 exe 同目录)
 - **安装包**: 未配置 NSIS/MSI，采用免安装 exe 方式
 
 ### 配置文件
@@ -413,8 +310,8 @@ npm run tauri build
 
 ### 数据库路径
 - 由 Rust 后端提供：`src-tauri/src/lib.rs` get_db_url()
-- 路径规则：exe 同目录下的 costhub.db
-- 连接字符串格式：`sqlite:<path>/costhub.db`
+- 路径规则：exe 同目录下的 monitor_cost.db
+- 连接字符串格式：`sqlite:<path>/monitor_cost.db`
 
 ## 特殊功能说明
 
@@ -443,118 +340,7 @@ npm run tauri build
 ```typescript
 // 项目总成本 = BOM成本 × (1 + 平台费率 + 利润率)
 totalCost = bomCost * (1 + (platform_fee_rate + profit_rate) / 100)
-
-// 器件加权成本 = Σ(启用供应商价格 × 份额比例) / Σ(启用供应商份额比例)
-// 示例：供应商A报价10元(份额60%)，供应商B报价12元(份额40%)
-// 加权成本 = (10 × 0.6 + 12 × 0.4) = 10.8元
 ```
-
-### 供应商管理使用流程 (v2.3.1+)
-
-#### 器件供应商管理
-
-##### 1. 添加供应商
-1. 在器件库页面，点击器件行的"管理"按钮
-2. 右侧抽屉打开，点击"添加供应商"
-3. 填写：
-   - 供应商名称（必填）：如"京东方"
-   - 价格（必填）：供应商报价
-   - 份额比例（必填）：0-100%，表示该供应商占总采购量的比例
-   - 状态：启用/停用
-   - 备注（可选）
-4. 点击"添加"
-
-##### 2. 份额比例说明
-- **单供应商**：份额100%，加权成本 = 该供应商价格
-- **多供应商**：份额总和可以不为100%，系统自动归一化
-  - 示例：A供应商60%，B供应商40% → 归一化后仍为60%和40%
-  - 示例：A供应商30%，B供应商20% → 归一化后为60%和40%
-- **停用供应商**：不参与加权成本计算
-
-##### 3. 价格变动记录
-- 修改供应商价格时，系统强制弹窗要求输入变动原因
-- 自动记录到 `part_supplier_price_history` 表
-- 同时记录到 `cost_change_log` 表，追踪影响范围
-
-##### 4. 自动更新器件成本
-- 添加/修改/删除供应商后，系统自动：
-  1. 计算器件的加权成本
-  2. 更新 `parts.cost` 字段
-  3. 记录成本变动日志
-  4. 标记影响的项目列表
-
-##### 5. 价格历史追踪
-- 点击供应商卡片右上角的"时钟"图标
-- 查看该供应商的历史报价变动
-- 显示旧价格、新价格、变动金额、时间、原因
-
-#### 整机供应商管理（ODM项目）(v2.3.2+)
-
-##### 1. 添加整机供应商
-1. 在项目管理页面，选择项目后点击"🏭 整机供应商"标签页
-2. 点击"添加供应商"
-3. 填写：
-   - 供应商名称（必填）：如"富士康"
-   - 整机报价（必填）：供应商整机报价
-   - 份额比例（必填）：0-100%
-   - 状态：启用/停用
-   - 备注（可选）
-4. 点击"添加"
-
-##### 2. 整机报价变动
-- 修改整机供应商报价时，系统强制弹窗要求输入变动原因
-- 自动记录到 `project_supplier_price_history` 表
-- 同时记录到 `cost_change_log` 表
-
-##### 3. 加权报价计算
-- 系统自动计算：`加权报价 = Σ(启用供应商报价 × 份额比例)`
-- 在统计卡片顶部实时显示
-- 供应商数量统计
-
-##### 4. ODM场景应用
-- 记录同一项目的多家ODM工厂报价
-- 对比不同工厂的报价和份额
-- 根据实际订单分配份额计算加权报价
-- 追踪工厂报价变动历史
-
-#### 成本变动追溯（v2.3.2+，v2.3.3 增强）
-
-##### 自动快照触发机制
-系统在以下场景**自动记录**项目总成本变化（无需手动创建快照）：
-
-1. **器件供应商价格变动**
-   - 触发：修改器件供应商价格
-   - 记录：`cost_change_log` (change_type: 'part_supplier_price')
-   - 影响：器件加权成本变化
-
-2. **器件成本变动**
-   - 触发：器件加权成本重新计算
-   - 记录：`cost_change_log` (change_type: 'part_cost')
-   - 影响：使用该器件的所有项目BOM成本
-
-3. **项目总成本变动** (v2.3.3 新增)
-   - 触发场景：
-     - 器件成本变化影响项目
-     - 添加/删除/修改项目BOM条目
-     - 修改项目费率（平台费率/利润率）
-     - 批量删除模块BOM
-     - 批量删除指定器件BOM
-   - 记录：`cost_change_log` (change_type: 'project_total_cost')
-   - 包含信息：旧总成本、新总成本、变动原因、影响详情
-
-4. **整机供应商报价变动**
-   - 触发：修改项目整机供应商报价
-   - 记录：`cost_change_log` (change_type: 'project_supplier_price')
-   - 影响：项目整机加权报价
-
-##### 变动链路示例
-```
-供应商价格变动 → 器件加权成本变化 → 项目总成本变化
-     ↓                    ↓                    ↓
-part_supplier_price   part_cost        project_total_cost
-```
-
-每一步都自动记录到 `cost_change_log` 表，形成完整的成本变动追溯链。
 
 ## 开发注意事项
 
@@ -584,8 +370,8 @@ monitor-cost-main/
 │   ├── Cargo.toml        # Rust 配置
 │   ├── target/           # 编译产物
 │   │   └── release/
-│   │       ├── costhub.exe
-│   │       ├── costhub.db
+│   │       ├── monitor-cost-manager.exe
+│   │       ├── monitor_cost.db
 │   │       └── ...
 │   └── icons/            # 应用图标
 ├── public/               # 静态资源
@@ -622,87 +408,6 @@ monitor-cost-main/
 - CSP 配置开放（开发便利性优先）
 
 ## 更新历史
-
-### v2.3.6 Bug 修复 (2026-07-27)
-- **成本快照计算修复**：
-  - 修复手动创建快照时总成本计算错误（未乘以数量）
-  - 修复 `createProjectCostSnapshot` 函数的成本计算公式
-- **成本变化日志增强**：
-  - 修复 `updateBOMItem` 日志只显示数量变化的问题
-  - 现在会同时显示数量和成本的变化详情
-  - 日志示例：`修改BOM条目: LCD屏幕 (成本: ¥100.00 → ¥120.00)`
-
-### v2.3.5 特性 (2026-07-27)
-- **模块批量分类增强**：
-  - 模块分组卡片右上角添加"设置分类"按钮
-  - 支持批量为所有同名模块设置分类
-  - 分类继承机制：新建同名模块自动继承已有分类
-  - 一次设置，全局生效，保持同名模块分类一致性
-- **数据库函数**：
-  - 新增 `updateModuleCategoryByName(name, category)` 批量更新函数
-
-### v2.3.4 特性 (2026-07-27)
-- **虚拟模块过滤**：
-  - 模块库页面不再显示在研项目中创建的虚拟模块
-  - 虚拟模块仅在项目页面显示，避免模块库混乱
-  - `getModules` 函数新增 `includeVirtual` 参数控制
-- **模块分类管理**：
-  - 新增 `modules.category` 字段，支持模块分类
-  - 模块库页面新增分类筛选器（绿色标签）
-  - 模块卡片显示分类标签
-  - 模块编辑表单支持选择现有分类或输入新分类
-  - 支持项目筛选 + 分类筛选同时使用
-  - 自动收集所有已使用的分类供选择
-- **数据库扩展**：
-  - `modules` 表新增 `category` 字段
-  - 新增 `getModuleCategories()` 函数
-
-### v2.3.3 特性 (2026-07-27)
-- **自动成本快照增强**：
-  - 项目总成本变化自动记录（无需手动创建快照）
-  - 自动触发场景：
-    - 添加/删除/修改项目BOM条目
-    - 修改项目费率（平台费率/利润率）
-    - 批量删除模块BOM
-    - 器件成本变化影响项目
-  - 每次变动记录完整信息：旧总成本、新总成本、变动原因、影响详情
-  - `cost_change_log` 新增 change_type: 'project_total_cost'
-- **成本变动追溯链完善**：
-  - 形成完整链路：供应商价格 → 器件成本 → 项目总成本
-  - 每个环节自动记录，可追溯完整变动历史
-
-### v2.3.2 特性 (2026-07-23)
-- **供应商管理系统优化**：
-  - 简化字段：移除供应商代码、交期、MOQ字段，保留核心字段（名称、价格、份额、状态、备注）
-  - 价格变动强制记录原因：修改供应商价格时弹窗要求输入变动原因
-  - 价格变动历史追踪：自动记录每次价格变动及原因
-- **整机供应商管理（ODM项目）**：
-  - 项目管理页面新增"整机供应商"标签页
-  - 支持多个整机供应商报价管理
-  - 份额比例分配，自动计算加权报价
-  - 整机报价变动记录及历史追踪
-- **成本变动追溯系统**：
-  - 新增 `cost_change_log` 统一成本变动日志表
-  - 记录完整变动链路：器件供应商价格 → 器件成本 → 项目BOM成本
-  - 记录变动类型、关联信息、变动原因、影响范围
-  - 支持按类型和ID查询成本变动历史
-- **数据库扩展**：
-  - Migration version 24：新增 `project_suppliers`、`project_supplier_price_history`、`cost_change_log` 表
-  - 简化 `part_suppliers` 表结构
-
-### v2.3.1 特性 (2026-07-23)
-- **供应商管理系统**：
-  - 每个器件可添加多个供应商报价
-  - 支持设置供应商份额比例（0-100%）
-  - 自动计算加权成本：加权成本 = Σ(供应商价格 × 份额比例)
-  - 供应商价格历史追踪（自动记录价格变动）
-  - 供应商启用/停用状态管理
-  - 右侧抽屉式UI，不遮挡主界面
-  - 紧凑的卡片式供应商列表展示
-- **数据库扩展**：
-  - 新增 `part_suppliers` 表
-  - 新增 `part_supplier_price_history` 表
-  - Migration version 23
 
 ### v2.2 特性
 - 项目分组管理
@@ -756,7 +461,7 @@ monitor-cost-main/
 
 **文档维护**: 所有重要的项目变更应同步更新此文件。
 
-**最后更新**: 2026-07-27
+**最后更新**: 2026-06-23
 
 ## 2026-06-23 调试记录
 
@@ -842,7 +547,7 @@ monitor-cost-main/
 - `getPopupContainer` 配置 - 已移除（不需要）
 
 ### GitHub 仓库
-- 仓库地址：https://github.com/JT15199/monitor-cost.git (GitHub仓库名未变更)
+- 仓库地址：https://github.com/JT15199/monitor-cost.git
 - 已推送当前版本
 
 ### 经验教训
@@ -963,4 +668,4 @@ monitor-cost-main/
 
 **文档维护**: 所有重要的项目变更应同步更新此文件。
 
-**最后更新**: 2026-07-27
+**最后更新**: 2026-06-26

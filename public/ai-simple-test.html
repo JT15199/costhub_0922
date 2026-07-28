@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>简化AI测试</title>
+    <style>
+        body { font-family: Arial; padding: 20px; max-width: 800px; margin: 0 auto; }
+        h1 { color: #8B5CF6; }
+        button { padding: 10px 20px; margin: 5px; font-size: 16px; cursor: pointer; }
+        .success { color: green; font-weight: bold; }
+        .error { color: red; }
+        .info { color: #666; }
+        pre { background: #f5f5f5; padding: 10px; border-radius: 5px; }
+        .step { margin: 20px 0; padding: 15px; border: 1px solid #ddd; }
+    </style>
+</head>
+<body>
+    <h1>⚡ AI智能导入简化测试</h1>
+
+    <div class="step">
+        <h2>步骤1：设置正确配置</h2>
+        <button onclick="setConfig()" style="background: #8B5CF6; color: white;">
+            一键设置配置（qwythos-9b:latest）
+        </button>
+        <pre id="configDisplay">点击按钮查看配置</pre>
+    </div>
+
+    <div class="step">
+        <h2>步骤2：验证模型连接</h2>
+        <button onclick="testModel()">测试模型响应</button>
+        <pre id="modelTest">等待测试...</pre>
+    </div>
+
+    <div class="step">
+        <h2>步骤3：模拟Excel识别</h2>
+        <p class="info">使用简化测试数据，验证AI能否正确识别</p>
+        <button onclick="testExcelRecognition()">测试识别能力</button>
+        <pre id="recognitionTest">等待识别...</pre>
+    </div>
+
+    <div class="step">
+        <h2>步骤4：查看完整配置</h2>
+        <button onclick="showFullConfig()">显示localStorage配置</button>
+        <pre id="fullConfig"></pre>
+    </div>
+
+    <div class="step">
+        <h2>步骤5：解决问题后</h2>
+        <button onclick="goToAI()" style="background: #10B981; color: white; font-size: 18px;">
+            返回AI智能导入页面
+        </button>
+    </div>
+
+    <script>
+        const MODEL = 'qwythos-9b:latest';
+        const OLLAMA_URL = 'http://localhost:11434';
+        const TIMEOUT = 60000;
+
+        // 步骤1：设置配置
+        function setConfig() {
+            const config = {
+                enabled: true,
+                ollamaUrl: OLLAMA_URL,
+                model: MODEL,
+                timeout: TIMEOUT,
+                autoApplyHighConfidence: false,
+                highConfidenceThreshold: 0.90
+            };
+
+            localStorage.setItem('ai_config', JSON.stringify(config));
+
+            document.getElementById('configDisplay').innerHTML =
+                '<span class="success">✓ 配置已保存</span>\n' +
+                JSON.stringify(config, null, 2);
+
+            alert('配置已设置！模型：' + MODEL);
+        }
+
+        // 步骤2：测试模型
+        async function testModel() {
+            const startTime = Date.now();
+            document.getElementById('modelTest').textContent = '测试中...';
+
+            try {
+                const resp = await fetch(OLLAMA_URL + '/api/generate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        model: MODEL,
+                        prompt: 'OK',
+                        stream: false,
+                        options: { num_predict: 5, temperature: 0.3 }
+                    })
+                });
+
+                const data = await resp.json();
+                const duration = Date.now() - startTime;
+
+                document.getElementById('modelTest').innerHTML =
+                    '<span class="success">✓ 模型响应成功</span>\n' +
+                    '响应时间: ' + duration + 'ms\n' +
+                    '返回内容: ' + data.response + '\n' +
+                    '状态: ' + (data.done ? '完成' : '未完成');
+            } catch (err) {
+                document.getElementById('modelTest').innerHTML =
+                    '<span class="error">✗ 模型连接失败</span>\n' +
+                    '错误: ' + err.message + '\n' +
+                    '请检查:\n' +
+                    '1. Ollama是否运行（ollama serve）\n' +
+                    '2. 模型名称是否正确（qwythos-9b:latest）';
+            }
+        }
+
+        // 步骤3：测试Excel识别
+        async function testExcelRecognition() {
+            document.getElementById('recognitionTest').textContent = '识别中...（可能需要10-20秒）';
+
+            // 简化的Excel识别测试
+            const testPrompt = `
+识别这个简单的Excel列名：
+
+列名：器件名称, 型号, 单价, 数量
+
+返回JSON格式（只返回JSON，不要其他内容）：
+{"器件名称": "name", "型号": "model", "单价": "cost", "数量": "quantity"}
+`;
+
+            try {
+                const startTime = Date.now();
+                const resp = await fetch(OLLAMA_URL + '/api/generate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        model: MODEL,
+                        prompt: testPrompt,
+                        stream: false,
+                        options: {
+                            num_predict: 100,
+                            temperature: 0.1,  // 降低随机性
+                            top_p: 0.9
+                        }
+                    })
+                });
+
+                const data = await resp.json();
+                const duration = Date.now() - startTime;
+
+                // 尝试解析JSON
+                let jsonResult = '解析失败';
+                try {
+                    const jsonMatch = data.response.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        jsonResult = JSON.parse(jsonMatch[0]);
+                        jsonResult = JSON.stringify(jsonResult, null, 2);
+                    }
+                } catch (parseErr) {
+                    jsonResult = '无法解析为JSON，原始响应:\n' + data.response;
+                }
+
+                document.getElementById('recognitionTest').innerHTML =
+                    '<span class="success">✓ AI识别测试完成</span>\n' +
+                    '耗时: ' + duration + 'ms\n' +
+                    '识别结果:\n' + jsonResult;
+            } catch (err) {
+                document.getElementById('recognitionTest').innerHTML =
+                    '<span class="error">✗ 识别测试失败</span>\n' +
+                    '错误: ' + err.message;
+            }
+        }
+
+        // 步骤4：显示完整配置
+        function showFullConfig() {
+            const config = localStorage.getItem('ai_config');
+            const status = localStorage.getItem('ai_status');
+            const failures = localStorage.getItem('ai_failure_count');
+
+            document.getElementById('fullConfig').innerHTML =
+                'AI配置:\n' + (config ? JSON.stringify(JSON.parse(config), null, 2) : '无') + '\n\n' +
+                'AI状态:\n' + (status || '无') + '\n\n' +
+                '失败次数:\n' + (failures || '0');
+        }
+
+        // 步骤5：返回AI页面
+        function goToAI() {
+            // 先确认配置正确
+            const config = JSON.parse(localStorage.getItem('ai_config') || '{}');
+            if (!config.model || config.model !== MODEL) {
+                alert('警告：配置可能不正确！\n请先点击"一键设置配置"按钮');
+                return;
+            }
+
+            window.location.href = 'http://localhost:5176/ai.html';
+        }
+
+        // 页面加载时自动检查
+        window.onload = function() {
+            const config = localStorage.getItem('ai_config');
+            if (config) {
+                document.getElementById('configDisplay').textContent =
+                    '当前配置:\n' + JSON.stringify(JSON.parse(config), null, 2);
+            }
+        };
+    </script>
+</body>
+</html>
