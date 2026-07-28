@@ -577,3 +577,42 @@ export async function getProjectSuppliers(projectId: number) {
 export async function getSupplierPriceHistory(partId: number, supplierName: string) {
   return (await getDb()).select<any[]>('SELECT * FROM supplier_price_history WHERE part_id = ? AND supplier_name = ? ORDER BY recorded_at DESC', [partId, supplierName]);
 }
+
+// ==================== API Providers ====================
+export async function getAllApiProviders() {
+  return (await getDb()).select<any[]>('SELECT * FROM api_providers ORDER BY provider_type, priority');
+}
+
+export async function getApiProvidersByType(type: 'search' | 'llm') {
+  return (await getDb()).select<any[]>('SELECT * FROM api_providers WHERE provider_type = ? ORDER BY priority', [type]);
+}
+
+export async function getActiveApiProviders(type: 'search' | 'llm') {
+  return (await getDb()).select<any[]>('SELECT * FROM api_providers WHERE provider_type = ? AND is_active = 1 ORDER BY priority', [type]);
+}
+
+export async function addApiProvider(data: any) {
+  const d = await getDb();
+  const r = await d.execute(
+    'INSERT INTO api_providers (provider_type, provider_name, api_key, base_url, model_name, is_active, priority, is_preset, monthly_quota_note, registration_url) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    [data.provider_type, data.provider_name, data.api_key || '', data.base_url || '', data.model_name || '', data.is_active ? 1 : 0, data.priority || 0, data.is_preset ? 1 : 0, data.monthly_quota_note || '', data.registration_url || '']
+  );
+  return r.lastInsertId;
+}
+
+export async function updateApiProvider(data: any) {
+  const d = await getDb();
+  await d.execute(
+    'UPDATE api_providers SET provider_name=?, api_key=?, base_url=?, model_name=?, is_active=?, priority=?, monthly_quota_note=?, registration_url=? WHERE id=?',
+    [data.provider_name, data.api_key || '', data.base_url || '', data.model_name || '', data.is_active ? 1 : 0, data.priority || 0, data.monthly_quota_note || '', data.registration_url || '', data.id]
+  );
+  return data.id;
+}
+
+export async function deleteApiProvider(id: number) {
+  await (await getDb()).execute('DELETE FROM api_providers WHERE id = ?', [id]);
+}
+
+export async function toggleApiProviderActive(id: number, isActive: boolean) {
+  await (await getDb()).execute('UPDATE api_providers SET is_active = ? WHERE id = ?', [isActive ? 1 : 0, id]);
+}

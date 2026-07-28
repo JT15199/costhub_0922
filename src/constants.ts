@@ -66,3 +66,122 @@ export function getCategoryColor(cat: string): string {
   colorIdx++;
   return c;
 }
+
+// 预置API供应商
+export const PRESET_SEARCH_PROVIDERS = [
+  {
+    provider_name: 'Tavily',
+    base_url: 'https://api.tavily.com',
+    monthly_quota_note: '每月1000次免费额度',
+    registration_url: 'https://tavily.com',
+  },
+  {
+    provider_name: 'Serper (Google Search)',
+    base_url: 'https://google.serper.dev',
+    monthly_quota_note: '注册即送2500次/月免费额度，以官网为准',
+    registration_url: 'https://serper.dev',
+  },
+  {
+    provider_name: 'Brave Search API',
+    base_url: 'https://api.search.brave.com',
+    monthly_quota_note: '免费层2000次/月，以官网为准',
+    registration_url: 'https://brave.com/search/api',
+  },
+  {
+    provider_name: 'Bocha 博查搜索',
+    base_url: 'https://api.bochaai.com',
+    monthly_quota_note: '国内搜索API，中文场景好，以官网为准',
+    registration_url: 'https://bochaai.com',
+  },
+  {
+    provider_name: 'Bing Search API',
+    base_url: 'https://api.bing.microsoft.com',
+    monthly_quota_note: 'Azure免费层每月1000次，超出按量计费，以官网为准',
+    registration_url: 'https://www.microsoft.com/en-us/bing/apis/bing-web-search-api',
+  },
+  {
+    provider_name: 'SearchAPI',
+    base_url: 'https://api.search1api.com',
+    monthly_quota_note: '聚合多搜索引擎（Google/Bing/Brave等），以官网为准',
+    registration_url: 'https://www.searchapi.io',
+  },
+  {
+    provider_name: 'DuckDuckGo Lite (免费)',
+    base_url: '',
+    monthly_quota_note: '完全免费，无需API Key（无结构化返回），适合低成本方案',
+    registration_url: '',
+  },
+];
+
+export const PRESET_LLM_PROVIDERS = [
+  {
+    provider_name: 'DeepSeek 官方',
+    base_url: 'https://api.deepseek.com',
+    model_name: 'deepseek-v4-pro',
+    monthly_quota_note: '新用户赠送500万tokens，按量计费极低，以官网为准',
+    registration_url: 'https://platform.deepseek.com',
+  },
+  {
+    provider_name: '硅基流动 SiliconFlow',
+    base_url: 'https://api.siliconflow.cn/v1/chat/completions',
+    model_name: 'deepseek-ai/DeepSeek-V2.5',
+    monthly_quota_note: '聚合多个开源模型的网关，部分模型免费/低价，以官网为准',
+    registration_url: 'https://siliconflow.cn',
+  },
+  {
+    provider_name: '智谱 GLM (BigModel)',
+    base_url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    model_name: 'glm-4-plus',
+    monthly_quota_note: '部分模型有个人开发者免费额度，以官网为准',
+    registration_url: 'https://open.bigmodel.cn',
+  },
+  {
+    provider_name: '月之暗面 Kimi',
+    base_url: 'https://api.moonshot.cn/v1/chat/completions',
+    model_name: 'moonshot-v1-8k',
+    monthly_quota_note: '有免费体验额度，具体以官网为准',
+    registration_url: 'https://platform.moonshot.cn',
+  },
+  {
+    provider_name: '阿里云通义千问 (DashScope)',
+    base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+    model_name: 'qwen-plus',
+    monthly_quota_note: '部分模型有免费额度（如qwen-turbo），以官网为准',
+    registration_url: 'https://dashscope.aliyun.com',
+  },
+  {
+    provider_name: '火山引擎 (豆包/DeepSeek)',
+    base_url: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+    model_name: 'deepseek-v3-241226',
+    monthly_quota_note: '随送创建度以官网为准，支持联网搜索+LLM打包接入',
+    registration_url: 'https://console.volcengine.com',
+  },
+  {
+    provider_name: '腾讯混元',
+    base_url: 'https://api.hunyuan.cloud.tencent.com/v1/chat/completions',
+    model_name: 'hunyuan-pro',
+    monthly_quota_note: '个人开发者免费额度以官网为准',
+    registration_url: 'https://cloud.tencent.com/product/hunyuan',
+  },
+  {
+    provider_name: '百度文心千帆',
+    base_url: 'https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat',
+    model_name: 'ERNIE-4.5-8K',
+    monthly_quota_note: '有免费调用额度，以官网为准',
+    registration_url: 'https://qianfan.cloud.baidu.com',
+  },
+  {
+    provider_name: 'Groq (超快推理)',
+    base_url: 'https://api.groq.com/openai/v1/chat/completions',
+    model_name: 'llama-3.3-70b-versatile',
+    monthly_quota_note: '免费层每天大量次数（具体开发者见官网），以官网为准',
+    registration_url: 'https://console.groq.com',
+  },
+  {
+    provider_name: 'Exa (formerly Metaphor)',
+    base_url: 'https://api.exa.ai',
+    model_name: '',
+    monthly_quota_note: '面向AI应用的语义搜索引擎，有免费试用额度，以官网为准',
+    registration_url: 'https://exa.ai',
+  },
+];

@@ -171,6 +171,25 @@ pub fn run() {
             sql: "ALTER TABLE project_boms ADD COLUMN ref_project_id INTEGER DEFAULT 0;",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "add api_providers table",
+            sql: "CREATE TABLE IF NOT EXISTS api_providers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider_type TEXT NOT NULL,
+                provider_name TEXT NOT NULL,
+                api_key TEXT DEFAULT '',
+                base_url TEXT DEFAULT '',
+                model_name TEXT DEFAULT '',
+                is_active INTEGER DEFAULT 0,
+                priority INTEGER DEFAULT 0,
+                is_preset INTEGER DEFAULT 0,
+                monthly_quota_note TEXT DEFAULT '',
+                registration_url TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            );",
+            kind: MigrationKind::Up,
+        },
     ];
 
     let db_url = get_db_url();

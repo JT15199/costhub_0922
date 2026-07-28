@@ -63,3 +63,19 @@ export interface ProjectSupplier {
   project_id?: number;
   quoted_price?: number;
 }
+
+// API Provider
+export interface ApiProvider {
+  id?: number;
+  provider_type: 'search' | 'llm';
+  provider_name: string;
+  api_key?: string;
+  base_url?: string;
+  model_name?: string;
+  is_active?: boolean;
+  priority?: number;
+  is_preset?: boolean;
+  monthly_quota_note?: string;
+  registration_url?: string;
+  created_at?: string;
+}
