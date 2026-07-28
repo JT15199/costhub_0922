@@ -609,10 +609,6 @@ export async function updateApiProvider(data: any) {
   return data.id;
 }
 
-export async function deleteApiProvider(id: number) {
-  await (await getDb()).execute('DELETE FROM api_providers WHERE id = ?', [id]);
-}
-
 export async function toggleApiProviderActive(id: number, isActive: boolean) {
   await (await getDb()).execute('UPDATE api_providers SET is_active = ? WHERE id = ?', [isActive ? 1 : 0, id]);
 }

@@ -185,3 +185,9 @@ export const PRESET_LLM_PROVIDERS = [
     registration_url: 'https://exa.ai',
   },
 ];
+
+// 兼容性导出（Settings.tsx使用的旧名称）
+export const PRESET_PROVIDERS = [
+  ...PRESET_SEARCH_PROVIDERS.map(p => ({ ...p, provider_type: 'search' })),
+  ...PRESET_LLM_PROVIDERS.map(p => ({ ...p, provider_type: 'llm' })),
+];
