@@ -27,6 +27,36 @@ export const PROJECT_TYPES = ['在研','已完成'];
 export const MEASURE_STATUSES = ['待执行','执行中','已完成','已取消'];
 export const BRAND_RED = '#CF0A2C';
 
+// 主题调色板定义
+export const PALETTES = [
+  { id: 'apple', name: 'Apple 紫粉', icon: '🍎' },
+  { id: 'tiffany', name: 'Tiffany 蓝玻璃', icon: '💎' },
+  { id: 'paper', name: 'Paper 白底', icon: '📄' },
+  { id: 'rose', name: 'Rose Gold 玫瑰', icon: '🌹' },
+  { id: 'aurora', name: 'Aurora 极光', icon: '🌌' },
+  { id: 'mint', name: 'Mint 薄荷', icon: '🍃' },
+  { id: 'sky', name: 'Sky 天空', icon: '☁️' },
+];
+
+// 调色板主色映射
+export const PALETTE_PRIMARY: Record<string, string> = {
+  apple: '#A855F7',
+  tiffany: '#06B6D4',
+  paper: '#64748B',
+  rose: '#F59E0B',
+  aurora: '#10B981',
+  mint: '#84CC16',
+  sky: '#3B82F6',
+};
+
+// 色温选项
+export const COLOR_TEMPS = [
+  { id: 'default', name: '默认', icon: '☀️' },
+  { id: 'warm', name: '暖光', icon: '🔥' },
+  { id: 'cool', name: '冷调', icon: '❄️' },
+  { id: 'sepia', name: '护眼', icon: '📖' },
+];
+
 const EXTRA_COLORS = ['#6366F1', '#EC4899', '#14B8A6', '#F97316', '#8B5CF6', '#06B6D4', '#E11D48', '#CA8A04', '#7C3AED', '#0891B2'];
 let colorIdx = 0;
 export function getCategoryColor(cat: string): string {

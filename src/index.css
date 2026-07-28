@@ -5,6 +5,21 @@
   --border: #E8ECF1; --shadow: 0 1px 3px rgba(0,0,0,0.04);
   --shadow-lg: 0 8px 24px rgba(0,0,0,0.06);
   --radius: 12px;
+
+  /* 调色板颜色 */
+  --palette-apple: linear-gradient(135deg, #A855F7, #EC4899);
+  --palette-tiffany: linear-gradient(135deg, #06B6D4, #3B82F6);
+  --palette-paper: #F8FAFC;
+  --palette-rose: linear-gradient(135deg, #F59E0B, #EC4899);
+  --palette-aurora: linear-gradient(135deg, #10B981, #8B5CF6);
+  --palette-mint: linear-gradient(135deg, #84CC16, #FCD34D);
+  --palette-sky: linear-gradient(135deg, #3B82F6, #8B5CF6);
+
+  /* 色温颜色 */
+  --temp-default: #F8FAFC;
+  --temp-warm: #FEF3C7;
+  --temp-cool: #DBEAFE;
+  --temp-sepia: #FEF3E2;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); overflow: hidden; }
@@ -100,3 +115,80 @@ body { font-family: "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe
 
 /* Chart glow */
 .chart-glow { filter: drop-shadow(0 4px 12px rgba(207,10,44,0.06)); }
+
+/* ========== 调色板主题 ========== */
+
+/* Apple 紫粉 */
+[data-palette="apple"] {
+  --brand: #A855F7;
+  --brand-hover: #C084FC;
+}
+
+/* Tiffany 蓝玻璃 */
+[data-palette="tiffany"] {
+  --brand: #06B6D4;
+  --brand-hover: #22D3EE;
+}
+
+/* Paper 白底 */
+[data-palette="paper"] {
+  --brand: #64748B;
+  --brand-hover: #94A3B8;
+}
+
+/* Rose Gold 玫瑰 */
+[data-palette="rose"] {
+  --brand: #F59E0B;
+  --brand-hover: #FBBF24;
+}
+
+/* Aurora 极光 */
+[data-palette="aurora"] {
+  --brand: #10B981;
+  --brand-hover: #34D399;
+}
+
+/* Mint 薄荷 */
+[data-palette="mint"] {
+  --brand: #84CC16;
+  --brand-hover: #A3E635;
+}
+
+/* Sky 天空 */
+[data-palette="sky"] {
+  --brand: #3B82F6;
+  --brand-hover: #60A5FA;
+}
+
+/* ========== 深色模式 ========== */
+[data-theme="dark"] {
+  --bg: #0F172A;
+  --card-bg: #1E293B;
+  --text: #F1F5F9;
+  --text-secondary: #94A3B8;
+  --border: #334155;
+  --sidebar-bg: #1E293B;
+  --sidebar-hover: #334155;
+  --sidebar-active: rgba(207,10,44,0.15);
+  --shadow: 0 1px 3px rgba(0,0,0,0.3);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+/* ========== 色温调节 ========== */
+[data-color-temp="warm"] body {
+  filter: sepia(0.15) brightness(1.02);
+}
+
+[data-color-temp="cool"] body {
+  filter: hue-rotate(10deg) brightness(1.05);
+}
+
+[data-color-temp="sepia"] body {
+  filter: sepia(0.3) brightness(1.1);
+}
+
+/* ========== 动效控制 ========== */
+[data-motion="off"] * {
+  transition: none !important;
+  animation: none !important;
+}

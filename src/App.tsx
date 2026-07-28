@@ -10,6 +10,7 @@ import Decomposition from './pages/Decomposition';
 import TrendInsight from './pages/TrendInsight';
 import SupplierManagement from './pages/SupplierManagement';
 import Settings from './pages/Settings';
+import { PALETTES, COLOR_TEMPS } from './constants';
 
 const NAV = [
   { key: 'dashboard', label: '仪表盘', icon: '📊' },
@@ -34,12 +35,29 @@ export default function App() {
     const saved = localStorage.getItem('app-zoom');
     return saved ? parseInt(saved) : 100;
   });
+  const [palette, setPalette] = useState(() => localStorage.getItem('app-palette') || 'paper');
+  const [colorTemp, setColorTemp] = useState(() => localStorage.getItem('app-color-temp') || 'default');
 
   useEffect(() => { setPageKey(p => p + 1); }, [active]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-palette', palette);
+    document.documentElement.setAttribute('data-color-temp', colorTemp);
+  }, [palette, colorTemp]);
 
   const setZoomLevel = (level: number) => {
     setZoom(level);
     localStorage.setItem('app-zoom', String(level));
+  };
+
+  const setPaletteTheme = (id: string) => {
+    setPalette(id);
+    localStorage.setItem('app-palette', id);
+  };
+
+  const setColorTemperature = (temp: string) => {
+    setColorTemp(temp);
+    localStorage.setItem('app-color-temp', temp);
   };
 
   const render = () => {
@@ -74,17 +92,43 @@ export default function App() {
             </div>
           ))}
         </nav>
-        <div style={{ padding: '8px 12px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+
+        {/* 主题调色板 */}
+        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <span style={{ color: 'var(--text-secondary)', fontSize: 10, marginRight: 2 }}>THEME</span>
+            {PALETTES.map(p => (
+              <div
+                key={p.id}
+                title={p.name}
+                onClick={() => setPaletteTheme(p.id)}
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: '50%',
+                  cursor: 'pointer',
+                  border: palette === p.id ? '2px solid var(--brand)' : '2px solid var(--border)',
+                  background: `var(--palette-${p.id})`,
+                  transition: 'all 0.2s',
+                  flexShrink: 0,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* 缩放控制 */}
+        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 10, marginRight: 4 }}>缩放</span>
+            <span style={{ color: 'var(--text-secondary)', fontSize: 10, marginRight: 4 }}>缩放</span>
             {ZOOM_LEVELS.map(level => (
               <button
                 key={level}
                 onClick={() => setZoomLevel(level)}
                 style={{
-                  border: zoom === level ? '1px solid rgba(207,10,44,0.6)' : '1px solid rgba(255,255,255,0.1)',
-                  background: zoom === level ? 'rgba(207,10,44,0.25)' : 'transparent',
-                  color: zoom === level ? '#FFF' : 'rgba(255,255,255,0.45)',
+                  border: zoom === level ? '1px solid var(--brand)' : '1px solid var(--border)',
+                  background: zoom === level ? 'var(--brand)' : 'transparent',
+                  color: zoom === level ? '#FFF' : 'var(--text-secondary)',
                   borderRadius: 4, padding: '2px 6px', fontSize: 10, cursor: 'pointer',
                   transition: 'all 0.2s',
                 }}
@@ -94,6 +138,31 @@ export default function App() {
             ))}
           </div>
         </div>
+
+        {/* 色温控制 */}
+        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ color: 'var(--text-secondary)', fontSize: 10, marginRight: 2 }}>色温</span>
+            {COLOR_TEMPS.map(temp => (
+              <div
+                key={temp.id}
+                title={temp.name}
+                onClick={() => setColorTemperature(temp.id)}
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: '50%',
+                  cursor: 'pointer',
+                  border: colorTemp === temp.id ? '2px solid var(--brand)' : '2px solid var(--border)',
+                  background: `var(--temp-${temp.id})`,
+                  transition: 'all 0.2s',
+                  flexShrink: 0,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+
         <div className="sidebar-ver" style={{ borderTop: 'none', paddingTop: 0 }}>v2.3.14</div>
       </aside>
       <main className="main-content" style={{ zoom: `${zoom}%` }}>
