@@ -9,7 +9,8 @@ import {
   PlusOutlined, DragOutlined, CheckOutlined, CloseOutlined, KeyOutlined,
   StopOutlined, HistoryOutlined,
 } from '@ant-design/icons';
-import { testSearchConnection, testLLMConnection, BUILTIN_SKILLS, loadSkillConfig, saveSkillConfig, getSkill, SkillTemplate } from '../trendService';
+import { testSearchConnection, testLLMConnection, BUILTIN_SKILLS, loadSkillConfig, saveSkillConfig, getSkill } from '../trendService';
+import type { SkillTemplate } from '../trendService';
 import {
   getApiProviders, saveApiProvider, deleteApiProvider, setActiveProvider,
   PRESET_PROVIDERS, updateProviderPriorities,
@@ -76,12 +77,15 @@ export default function Settings(_props: any) {
 
   const loadMemoryItems = async () => {
     setMemoryLoading(true);
-    try { setMemoryItems(await getAllChecklistWithLogs()); } catch { }
+    try {
+      const data = await getAllChecklistWithLogs();
+      setMemoryItems(data.items);
+    } catch { }
     setMemoryLoading(false);
   };
 
   const handleToggleMemory = async (id: number, current: boolean) => {
-    await updateChecklistActive(id, current ? 0 : 1);
+    await updateChecklistActive(id, !current);
     message.success(current ? '已暂停该记忆' : '已恢复该记忆');
     loadMemoryItems();
   };

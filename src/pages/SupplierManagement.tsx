@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Card, Button, Input, Select, Tag, Space, Modal, Form, message, Tabs, Row, Col, Statistic, Table, Popconfirm, Empty, InputNumber, Radio } from 'antd';
 import { ShopOutlined, AppstoreOutlined, UnorderedListOutlined, EditOutlined, DeleteOutlined, HistoryOutlined } from '@ant-design/icons';
-import { getPartSuppliers, getParts, addPartSupplier, updatePartSupplier, deletePartSupplier, getSupplierPriceHistory, getProjects, getProjectSuppliers } from '../db';
+import { getAllPartSuppliers, getParts, addPartSupplier, updatePartSupplier, deletePartSupplier, getSupplierPriceHistory, getProjects, getProjectSuppliers } from '../db';
 import { getCategoryColor } from '../constants';
 import type { PartSupplier, ProjectSupplier } from '../types';
 
@@ -18,6 +18,7 @@ interface SupplierMapItem {
     price: number;
     shareRatio: number;
     supplierId: number;
+    supplierName: string;
   }>;
 }
 
@@ -68,7 +69,7 @@ export default function SupplierManagement() {
     try {
       if (supplierType === 'part') {
         // 加载器件供应商数据
-        const suppliers = await getPartSuppliers();
+        const suppliers = await getAllPartSuppliers();
         const parts = await getParts();
 
         setAllSuppliers(suppliers);
@@ -132,9 +133,10 @@ export default function SupplierManagement() {
         partModel: part.model || '',
         mainCategory: part.main_category,
         subCategory: part.sub_category || '',
-        price: s.price,
-        shareRatio: s.share_ratio,
-        supplierId: s.id!
+        price: s.price || 0,
+        shareRatio: s.share_ratio || 0,
+        supplierId: s.id!,
+        supplierName: s.supplier_name
       });
     });
 
@@ -188,7 +190,7 @@ export default function SupplierManagement() {
 
       if (editingRelation) {
         // 更新
-        await updatePartSupplier(editingRelation.id!, values);
+        await updatePartSupplier({ ...values, id: editingRelation.id });
         message.success('已更新');
       } else {
         // 新增
@@ -217,9 +219,9 @@ export default function SupplierManagement() {
   };
 
   // 查看价格历史
-  const showPriceHistory = async (supplierId: number) => {
+  const showPriceHistory = async (partId: number, supplierName: string) => {
     try {
-      const history = await getSupplierPriceHistory(supplierId);
+      const history = await getSupplierPriceHistory(partId, supplierName);
       setPriceHistory(history);
       setPriceHistoryOpen(true);
     } catch (e) {
@@ -541,7 +543,7 @@ export default function SupplierManagement() {
                     width: 120,
                     render: (_: any, record: any) => (
                       <Space size="small">
-                        <Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => showPriceHistory(record.supplierId)} />
+                        <Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => showPriceHistory(record.part_id, record.supplier_name)} />
                         <Button type="link" size="small" icon={<EditOutlined />} onClick={() => {
                           const relation = allSuppliers.find(s => s.id === record.id);
                           if (relation) openEditModal(relation);
@@ -573,7 +575,7 @@ export default function SupplierManagement() {
                     width: 80,
                     render: (_: any, record: any) => (
                       <Space size="small">
-                        <Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => showPriceHistory(record.supplierId)} />
+                        <Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => showPriceHistory(record.part_id, record.supplier_name)} />
                       </Space>
                     )
                   }
@@ -594,7 +596,7 @@ export default function SupplierManagement() {
                         dataSource={Array.from(new Set(allSuppliers.map(s => s.supplier_name)))
                           .map(name => {
                             const supplies = allSuppliers.filter(s => s.supplier_name === name);
-                            const totalAmount = supplies.reduce((sum, s) => sum + s.price * s.share_ratio / 100, 0);
+                            const totalAmount = supplies.reduce((sum, s) => sum + (s.price || 0) * (s.share_ratio || 0) / 100, 0);
                             return {
                               name,
                               count: supplies.length,
@@ -770,8 +772,8 @@ export default function SupplierManagement() {
                               supplierName,
                               totalParts: supplies.length,
                               categories: Array.from(categories),
-                              avgPrice: supplies.reduce((sum, s) => sum + s.price, 0) / supplies.length,
-                              avgShare: supplies.reduce((sum, s) => sum + s.share_ratio, 0) / supplies.length
+                              avgPrice: supplies.reduce((sum, s) => sum + (s.price || 0), 0) / supplies.length,
+                              avgShare: supplies.reduce((sum, s) => sum + (s.share_ratio || 0), 0) / supplies.length
                             };
                           })}
                           rowKey="supplierName"
@@ -828,7 +830,7 @@ export default function SupplierManagement() {
                                   const prices: Record<string, number> = {};
                                   selectedSuppliers.forEach(supplierName => {
                                     const supply = allSuppliers.find(s => s.part_id === partId && s.supplier_name === supplierName);
-                                    if (supply) prices[supplierName] = supply.price;
+                                    if (supply && supply.price) prices[supplierName] = supply.price;
                                   });
                                   const minPrice = Math.min(...Object.values(prices));
                                   const maxPrice = Math.max(...Object.values(prices));
@@ -922,7 +924,7 @@ export default function SupplierManagement() {
                   title: '操作',
                   width: 80,
                   render: (_: any, record: any) => (
-                    <Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => showPriceHistory(record.supplierId)} />
+                    <Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => showPriceHistory(record.partId, record.supplierName)} />
                   )
                 }
               ]}

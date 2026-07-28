@@ -22,13 +22,16 @@ export default function AnalysisChecklist(_props: any) {
 
   const load = async () => {
     setLoading(true);
-    try { setItems(await getAllChecklistWithLogs()); } catch { }
+    try {
+      const data = await getAllChecklistWithLogs();
+      setItems(data.items);
+    } catch { }
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
 
   const handleToggle = async (id: number, current: boolean) => {
-    await updateChecklistActive(id, current ? 0 : 1);
+    await updateChecklistActive(id, !current);
     message.success(current ? '已暂停该记忆' : '已恢复该记忆');
     load();
   };

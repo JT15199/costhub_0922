@@ -50,3 +50,16 @@ export interface DashboardStats {
   category_distribution: { category: string; count: number }[];
   recent_parts: Part[];
 }
+export interface PartSupplier {
+  id?: number; part_id: number; supplier_name: string; unit_price: number;
+  moq: number; lead_time: string; priority: number; remark: string;
+  price?: number; share_ratio?: number; is_active?: number;
+}
+export interface ProjectSupplier {
+  id?: number;
+  supplier_name: string;
+  share_ratio?: number;
+  is_active?: number;
+  project_id?: number;
+  quoted_price?: number;
+}

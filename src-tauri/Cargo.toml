@@ -1,5 +1,5 @@
 [package]
-name = "monitor-cost-manager"
+name = "costhub"
 version = "1.0.0"
 description = "显示器成本管理系统"
 authors = ["MonitorCost"]

@@ -16,7 +16,7 @@ import {
 import type { Edge, Node } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
-  getDecompositionTree, getDecompositionNode, saveDecompositionNode,
+  getAllDecompositionNodes, getDecompositionNode, saveDecompositionNode,
   deleteDecompositionNode, searchDecompositionNodes, getDecompositionHistory,
   getTrendItemsWithDetails, getLatestTrendSnapshot, getTrendItemByCategory,
   saveTrendItem, saveTrendSnapshot, getTrendSnapshots,
@@ -265,7 +265,7 @@ export default function Decomposition(_props: any) {
   const loadTree = useCallback(async () => {
     setLoading(true);
     try {
-      const all = await getDecompositionTree();
+      const all = await getAllDecompositionNodes();
       setNodesData(all);
       const items = await getTrendItemsWithDetails();
       setTrendItems(items);
@@ -531,9 +531,9 @@ export default function Decomposition(_props: any) {
           magnitude_reference: structured.magnitude_reference, summary: structured.summary,
           suggested_action: structured.suggested_action, raw_search_results: JSON.stringify(result.allSources),
         });
-        await saveTrendInsightDimensions(snapshotId, structured.dimensions || []);
+        await saveTrendInsightDimensions(snapshotId!, structured.dimensions || []);
         for (const event of structured.key_events || []) {
-          if (event.event_description) await saveTrendKeyEvent({ ...event, trend_snapshot_id: snapshotId });
+          if (event.event_description) await saveTrendKeyEvent({ ...event, trend_snapshot_id: snapshotId! });
         }
       }
 

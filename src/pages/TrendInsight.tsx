@@ -104,11 +104,7 @@ export default function TrendInsight(_props: any) {
           // 已有对应条目，检查是否已关联该器件
           const alreadyMapped = matched.mapped_parts?.some((p: any) => p.id === part.id);
           if (!alreadyMapped) {
-            await (await import('../db').then(m => m.addTrendMapping))({
-              component_id: part.id,
-              trend_item_id: matched.id,
-              component_type: 'part',
-            });
+            await (await import('../db').then(m => m.addTrendMapping))(matched.id, part.id);
           }
         } else {
           // 创建新的趋势条目
@@ -122,11 +118,7 @@ export default function TrendInsight(_props: any) {
             raw_search_results: '',
             last_updated_at: '',
           });
-          await (await import('../db').then(m => m.addTrendMapping))({
-            component_id: part.id,
-            trend_item_id: newId,
-            component_type: 'part',
-          });
+          await (await import('../db').then(m => m.addTrendMapping))(newId, part.id);
         }
       }
 
@@ -354,9 +346,9 @@ export default function TrendInsight(_props: any) {
           raw_search_results: JSON.stringify(sources),
           skill_used: skill.id,
         });
-        await saveTrendInsightDimensions(snapshotId, structuredResult.dimensions || []);
+        await saveTrendInsightDimensions(snapshotId!, structuredResult.dimensions || []);
         for (const event of structuredResult.key_events || []) {
-          if (event.event_description) await saveTrendKeyEvent({ ...event, trend_snapshot_id: snapshotId });
+          if (event.event_description) await saveTrendKeyEvent({ ...event, trend_snapshot_id: snapshotId! });
         }
       } else {
         // 模拟数据（API 未配置时的演示数据）
@@ -394,7 +386,7 @@ export default function TrendInsight(_props: any) {
           raw_search_results: JSON.stringify(sources),
           skill_used: skill.id,
         });
-        await saveTrendInsightDimensions(snapshotId, demoDimensions);
+        await saveTrendInsightDimensions(snapshotId!, demoDimensions);
       }
 
       const now = new Date().toISOString().split('T')[0];
@@ -532,8 +524,8 @@ export default function TrendInsight(_props: any) {
     setMaterialCategories(mats);
   };
 
-  const handleDeleteMaterial = async (id: number) => {
-    await removeMaterialCategory(id);
+  const handleDeleteMaterial = async (categoryName: string) => {
+    await removeMaterialCategory(categoryName);
     message.success('已删除');
     const mats = await getMaterialCategories();
     setMaterialCategories(mats);
