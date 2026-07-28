@@ -6,6 +6,11 @@ import Projects from './pages/Projects';
 import Competitors from './pages/Competitors';
 import Compare from './pages/Compare';
 import Reports from './pages/Reports';
+import AnalysisChecklist from './pages/AnalysisChecklist';
+import Decomposition from './pages/Decomposition';
+import TrendInsight from './pages/TrendInsight';
+import SupplierManagement from './pages/SupplierManagement';
+import Settings from './pages/Settings';
 
 const NAV = [
   { key: 'dashboard', label: '仪表盘', icon: '📊' },
@@ -15,6 +20,11 @@ const NAV = [
   { key: 'competitors', label: '竞品管理', icon: '🏭' },
   { key: 'compare', label: '对比分析', icon: '📈' },
   { key: 'reports', label: '成本报告', icon: '📄' },
+  { key: 'decomposition', label: '物料分解', icon: '🌳' },
+  { key: 'trendInsight', label: '趋势洞察', icon: '📡' },
+  { key: 'supplierManagement', label: '供应商管理', icon: '🏢' },
+  { key: 'analysisChecklist', label: '分析清单', icon: '🧠' },
+  { key: 'settings', label: '系统设置', icon: '⚙️' },
 ];
 
 const ZOOM_LEVELS = [80, 100, 125, 150];
@@ -44,6 +54,11 @@ export default function App() {
       case 'competitors': return <Competitors {...p} />;
       case 'compare': return <Compare {...p} />;
       case 'reports': return <Reports {...p} />;
+      case 'decomposition': return <Decomposition {...p} />;
+      case 'trendInsight': return <TrendInsight {...p} />;
+      case 'supplierManagement': return <SupplierManagement {...p} />;
+      case 'analysisChecklist': return <AnalysisChecklist {...p} />;
+      case 'settings': return <Settings {...p} />;
       default: return <Dashboard {...p} />;
     }
   };
