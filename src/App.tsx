@@ -37,6 +37,7 @@ export default function App() {
   });
   const [palette, setPalette] = useState(() => localStorage.getItem('app-palette') || 'paper');
   const [colorTemp, setColorTemp] = useState(() => localStorage.getItem('app-color-temp') || 'default');
+  const [customLogo] = useState(() => localStorage.getItem('costhub_custom_logo') || '');
 
   useEffect(() => { setPageKey(p => p + 1); }, [active]);
 
@@ -44,6 +45,11 @@ export default function App() {
     document.documentElement.setAttribute('data-palette', palette);
     document.documentElement.setAttribute('data-color-temp', colorTemp);
   }, [palette, colorTemp]);
+
+  useEffect(() => {
+    const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (icon && customLogo) icon.href = customLogo;
+  }, [customLogo]);
 
   const setZoomLevel = (level: number) => {
     setZoom(level);
@@ -82,7 +88,11 @@ export default function App() {
     <>
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <div className="logo-img">CH</div>
+          <div className="logo-img">
+            {customLogo
+              ? <img src={customLogo} alt="CostHub Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              : 'CH'}
+          </div>
           <div><h1>CostHub</h1><span>成本管理平台</span></div>
         </div>
         <nav className="sidebar-nav">

@@ -73,42 +73,10 @@ async function callLLMWithFallback(
   for (const provider of llmProviders) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const isOpenAI = provider.provider_name?.toLowerCase().includes('openai');
-        let baseUrl = provider.base_url || (isOpenAI ? 'https://api.openai.com/v1/chat/completions' : 'https://api.deepseek.com/v1/chat/completions');
-        // 自动补全 /chat/completions 路径
-        if (!baseUrl.endsWith('/chat/completions')) {
-          baseUrl = baseUrl.replace(/\/+$/, '') + '/chat/completions';
-        }
-        const res = await rustPost(
-          baseUrl,
-          { 'Authorization': `Bearer ${provider.api_key}`, 'Content-Type': 'application/json' },
-          JSON.stringify({
-            model: provider.model_name || 'deepseek-chat',
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt },
-            ],
-            temperature,
-            max_tokens: maxTokens,
-          })
-        );
-        if (res.success) {
-          let data: any;
-          try {
-            data = JSON.parse(res.body);
-          } catch {
-            const preview = res.body.slice(0, 120).replace(/\n/g, ' ');
-            throw new Error(`供应商「${provider.provider_name}」返回非 JSON，请检查 base_url（${baseUrl}）: ${preview}...`);
-          }
-          return data.choices?.[0]?.message?.content || '';
-        }
-        // HTTP 错误 — 记录详情后按状态码决定是否跳过
-        const errMsg = `HTTP ${res.status}: ${res.body.slice(0, 200).replace(/\n/g, ' ')}`;
-        if (!lastError) lastError = new Error(errMsg);
-        // 4xx 客户端错误（如 401/403/429）不重试，直接降级到下一个供应商
-        if (res.status >= 400 && res.status < 500) break;
+        return await callSingleLLMProvider(provider, systemPrompt, userPrompt, temperature, maxTokens);
       } catch (e: any) {
         lastError = e;
+        if (/HTTP 4\d\d/.test(e?.message || '')) break;
         if (attempt === 0) await new Promise(r => setTimeout(r, 1000)); // 重试前等1秒
       }
     }
@@ -120,6 +88,58 @@ async function callLLMWithFallback(
   throw new Error(`所有 LLM 供应商均调用失败${lastError ? `。最后一个错误: ${(lastError as any).message || lastError}` : '（无具体错误）'}`);
 }
 
+function normalizeChatCompletionUrl(baseUrl: string): string {
+  const trimmed = (baseUrl || 'https://api.deepseek.com/chat/completions').replace(/\/+$/, '');
+  if (trimmed.endsWith('/chat/completions')) return trimmed;
+  return `${trimmed}/chat/completions`;
+}
+
+async function callSingleLLMProvider(
+  provider: any,
+  systemPrompt: string,
+  userPrompt: string,
+  temperature = 0.3,
+  maxTokens = 2000,
+): Promise<string> {
+  const messages = [] as Array<{ role: string; content: string }>;
+  if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+  messages.push({ role: 'user', content: userPrompt });
+  return callSingleLLMProviderMessages(provider, messages, temperature, maxTokens);
+}
+
+async function callSingleLLMProviderMessages(
+  provider: any,
+  messages: Array<{ role: string; content: string }>,
+  temperature = 0.3,
+  maxTokens = 2000,
+): Promise<string> {
+  const baseUrl = normalizeChatCompletionUrl(provider.base_url);
+  const res = await rustPost(
+    baseUrl,
+    { Authorization: `Bearer ${provider.api_key}`, 'Content-Type': 'application/json' },
+    JSON.stringify({
+      model: provider.model_name || 'deepseek-chat',
+      messages,
+      temperature,
+      max_tokens: maxTokens,
+    }),
+  );
+  if (!res.success) {
+    throw new Error(`${provider.provider_name} HTTP ${res.status}: ${res.body.slice(0, 400).replace(/\n/g, ' ')}`);
+  }
+  let data: any;
+  try {
+    data = JSON.parse(res.body);
+  } catch {
+    throw new Error(`${provider.provider_name} 返回非 JSON，请检查 Base URL：${res.body.slice(0, 160)}`);
+  }
+  const content = data.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error(`${provider.provider_name} 返回成功但没有 choices[0].message.content`);
+  }
+  return content;
+}
+
 // ====== Rust HTTP 代理 ======
 
 interface HttpResponse {
@@ -129,16 +149,37 @@ interface HttpResponse {
 }
 
 async function rustPost(url: string, headers: Record<string, string>, body?: string): Promise<HttpResponse> {
-  const result = await invoke<HttpResponse>('http_post', {
-    request: { url, headers, body: body || null },
-  });
-  return result;
+  return invokeWithRequestLog('POST', url, headers, body || null);
 }
 
 async function rustGet(url: string, headers: Record<string, string>): Promise<HttpResponse> {
-  const result = await invoke<HttpResponse>('http_get', {
-    request: { url, headers, body: null },
-  });
+  return invokeWithRequestLog('GET', url, headers, null);
+}
+
+function redactUrl(url: string): string {
+  return url.replace(/([?&](?:api_?key|key|token)=)[^&]+/gi, '$1***');
+}
+
+async function invokeWithRequestLog(method: 'GET' | 'POST', url: string, headers: Record<string, string>, body: string | null): Promise<HttpResponse> {
+  const started = Date.now();
+  let result: HttpResponse;
+  try {
+    result = await invoke<HttpResponse>(method === 'POST' ? 'http_post' : 'http_get', {
+      request: { url, headers, body },
+    });
+  } catch (e: any) {
+    result = { status: 0, body: e?.message || String(e), success: false };
+  }
+  try {
+    const { logOutboundRequest } = await import('./db');
+    await logOutboundRequest({
+      method,
+      url: redactUrl(url),
+      status_code: result.status,
+      response_time_ms: Date.now() - started,
+      error_message: result.success ? '' : result.body.slice(0, 500),
+    });
+  } catch { }
   return result;
 }
 
@@ -150,9 +191,47 @@ interface SearchResult {
   snippet: string;
 }
 
-async function searchSerper(query: string, apiKey: string): Promise<SearchResult[]> {
+function collapseText(text: string): string {
+  return String(text || '').replace(/\s+/g, ' ').trim();
+}
+
+function isReadableText(text: string): boolean {
+  const value = collapseText(text);
+  if (!value) return false;
+  const replacementCount = (value.match(/\uFFFD/g) || []).length;
+  if (replacementCount > 0) return false;
+  const controlCount = (value.match(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g) || []).length;
+  if (controlCount > 0) return false;
+  const letters = (value.match(/[\p{L}\p{N}\u4e00-\u9fff]/gu) || []).length;
+  const symbols = (value.match(/[^\p{L}\p{N}\u4e00-\u9fff\s，。！？、：；（）《》“”‘’"'.,:;!?()[\]{}%+\-_/]/gu) || []).length;
+  return letters >= 4 && symbols / Math.max(value.length, 1) < 0.18;
+}
+
+function sanitizeSearchResults(results: SearchResult[]): SearchResult[] {
+  const seen = new Set<string>();
+  return (results || [])
+    .map(r => ({
+      title: collapseText(r.title).slice(0, 160),
+      url: collapseText(r.url),
+      snippet: collapseText(r.snippet).slice(0, 600),
+    }))
+    .filter(r => r.title && r.url && isReadableText(`${r.title} ${r.snippet}`))
+    .filter(r => {
+      const key = r.url.replace(/#.*$/, '');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function isRelevantSearchResult(result: SearchResult, terms: string[]): boolean {
+  const text = `${result.title} ${result.snippet} ${result.url}`.toLowerCase();
+  return terms.some(term => text.includes(term.toLowerCase()));
+}
+
+async function searchSerper(query: string, apiKey: string, baseUrl = 'https://google.serper.dev/search'): Promise<SearchResult[]> {
   const res = await rustPost(
-    'https://google.serper.dev/search',
+    baseUrl,
     { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
     // tbs=qdr:m6 限制只搜最近6个月的结果
     JSON.stringify({ q: query, num: 8, gl: 'cn', hl: 'zh-CN', tbs: 'qdr:m6' })
@@ -166,9 +245,9 @@ async function searchSerper(query: string, apiKey: string): Promise<SearchResult
   }));
 }
 
-async function searchBing(query: string, apiKey: string): Promise<SearchResult[]> {
+async function searchBing(query: string, apiKey: string, baseUrl = 'https://api.bing.microsoft.com/v7.0/search'): Promise<SearchResult[]> {
   const res = await rustGet(
-    `https://api.bing.microsoft.com/v7.0/search?q=${encodeURIComponent(query)}&count=8&mkt=zh-CN&freshness=Month`,
+    `${baseUrl}?q=${encodeURIComponent(query)}&count=8&mkt=zh-CN&freshness=Month`,
     { 'Ocp-Apim-Subscription-Key': apiKey }
   );
   if (!res.success) throw new Error(`Bing API 返回错误 (HTTP ${res.status}): ${res.body.slice(0, 300)}`);
@@ -178,6 +257,54 @@ async function searchBing(query: string, apiKey: string): Promise<SearchResult[]
     url: r.url || '',
     snippet: r.snippet || '',
   }));
+}
+
+async function searchBrave(query: string, apiKey: string, baseUrl: string): Promise<SearchResult[]> {
+  const res = await rustGet(`${baseUrl}?q=${encodeURIComponent(query)}&count=8&search_lang=zh-hans&freshness=pm`, {
+    Accept: 'application/json', 'X-Subscription-Token': apiKey,
+  });
+  if (!res.success) throw new Error(`Brave Search HTTP ${res.status}: ${res.body.slice(0, 300)}`);
+  const data = JSON.parse(res.body);
+  return (data.web?.results || []).map((r: any) => ({ title: r.title || '', url: r.url || '', snippet: r.description || '' }));
+}
+
+async function searchBocha(query: string, apiKey: string, baseUrl: string): Promise<SearchResult[]> {
+  const res = await rustPost(baseUrl, { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, JSON.stringify({ query, freshness: 'oneMonth', summary: true, count: 8 }));
+  if (!res.success) throw new Error(`博查搜索 HTTP ${res.status}: ${res.body.slice(0, 300)}`);
+  const data = JSON.parse(res.body);
+  const values = data.data?.webPages?.value || data.webPages?.value || [];
+  return values.map((r: any) => ({ title: r.name || r.title || '', url: r.url || '', snippet: r.summary || r.snippet || '' }));
+}
+
+async function searchSearchApi(query: string, apiKey: string, baseUrl: string): Promise<SearchResult[]> {
+  const res = await rustGet(`${baseUrl}?engine=google&q=${encodeURIComponent(query)}&api_key=${encodeURIComponent(apiKey)}`, {});
+  if (!res.success) throw new Error(`SearchApi.io HTTP ${res.status}: ${res.body.slice(0, 300)}`);
+  const data = JSON.parse(res.body);
+  return (data.organic_results || []).slice(0, 8).map((r: any) => ({ title: r.title || '', url: r.link || '', snippet: r.snippet || '' }));
+}
+
+async function searchExa(query: string, apiKey: string, baseUrl: string): Promise<SearchResult[]> {
+  const res = await rustPost(baseUrl, { 'x-api-key': apiKey, 'Content-Type': 'application/json' }, JSON.stringify({ query, numResults: 8, type: 'auto', contents: { text: { maxCharacters: 500 } } }));
+  if (!res.success) throw new Error(`Exa Search HTTP ${res.status}: ${res.body.slice(0, 300)}`);
+  const data = JSON.parse(res.body);
+  return (data.results || []).map((r: any) => ({ title: r.title || '', url: r.url || '', snippet: r.text || r.highlights?.[0] || '' }));
+}
+
+async function searchWithProvider(provider: any, query: string): Promise<SearchResult[]> {
+  const name = (provider.provider_name || '').toLowerCase();
+  const baseUrl = (provider.base_url || '').replace(/\/+$/, '');
+  let results: SearchResult[];
+  if (name.includes('tavily') || baseUrl.includes('tavily.com')) results = await searchTavily(query, provider.api_key, baseUrl);
+  else if (name.includes('brave') || baseUrl.includes('search.brave.com')) results = await searchBrave(query, provider.api_key, baseUrl);
+  else if (name.includes('博查') || name.includes('bocha') || baseUrl.includes('bochaai.com')) results = await searchBocha(query, provider.api_key, baseUrl);
+  else if (name.includes('bing') || baseUrl.includes('bing.microsoft.com')) results = await searchBing(query, provider.api_key, baseUrl);
+  else if (name.includes('searchapi') || baseUrl.includes('searchapi.io')) results = await searchSearchApi(query, provider.api_key, baseUrl);
+  else if (name.includes('exa') || baseUrl.includes('exa.ai')) results = await searchExa(query, provider.api_key, baseUrl);
+  else if (name.includes('serper') || baseUrl.includes('serper.dev')) results = await searchSerper(query, provider.api_key, baseUrl);
+  else {
+    throw new Error(`不支持的搜索供应商「${provider.provider_name}」，请从预置模板选择或检查 Base URL`);
+  }
+  return sanitizeSearchResults(results);
 }
 
 /** 搜索公开网页信息（多供应商降级） */
@@ -191,15 +318,7 @@ export async function searchWeb(query: string): Promise<SearchResult[]> {
   for (const provider of searchProviders) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const name = provider.provider_name?.toLowerCase() || '';
-        if (name.includes('tavily')) {
-          return await searchTavily(query, provider.api_key);
-        }
-        if (name.includes('bing')) {
-          return await searchBing(query, provider.api_key);
-        }
-        // 默认使用 Serper
-        return await searchSerper(query, provider.api_key);
+        return await searchWithProvider(provider, query);
       } catch (e: any) {
         lastError = e;
         if (attempt === 0) await new Promise(r => setTimeout(r, 1000));
@@ -219,11 +338,18 @@ function extractJSON(text: string): any {
   cleaned = cleaned.replace(/```(?:json)?/gi, '');
   cleaned = cleaned.trim();
 
-  // 尝试找第一个 { 到最后一个 }
+  // 尝试找第一个 JSON 对象或数组
   const firstBrace = cleaned.indexOf('{');
   const lastBrace = cleaned.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+  const firstBracket = cleaned.indexOf('[');
+  const lastBracket = cleaned.lastIndexOf(']');
+  const starts = [firstBrace, firstBracket].filter(i => i !== -1);
+  const firstJson = starts.length ? Math.min(...starts) : -1;
+  if (firstJson !== -1) {
+    const endJson = firstJson === firstBracket && lastBracket > firstBracket
+      ? lastBracket
+      : lastBrace;
+    if (endJson > firstJson) cleaned = cleaned.slice(firstJson, endJson + 1);
   }
 
   try {
@@ -291,6 +417,10 @@ function extractJSON(text: string): any {
       };
     }
   }
+}
+
+export function extractLLMJson(text: string): any {
+  return extractJSON(text);
 }
 
 export interface TrendAnalysisResult {
@@ -487,23 +617,8 @@ async function callLLMChat(_provider: string, _apiKey: string, _model: string, m
   for (const provider of llmProviders) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const isOpenAI = provider.provider_name?.toLowerCase().includes('openai');
-        let baseUrl = provider.base_url || (isOpenAI ? 'https://api.openai.com/v1/chat/completions' : 'https://api.deepseek.com/v1/chat/completions');
-        // 自动补全 /chat/completions 路径
-        if (!baseUrl.endsWith('/chat/completions')) {
-          baseUrl = baseUrl.replace(/\/+$/, '') + '/chat/completions';
-        }
-        const res = await rustPost(
-          baseUrl,
-          { 'Authorization': `Bearer ${provider.api_key}`, 'Content-Type': 'application/json' },
-          JSON.stringify({ model: provider.model_name || 'deepseek-chat', messages, temperature: 0.5, max_tokens: 4000 })
-        );
-        if (res.success) {
-          const data = JSON.parse(res.body);
-          return data.choices?.[0]?.message?.content || '';
-        }
-        if (res.status >= 400 && res.status < 500) break;
-      } catch (e: any) { lastError = e; if (attempt === 0) await new Promise(r => setTimeout(r, 1000)); }
+        return await callSingleLLMProviderMessages(provider, messages, 0.5, 4000);
+      } catch (e: any) { lastError = e; if (/HTTP 4\d\d/.test(e?.message || '')) break; if (attempt === 0) await new Promise(r => setTimeout(r, 1000)); }
     }
   }
   throw new Error(`所有 LLM 供应商均调用失败${lastError ? `。最后一个错误: ${(lastError as any).message || lastError}` : '（无具体错误）'}`);
@@ -615,9 +730,9 @@ export async function supplementarySearch(
 }
 
 /** Tavily 搜索 API */
-async function searchTavily(query: string, apiKey: string): Promise<SearchResult[]> {
+async function searchTavily(query: string, apiKey: string, baseUrl = 'https://api.tavily.com/search'): Promise<SearchResult[]> {
   const res = await rustPost(
-    'https://api.tavily.com/search',
+    baseUrl,
     { 'Content-Type': 'application/json' },
     JSON.stringify({ api_key: apiKey, query, search_depth: 'basic', max_results: 8, include_answer: false })
   );
@@ -1091,12 +1206,27 @@ ${skill.systemPrompt}
       const searchResults = await executeSearchRounds(parsed.queries.slice(0, 3));
 
       // 收集来源
+      const sourceCountBefore = allSources.length;
       for (const batch of searchResults) {
         for (const r of batch) {
           if (!allSources.find(s => s.url === r.url)) {
             allSources.push(r);
           }
         }
+      }
+
+      if (allSources.length === sourceCountBefore && rounds >= maxRounds) {
+        return {
+          trend_direction: '信号不明确',
+          confidence_level: '低',
+          magnitude_min: null,
+          magnitude_max: null,
+          magnitude_reference: '',
+          summary: '搜索 API 可调用，但没有返回可读且相关的公开来源。本次未形成可靠趋势判断，请检查搜索供应商配置、配额或更换关键词。',
+          suggested_action: '观望',
+          allSources,
+          searchRounds: rounds,
+        };
       }
 
       // 将搜索结果反馈给 LLM
@@ -1204,26 +1334,27 @@ export async function testSearchConnection(): Promise<TestResult> {
       return { success: false, message: '未配置搜索 API Key', detail: '请先在设置页面添加并启用搜索供应商' };
     }
 
-    const testQuery = '铜价 市场行情';
+    const testQuery = '2026 铜价 上海有色网 LME copper price';
     let results: SearchResult[];
 
-    const name = activeSearch.provider_name?.toLowerCase() || '';
-    if (name.includes('tavily')) {
-      results = await searchTavily(testQuery, activeSearch.api_key);
-    } else if (name.includes('bing')) {
-      results = await searchBing(testQuery, activeSearch.api_key);
-    } else {
-      results = await searchSerper(testQuery, activeSearch.api_key);
-    }
+    results = await searchWithProvider(activeSearch, testQuery);
+    const relevantTerms = ['铜', 'copper', 'lme', '金属', '价格', 'commodity', '有色', '期货'];
+    const relevantResults = results.filter(r => isRelevantSearchResult(r, relevantTerms));
 
-    if (results.length === 0) {
-      return { success: false, message: '搜索 API 连接成功但无搜索结果', detail: 'API Key 有效但查询未返回结果，请检查 API 权限/配额' };
+    if (relevantResults.length === 0) {
+      return {
+        success: false,
+        message: '搜索 API 返回了结果，但没有可用的相关结果',
+        detail: results.length === 0
+          ? 'API Key 可能有效，但返回内容为空或被判定为不可读，请检查供应商配额、Base URL、地区限制。'
+          : `返回结果与测试主题不相关，已拦截为失败，避免误判通过。\n\n${results.slice(0, 3).map(r => `• ${r.title}\n  ${r.snippet}`).join('\n\n')}`,
+      };
     }
 
     return {
       success: true,
-      message: `✅ 搜索 API 连接成功！获取到 ${results.length} 条结果`,
-      detail: results.slice(0, 3).map(r => `• ${r.title}\n  ${r.snippet}`).join('\n\n'),
+      message: `✅ 搜索 API 连接成功！获取到 ${relevantResults.length} 条有效结果`,
+      detail: relevantResults.slice(0, 3).map(r => `• ${r.title}\n  ${r.snippet}`).join('\n\n'),
     };
   } catch (e: any) {
     return { success: false, message: '搜索 API 连接失败', detail: e.message || '未知错误' };
@@ -1239,13 +1370,22 @@ export async function testLLMConnection(): Promise<TestResult> {
       return { success: false, message: '未配置大模型 API Key', detail: '请先在设置页面添加并启用 LLM 供应商' };
     }
 
-    const response = await callLLM(
-      '', '', '',
+    const response = await callSingleLLMProvider(
+      activeLLM,
       '你是一个助手。只回复"OK"两个字，不要回复其他内容。',
-      '请回复OK'
+      '请回复OK',
+      0,
+      32,
     );
 
     const trimmed = response.trim();
+    if (!isReadableText(trimmed) || !/\bOK\b/i.test(trimmed)) {
+      return {
+        success: false,
+        message: '大模型 API 返回异常内容',
+        detail: `接口可访问，但未按要求返回 OK，可能是 Base URL、模型名或网关编码异常。\nLLM 响应: "${trimmed.slice(0, 200)}"${trimmed.length > 200 ? '...' : ''}`,
+      };
+    }
     return {
       success: true,
       message: `✅ LLM API 连接成功！`,

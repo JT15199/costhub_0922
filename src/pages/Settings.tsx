@@ -13,7 +13,7 @@ import { testSearchConnection, testLLMConnection, BUILTIN_SKILLS, loadSkillConfi
 import type { SkillTemplate } from '../trendService';
 import {
   getApiProviders, saveApiProvider, deleteApiProvider, setActiveProvider,
-  PRESET_PROVIDERS, updateProviderPriorities,
+  PRESET_PROVIDERS, updateProviderPriorities, ensurePresetProviders,
   getAllChecklistWithLogs, updateChecklistActive, deleteAnalysisChecklistItem,
 } from '../db';
 import { encryptText } from '../apiConfig';
@@ -108,6 +108,7 @@ export default function Settings(_props: any) {
   useEffect(() => {
     (async () => {
       setLoading(true);
+      await ensurePresetProviders();
       await loadProviders();
       await loadMemoryItems();
       setLoading(false);
@@ -193,7 +194,7 @@ export default function Settings(_props: any) {
   // 从预置模板添加
   const handleAddFromPreset = () => {
     if (!selectedPreset) { message.warning('请先选择一个供应商模板'); return; }
-    const preset = PRESET_PROVIDERS.find(p => p.provider_name === selectedPreset);
+    const preset = PRESET_PROVIDERS.find(p => p.provider_name === selectedPreset) as any;
     if (!preset) { message.warning('未找到该模板'); return; }
     const alreadyAdded = providers.some(
       (p: any) => p.provider_name === preset.provider_name && p.provider_type === preset.provider_type
@@ -219,7 +220,6 @@ export default function Settings(_props: any) {
     setTestingSearch(true);
     const result = await testSearchConnection();
     setSearchTestResult(result);
-    if (result.success) { message.success('搜索 API 测试通过！'); } else { message.error(`搜索测试失败: ${result.detail || result.message}`); }
     setTestingSearch(false);
   };
 
@@ -228,7 +228,6 @@ export default function Settings(_props: any) {
     setLLMTestResult(null);
     const result = await testLLMConnection();
     setLLMTestResult(result);
-    if (result.success) { message.success('LLM API 测试通过！'); } else { message.error(`LLM测试失败: ${result.detail || result.message}`); }
     setTestingLLM(false);
   };
 
@@ -1164,7 +1163,7 @@ export default function Settings(_props: any) {
             Logo 自定义
           </h2>
           <p style={{ margin: '4px 0 0 34px', color: '#6b7280', fontSize: 13 }}>
-            上传自定义Logo，支持PNG、SVG等格式
+            上传侧边栏 Logo，支持 PNG、SVG 等格式（不会修改 Windows exe 文件图标）
           </p>
         </div>
 

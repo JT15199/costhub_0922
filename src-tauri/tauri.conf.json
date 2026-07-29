@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "显示器成本管理",
-  "version": "1.0.0",
+  "productName": "CostHub",
+  "version": "2.3.14",
   "identifier": "com.monitor.cost.manager",
   "build": {
     "frontendDist": "../dist",
@@ -11,7 +11,7 @@
   "app": {
     "windows": [
       {
-        "title": "显示器成本管理系统",
+        "title": "CostHub - 成本管理平台",
         "width": 1400,
         "height": 860,
         "minWidth": 1100,

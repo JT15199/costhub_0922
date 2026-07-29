@@ -22,12 +22,13 @@ import {
   saveTrendItem, saveTrendSnapshot, getTrendSnapshots,
   getTrendConversations,
   saveTrendSource, clearTrendSources,
+  getTrendSources,
   saveRollupContribution, getRollupContributions, saveRollupFeedback, getAllRollupFeedback,
   getTrendInsightDimensions, saveTrendInsightDimensions, saveTrendKeyEvent,
   getParts,
 } from '../db';
 import { hasLLMConfig } from '../apiConfig';
-import { agentSearchLoop, askLLM, createStructuredInsight, BUILTIN_SKILLS } from '../trendService';
+import { agentSearchLoop, askLLM, createStructuredInsight, BUILTIN_SKILLS, extractLLMJson } from '../trendService';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getCategoryColor } from '../constants';
@@ -47,6 +48,38 @@ const ROLLUP_SKILL = `# 层级趋势汇总（Rollup）Skill
 ## 输出 JSON 格式
 {"trend_direction":"上涨|下降|震荡|信号不明确","confidence_level":"高|中|低","summary":"综合叙述判断依据，需明确说明基于N个子节点的综合研判，列出各子节点贡献"}
 `;
+
+function parseDecompositionItems(response: string): any[] {
+  const parsed = extractLLMJson(response);
+  const items = Array.isArray(parsed)
+    ? parsed
+    : (Array.isArray(parsed?.components) ? parsed.components
+      : Array.isArray(parsed?.children) ? parsed.children
+        : Array.isArray(parsed?.items) ? parsed.items
+          : Array.isArray(parsed?.data) ? parsed.data
+            : null);
+
+  if (!items) throw new Error('未识别到子组件数组');
+
+  const normalized = items
+    .map((item: any) => {
+      const name = String(item?.component_name || item?.name || item?.title || '').trim();
+      const ratioRaw = item?.cost_ratio_estimate ?? item?.cost_ratio ?? item?.ratio ?? null;
+      const ratio = ratioRaw === null || ratioRaw === '' || Number.isNaN(Number(ratioRaw)) ? null : Number(ratioRaw);
+      const nodeType = item?.node_type === 'terminal' ? 'terminal' : 'structural';
+      return { component_name: name, cost_ratio_estimate: ratio, node_type: nodeType };
+    })
+    .filter((item: any) => item.component_name);
+
+  if (normalized.length === 0) throw new Error('子组件缺少 component_name');
+  return normalized;
+}
+
+function openExternal(url: string) {
+  if (!url) return;
+  const win = window.open(url, '_blank', 'noopener,noreferrer');
+  if (!win) window.location.href = url;
+}
 
 const TREND_COLORS: Record<string, string> = { '上涨': '#EF4444', '下降': '#10B981', '震荡': '#F59E0B', '信号不明确': '#94A3B8' };
 const TREND_ICONS: Record<string, string> = { '上涨': '🔺', '下降': '🔻', '震荡': '▬', '信号不明确': '？' };
@@ -139,6 +172,7 @@ export default function Decomposition(_props: any) {
   const [convAsk, setConvAsk] = useState('');
   const [convLoading, setConvLoading] = useState(false);
   const [conversations, setConversations] = useState<any[]>([]);
+  const [trendSources, setTrendSources] = useState<any[]>([]);
   const [insightLoading, setInsightLoading] = useState(false);
   const [rollupLoading, setRollupLoading] = useState(false);
   const [insightDimensions, setInsightDimensions] = useState<any[]>([]);
@@ -412,6 +446,7 @@ export default function Decomposition(_props: any) {
     setSelectedId(node.id);
     setHistory(await getDecompositionHistory(node.id));
     setInsightDimensions([]);
+    setTrendSources([]);
     setAvailableHistoryTimes([]);
     setSelectedHistoryTime(null);
 
@@ -419,6 +454,7 @@ export default function Decomposition(_props: any) {
       const snaps = await getTrendSnapshots(full.trend_item_id);
       setSnapshots(snaps);
       setConversations(await getTrendConversations(full.trend_item_id));
+      setTrendSources(await getTrendSources(full.trend_item_id));
 
       // 收集所有历史洞察时间（去重）
       const directSnaps = snaps.filter((s: any) => s.source_type !== 'aggregated');
@@ -438,7 +474,7 @@ export default function Decomposition(_props: any) {
         setRollupContributions(contribs);
         setRollupResult(lastAgg[lastAgg.length - 1]);
       } else { setRollupContributions([]); setRollupResult(null); }
-    } else { setSnapshots([]); setConversations([]); setRollupContributions([]); setRollupResult(null); }
+    } else { setSnapshots([]); setConversations([]); setTrendSources([]); setRollupContributions([]); setRollupResult(null); }
   }, [nodes, trendItems]);
 
   // React Flow 点击事件
@@ -635,7 +671,7 @@ export default function Decomposition(_props: any) {
     const snap = snapshots.filter(s => s.source_type === 'aggregated').pop();
     if (!snap || !selectedNode) return;
     await saveRollupFeedback({
-      component_id: selectedId, ai_direction: snap.direction, ai_summary: snap.summary, ai_confidence_level: snap.confidence_level,
+      component_id: selectedId, component_name: selectedNode.component_name, ai_direction: snap.direction, ai_summary: snap.summary, ai_confidence_level: snap.confidence_level,
       user_corrected_direction: feedbackData.direction, user_corrected_confidence_level: feedbackData.confidence,
       user_corrected_summary: feedbackData.summary, correction_reason: feedbackData.reason,
     });
@@ -660,11 +696,7 @@ export default function Decomposition(_props: any) {
 规则：3-8个，成本占比≤100。terminal表示末端物料，structural表示需继续拆解的。`,
         `请分解：${aiDraftName}`
       );
-      let jsonStr = response.trim();
-      if (jsonStr.startsWith('```')) jsonStr = jsonStr.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '');
-      const parsed = JSON.parse(jsonStr);
-      if (!Array.isArray(parsed)) throw new Error('非数组格式');
-      setAiDraftResult(parsed.map((item: any) => ({ ...item, node_type: item.node_type || 'structural' })));
+      setAiDraftResult(parseDecompositionItems(response));
     } catch (e: any) { message.error(`AI 起草失败：${e.message}`); }
     setAiDraftLoading(false);
   };
@@ -814,6 +846,7 @@ export default function Decomposition(_props: any) {
     setBatchDecomposeLoading(true);
     setBatchProgress({ done: 0, total: selected.length });
     const allResults: { parentId: number; parentName: string; items: any[] }[] = [];
+    const failures: string[] = [];
     let done = 0;
     for (const node of selected) {
       try {
@@ -822,22 +855,16 @@ export default function Decomposition(_props: any) {
 规则：3-8个子项，cost_ratio_estimate之和应接近100；terminal表示不可再拆的终端物料，structural表示可继续拆解的结构节点。`,
           `分解：${node.component_name}`
         );
-        let jsonStr = response.trim();
-        if (jsonStr.startsWith('```')) jsonStr = jsonStr.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '');
-        const parsed = JSON.parse(jsonStr);
-        if (Array.isArray(parsed)) {
-          allResults.push({
-            parentId: node.id,
-            parentName: node.component_name,
-            items: parsed.map((item: any) => ({
-              component_name: item.component_name,
-              cost_ratio_estimate: item.cost_ratio_estimate ?? null,
-              node_type: item.node_type || 'structural',
-            })),
-          });
-        }
+        allResults.push({
+          parentId: node.id,
+          parentName: node.component_name,
+          items: parseDecompositionItems(response),
+        });
         done++;
-      } catch { done++; }
+      } catch (e: any) {
+        failures.push(`「${node.component_name}」：${e.message || '解析失败'}`);
+        done++;
+      }
       setBatchProgress({ done, total: selected.length });
     }
     setBatchProgress({ done: 0, total: 0 });
@@ -858,6 +885,15 @@ export default function Decomposition(_props: any) {
       setCostRatioWarning(warning || null);
       setBatchDecomposeResults(allResults);
       setBatchDecomposeOpen(true); // 重新打开弹窗预览
+    }
+    if (failures.length > 0) {
+      message.warning(`部分拆解失败：${failures.slice(0, 3).join('；')}${failures.length > 3 ? `；另有 ${failures.length - 3} 项` : ''}`);
+    }
+    if (allResults.length === 0 && failures.length > 0) {
+      Modal.error({
+        title: '批量拆解失败',
+        content: <div style={{ whiteSpace: 'pre-wrap' }}>{failures.join('\n')}</div>,
+      });
     }
   };
 
@@ -1574,15 +1610,9 @@ export default function Decomposition(_props: any) {
                                   <div style={{ marginTop: 4 }}>
                                     <a
                                       href="#"
-                                      onClick={async (e) => {
+                                      onClick={(e) => {
                                         e.preventDefault();
-                                        try {
-                                          const { invoke } = await import('@tauri-apps/api/core');
-                                          await invoke('open_url', { url: dim.source_url });
-                                        } catch (err) {
-                                          console.error('打开链接失败:', err);
-                                          message.error('无法打开链接');
-                                        }
+                                        openExternal(dim.source_url);
                                       }}
                                       style={{ fontSize: 11, color: '#3B82F6', cursor: 'pointer' }}
                                     >
@@ -1637,15 +1667,9 @@ export default function Decomposition(_props: any) {
                                             <div style={{ marginTop: 4 }}>
                                               <a
                                                 href="#"
-                                                onClick={async (e) => {
+                                                onClick={(e) => {
                                                   e.preventDefault();
-                                                  try {
-                                                    const { invoke } = await import('@tauri-apps/api/core');
-                                                    await invoke('open_url', { url: dim.source_url });
-                                                  } catch (err) {
-                                                    console.error('打开链接失败:', err);
-                                                    message.error('无法打开链接');
-                                                  }
+                                                  openExternal(dim.source_url);
                                                 }}
                                                 style={{ fontSize: 11, color: '#3B82F6', cursor: 'pointer' }}
                                               >
@@ -1676,6 +1700,42 @@ export default function Decomposition(_props: any) {
                   <Descriptions.Item label="洞察"><Tag color={selectedNode.insight_status === 'queried' ? 'green' : 'gold'}>{selectedNode.insight_status === 'queried' ? '✅已查询' : '⏳待洞察'}</Tag></Descriptions.Item>
                   <Descriptions.Item label="更新">{selectedNode.updated_at || '-'}</Descriptions.Item>
                 </Descriptions>
+
+                {trendSources.length > 0 && (
+                  <div style={{ marginTop: 12, padding: 12, border: '1px solid #E2E8F0', borderRadius: 8, background: '#F8FAFC' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <h4 style={{ margin: 0 }}>依据来源</h4>
+                      <Tag color="blue" style={{ margin: 0 }}>{trendSources.length} 条</Tag>
+                    </div>
+                    <List
+                      size="small"
+                      dataSource={trendSources.slice(0, 8)}
+                      renderItem={(source: any, index) => (
+                        <List.Item style={{ alignItems: 'flex-start', padding: '8px 0' }}>
+                          <div style={{ width: '100%' }}>
+                            <a
+                              href={source.source_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                openExternal(source.source_url);
+                              }}
+                              style={{ fontSize: 12, fontWeight: 600 }}
+                            >
+                              {index + 1}. {source.source_title || source.source_url}
+                            </a>
+                            {source.excerpt && (
+                              <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.5, color: '#64748B' }}>
+                                {source.excerpt}
+                              </div>
+                            )}
+                          </div>
+                        </List.Item>
+                      )}
+                    />
+                  </div>
+                )}
 
                 {history.length > 0 && (
                   <div style={{ marginTop: 12 }}><h4>修改历史</h4>

@@ -14,7 +14,7 @@ export interface ProjectBOM {
   quantity: number; remark: string; part_name?: string; part_model?: string;
   part_cost?: number; main_category?: string; sub_category?: string; category?: string;
 }
-export interface Module { id?: number; project_id: number; name: string; description: string; created_at?: string; }
+export interface Module { id?: number; project_id: number; name: string; module_category?: string; description: string; created_at?: string; }
 export interface ModuleItem {
   id?: number; module_id: number; part_id?: number; part_name: string;
   part_model: string; main_category: string; sub_category: string;
@@ -39,6 +39,11 @@ export interface CompetitorPart {
 export interface CostReview {
   id?: number; project_id: number; stage: string; reviewed_cost: number;
   reviewer: string; reviewed_at?: string; remark: string;
+}
+export interface ProjectCostSnapshot {
+  id?: number; project_id: number; snapshot_type: string; change_reason: string;
+  bom_cost: number; total_cost: number; platform_fee_rate: number; profit_rate: number;
+  module_count: number; item_count: number; created_at?: string;
 }
 export interface Measure {
   id?: number; project_id: number; main_category: string; measure: string;

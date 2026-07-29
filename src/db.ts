@@ -1,8 +1,10 @@
 import Database from '@tauri-apps/plugin-sql';
 import { invoke } from '@tauri-apps/api/core';
+import { PRESET_PROVIDERS as PRESET_PROVIDER_TEMPLATES } from './constants';
 
 let db: Database | null = null;
 let dbUrl: string | null = null;
+let schemaReady = false;
 
 async function getDbUrl(): Promise<string> {
   if (!dbUrl) { dbUrl = await invoke<string>('get_db_path'); }
@@ -10,7 +12,61 @@ async function getDbUrl(): Promise<string> {
 }
 async function getDb(): Promise<Database> {
   if (!db) { db = await Database.load(await getDbUrl()); }
+  if (!schemaReady) {
+    await ensureSchema(db);
+    schemaReady = true;
+  }
   return db;
+}
+
+async function ignoreSchemaError(task: Promise<any>) {
+  try { await task; } catch { }
+}
+
+async function ensureSchema(d: Database) {
+  await ignoreSchemaError(d.execute('ALTER TABLE parts ADD COLUMN trend_enabled INTEGER DEFAULT 0'));
+  await ignoreSchemaError(d.execute("ALTER TABLE parts ADD COLUMN trend_query_category TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE parts ADD COLUMN trend_category_type TEXT DEFAULT '直接查询'"));
+
+  await ignoreSchemaError(d.execute('ALTER TABLE part_suppliers ADD COLUMN price REAL DEFAULT 0'));
+  await ignoreSchemaError(d.execute('ALTER TABLE part_suppliers ADD COLUMN share_ratio REAL DEFAULT 0'));
+  await ignoreSchemaError(d.execute('ALTER TABLE part_suppliers ADD COLUMN is_active INTEGER DEFAULT 1'));
+
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_snapshots ADD COLUMN source_type TEXT DEFAULT 'direct_query'"));
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_snapshots ADD COLUMN confidence_level TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE modules ADD COLUMN module_category TEXT DEFAULT '未分类'"));
+
+  await ignoreSchemaError(d.execute("ALTER TABLE rollup_feedback ADD COLUMN component_name TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE rollup_feedback ADD COLUMN correction_reason TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE rollup_feedback ADD COLUMN user_corrected_summary TEXT DEFAULT ''"));
+
+  await ignoreSchemaError(d.execute("ALTER TABLE decomposition_tree ADD COLUMN component_name TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute('ALTER TABLE decomposition_tree ADD COLUMN cost_ratio_estimate REAL DEFAULT NULL'));
+  await ignoreSchemaError(d.execute("ALTER TABLE decomposition_tree ADD COLUMN source_type TEXT DEFAULT 'user_confirmed'"));
+  await ignoreSchemaError(d.execute("ALTER TABLE decomposition_tree ADD COLUMN insight_status TEXT DEFAULT 'pending'"));
+  await ignoreSchemaError(d.execute('ALTER TABLE decomposition_tree ADD COLUMN trend_item_id INTEGER DEFAULT NULL'));
+  await ignoreSchemaError(d.execute('ALTER TABLE projects ADD COLUMN sort_order INTEGER DEFAULT 0'));
+  await ignoreSchemaError(d.execute('ALTER TABLE projects ADD COLUMN is_deleted INTEGER DEFAULT 0'));
+  await ignoreSchemaError(d.execute('ALTER TABLE competitors ADD COLUMN sort_order INTEGER DEFAULT 0'));
+  await ignoreSchemaError(d.execute('ALTER TABLE project_boms ADD COLUMN cost REAL DEFAULT 0'));
+  await ignoreSchemaError(d.execute('ALTER TABLE project_boms ADD COLUMN is_reference INTEGER DEFAULT 0'));
+  await ignoreSchemaError(d.execute("ALTER TABLE project_boms ADD COLUMN reference_remark TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute('ALTER TABLE project_boms ADD COLUMN is_deleted INTEGER DEFAULT 0'));
+  await ignoreSchemaError(d.execute(`
+    CREATE TABLE IF NOT EXISTS project_cost_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      snapshot_type TEXT DEFAULT 'bom_change',
+      change_reason TEXT DEFAULT '',
+      bom_cost REAL DEFAULT 0,
+      total_cost REAL DEFAULT 0,
+      platform_fee_rate REAL DEFAULT 0,
+      profit_rate REAL DEFAULT 0,
+      module_count INTEGER DEFAULT 0,
+      item_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    )
+  `));
 }
 
 // ==================== Parts ====================
@@ -27,15 +83,23 @@ export async function getPart(id: number) {
   const r = await (await getDb()).select<any[]>('SELECT * FROM parts WHERE id = ?', [id]);
   return r[0] || null;
 }
-export async function savePart(data: any) {
+export async function savePart(data: any, autoSnapshot = true) {
   const d = await getDb();
   if (data.id) {
     const old = await d.select<{ cost: number }[]>('SELECT cost FROM parts WHERE id = ?', [data.id]);
     if (old[0] && Math.abs(old[0].cost - (data.cost || 0)) > 0.0001) {
       await d.execute('INSERT INTO part_price_history (part_id, old_cost, new_cost) VALUES (?, ?, ?)', [data.id, old[0].cost, data.cost || 0]);
     }
+    const affectedProjects = autoSnapshot
+      ? await d.select<{ project_id: number }[]>('SELECT DISTINCT project_id FROM project_boms WHERE part_id = ? AND COALESCE(is_deleted, 0) = 0', [data.id])
+      : [];
     await d.execute(`UPDATE parts SET main_category=?, sub_category=?, category=?, name=?, model=?, cost=?, specs=?, projects=?, remark=?, updated_at=datetime('now','localtime') WHERE id=?`,
       [data.main_category || '硬件类', data.sub_category || '', data.category || '', data.name, data.model, data.cost || 0, data.specs || '', data.projects || '', data.remark || '', data.id]);
+    if (autoSnapshot && affectedProjects.length > 0) {
+      for (const p of affectedProjects) {
+        await recordProjectCostSnapshot(p.project_id, 'part_price_changed', `器件「${data.name || ''}」价格/信息变更`);
+      }
+    }
     return data.id;
   } else {
     const r = await d.execute(`INSERT INTO parts (main_category, sub_category, category, name, model, cost, specs, projects, remark) VALUES (?,?,?,?,?,?,?,?,?)`,
@@ -62,7 +126,7 @@ export async function getProjects(status = '', projectType = '') {
   const d = await getDb(); let q = 'SELECT * FROM projects WHERE 1=1'; const p: any[] = [];
   if (status) { q += ' AND status = ?'; p.push(status); }
   if (projectType) { q += ' AND project_type = ?'; p.push(projectType); }
-  q += ' ORDER BY created_at DESC';
+  q += ' AND COALESCE(is_deleted, 0) = 0 ORDER BY COALESCE(sort_order, 0), created_at DESC';
   return d.select<any[]>(q, p);
 }
 export async function getProject(id: number) { const r = await (await getDb()).select<any[]>('SELECT * FROM projects WHERE id = ?', [id]); return r[0] || null; }
@@ -78,7 +142,7 @@ export async function saveProject(data: any) {
     return r.lastInsertId;
   }
 }
-export async function deleteProject(id: number) { await (await getDb()).execute('DELETE FROM projects WHERE id = ?', [id]); }
+export async function deleteProject(id: number) { await (await getDb()).execute('UPDATE projects SET is_deleted = 1 WHERE id = ?', [id]); }
 export async function copyProject(id: number, newCode: string, newName: string) {
   const d = await getDb(); const src = await d.select<any[]>('SELECT * FROM projects WHERE id = ?', [id]);
   if (!src[0]) return 0;
@@ -88,7 +152,7 @@ export async function copyProject(id: number, newCode: string, newName: string) 
   for (const b of boms) { await d.execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark) VALUES (?,?,?,?,?)', [r.lastInsertId, b.part_id, b.module_name, b.quantity, b.remark]); }
   const mods = await d.select<any[]>('SELECT * FROM modules WHERE project_id = ?', [id]);
   for (const m of mods) {
-    const mr = await d.execute('INSERT INTO modules (project_id, name, description) VALUES (?,?,?)', [r.lastInsertId, m.name, m.description]);
+    const mr = await d.execute('INSERT INTO modules (project_id, name, module_category, description) VALUES (?,?,?,?)', [r.lastInsertId, m.name, m.module_category || '未分类', m.description]);
     const items = await d.select<any[]>('SELECT * FROM module_items WHERE module_id = ?', [m.id]);
     for (const mi of items) { await d.execute('INSERT INTO module_items (module_id, part_id, part_name, part_model, main_category, sub_category, cost, quantity, remark) VALUES (?,?,?,?,?,?,?,?,?)', [mr.lastInsertId, mi.part_id, mi.part_name, mi.part_model, mi.main_category, mi.sub_category, mi.cost, mi.quantity, mi.remark]); }
   }
@@ -97,26 +161,75 @@ export async function copyProject(id: number, newCode: string, newName: string) 
 
 // ==================== Project BOMs ====================
 export async function getProjectBOMs(projectId: number) {
-  return (await getDb()).select<any[]>(`SELECT pb.*, p.name as part_name, p.model as part_model, p.cost as part_cost, p.main_category, p.sub_category, p.category FROM project_boms pb JOIN parts p ON pb.part_id = p.id WHERE pb.project_id = ? ORDER BY pb.module_name, p.main_category, p.sub_category, p.name`, [projectId]);
+  return (await getDb()).select<any[]>(`SELECT pb.*, p.name as part_name, p.model as part_model, p.cost as part_cost, p.main_category, p.sub_category, p.category FROM project_boms pb JOIN parts p ON pb.part_id = p.id WHERE pb.project_id = ? AND COALESCE(pb.is_deleted, 0) = 0 ORDER BY pb.module_name, p.main_category, p.sub_category, p.name`, [projectId]);
 }
-export async function addBOMItem(projectId: number, partId: number, quantity = 1, moduleName = '', remark = '', refProjectId = 0) {
+export async function recordProjectCostSnapshot(projectId: number, snapshotType = 'bom_change', changeReason = '') {
+  const d = await getDb();
+  const project = await d.select<any[]>('SELECT * FROM projects WHERE id = ?', [projectId]).then(rows => rows[0]);
+  if (!project) return 0;
+  const rows = await d.select<any[]>(
+    `SELECT pb.module_name, pb.quantity, p.cost
+     FROM project_boms pb
+     JOIN parts p ON pb.part_id = p.id
+     WHERE pb.project_id = ? AND COALESCE(pb.is_deleted, 0) = 0`,
+    [projectId]
+  );
+  const bomCost = rows.reduce((sum, row) => sum + (Number(row.cost) || 0) * (Number(row.quantity) || 0), 0);
+  const totalCost = bomCost * (1 + ((Number(project.platform_fee_rate) || 0) + (Number(project.profit_rate) || 0)) / 100);
+  const modules = new Set(rows.map(row => row.module_name || '未归类'));
+  const result = await d.execute(
+    `INSERT INTO project_cost_snapshots
+      (project_id, snapshot_type, change_reason, bom_cost, total_cost, platform_fee_rate, profit_rate, module_count, item_count)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    [
+      projectId,
+      snapshotType,
+      changeReason,
+      Math.round(bomCost * 10000) / 10000,
+      Math.round(totalCost * 10000) / 10000,
+      Number(project.platform_fee_rate) || 0,
+      Number(project.profit_rate) || 0,
+      modules.size,
+      rows.length,
+    ]
+  );
+  return result.lastInsertId;
+}
+export async function getProjectCostSnapshots(projectId: number) {
+  return (await getDb()).select<any[]>('SELECT * FROM project_cost_snapshots WHERE project_id = ? ORDER BY created_at DESC, id DESC', [projectId]);
+}
+export async function addBOMItem(projectId: number, partId: number, quantity = 1, moduleName = '', remark = '', refProjectId = 0, autoSnapshot = true) {
   await (await getDb()).execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, ref_project_id) VALUES (?,?,?,?,?,?)', [projectId, partId, moduleName, quantity, remark, refProjectId]);
+  if (autoSnapshot) await recordProjectCostSnapshot(projectId, 'part_added', `新增器件到${moduleName || '未归类'}`);
 }
-export async function updateBOMItem(id: number, quantity: number, moduleName: string, remark: string) {
-  await (await getDb()).execute('UPDATE project_boms SET quantity=?, module_name=?, remark=? WHERE id=?', [quantity, moduleName, remark, id]);
+export async function updateBOMItem(id: number, quantity: number, moduleName: string, remark: string, autoSnapshot = true) {
+  const d = await getDb();
+  const rows = await d.select<any[]>('SELECT project_id FROM project_boms WHERE id = ?', [id]);
+  await d.execute('UPDATE project_boms SET quantity=?, module_name=?, remark=? WHERE id=?', [quantity, moduleName, remark, id]);
+  if (autoSnapshot && rows[0]?.project_id) await recordProjectCostSnapshot(rows[0].project_id, 'part_changed', `调整BOM项：${moduleName || '未归类'}`);
 }
 export async function updateBOMRefProject(moduleName: string, projectId: number, refProjectId: number) {
   await (await getDb()).execute('UPDATE project_boms SET ref_project_id=? WHERE project_id=? AND module_name=?', [refProjectId, projectId, moduleName]);
 }
-export async function deleteBOMItem(id: number) { await (await getDb()).execute('DELETE FROM project_boms WHERE id = ?', [id]); }
+export async function deleteBOMItem(id: number, autoSnapshot = true) {
+  const d = await getDb();
+  const rows = await d.select<any[]>('SELECT project_id, module_name FROM project_boms WHERE id = ?', [id]);
+  await d.execute('UPDATE project_boms SET is_deleted = 1 WHERE id = ?', [id]);
+  if (autoSnapshot && rows[0]?.project_id) await recordProjectCostSnapshot(rows[0].project_id, 'part_deleted', `移除器件：${rows[0].module_name || '未归类'}`);
+}
 
 // ==================== Modules ====================
-export async function getModules(projectId: number) { return (await getDb()).select<any[]>('SELECT * FROM modules WHERE project_id = ? ORDER BY name', [projectId]); }
+export async function getModules(projectId: number) { return (await getDb()).select<any[]>('SELECT * FROM modules WHERE project_id = ? ORDER BY module_category, name', [projectId]); }
 export async function getModuleItems(moduleId: number) { return (await getDb()).select<any[]>('SELECT * FROM module_items WHERE module_id = ? ORDER BY main_category, sub_category, part_name', [moduleId]); }
 export async function saveModule(data: any) {
   const d = await getDb();
-  if (data.id) { await d.execute('UPDATE modules SET name=?, description=? WHERE id=?', [data.name, data.description || '', data.id]); return data.id; }
-  else { const r = await d.execute('INSERT INTO modules (project_id, name, description) VALUES (?,?,?)', [data.project_id, data.name, data.description || '']); return r.lastInsertId; }
+  if (data.id) { await d.execute('UPDATE modules SET name=?, module_category=?, description=? WHERE id=?', [data.name, data.module_category || '未分类', data.description || '', data.id]); return data.id; }
+  else { const r = await d.execute('INSERT INTO modules (project_id, name, module_category, description) VALUES (?,?,?,?)', [data.project_id, data.name, data.module_category || '未分类', data.description || '']); return r.lastInsertId; }
+}
+export async function getModuleCategories() {
+  return (await getDb()).select<{ module_category: string }[]>(
+    "SELECT DISTINCT COALESCE(NULLIF(module_category, ''), '未分类') AS module_category FROM modules ORDER BY module_category"
+  ).then(rows => rows.map(r => r.module_category));
 }
 export async function deleteModule(id: number) { await (await getDb()).execute('DELETE FROM modules WHERE id = ?', [id]); }
 export async function saveModuleItem(data: any) {
@@ -141,7 +254,7 @@ export async function getProjectModuleSummary(projectId: number) {
 }
 
 // ==================== Competitors ====================
-export async function getCompetitors() { return (await getDb()).select<any[]>('SELECT * FROM competitors ORDER BY created_at DESC'); }
+export async function getCompetitors() { return (await getDb()).select<any[]>('SELECT * FROM competitors ORDER BY COALESCE(sort_order, 0), created_at DESC'); }
 export async function getCompetitor(id: number) { const r = await (await getDb()).select<any[]>('SELECT * FROM competitors WHERE id = ?', [id]); return r[0] || null; }
 export async function saveCompetitor(data: any) {
   const d = await getDb();
@@ -339,9 +452,10 @@ export async function getLatestTrendSnapshot(trendItemId: number) {
 
 export async function saveTrendSnapshot(data: any) {
   const d = await getDb();
+  const confidenceLevel = data.confidence_level ?? data.confidence ?? '';
   const r = await d.execute(
-    'INSERT INTO trend_snapshots (trend_item_id, query_time, direction, confidence, summary, suggested_action, skill_used, magnitude_min, magnitude_max, magnitude_reference) VALUES (?,?,?,?,?,?,?,?,?,?)',
-    [data.trend_item_id, data.query_time, data.direction, data.confidence, data.summary, data.suggested_action, data.skill_used, data.magnitude_min, data.magnitude_max, data.magnitude_reference]
+    'INSERT INTO trend_snapshots (trend_item_id, query_time, source_type, direction, confidence, confidence_level, summary, suggested_action, skill_used, magnitude_min, magnitude_max, magnitude_reference) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+    [data.trend_item_id, data.query_time, data.source_type || 'direct_query', data.direction, confidenceLevel, confidenceLevel, data.summary, data.suggested_action, data.skill_used, data.magnitude_min, data.magnitude_max, data.magnitude_reference]
   );
   return r.lastInsertId;
 }
@@ -390,34 +504,61 @@ export async function removeMaterialCategory(categoryName: string) {
   await (await getDb()).execute('DELETE FROM material_categories WHERE category_name = ?', [categoryName]);
 }
 
-// ==================== API Providers ====================
-export const PRESET_PROVIDERS = [
-  { provider_name: 'Serper', provider_type: 'search', api_key: '', priority: 1, enabled: true, monthly_quota_note: '免费2500次/月', base_url: 'https://google.serper.dev', model_name: '', registration_url: 'https://serper.dev' },
-  { provider_name: 'Tavily', provider_type: 'search', api_key: '', priority: 2, enabled: false, monthly_quota_note: '免费1000次/月', base_url: 'https://api.tavily.com', model_name: '', registration_url: 'https://tavily.com' },
-  { provider_name: 'Bing', provider_type: 'search', api_key: '', priority: 3, enabled: false, monthly_quota_note: '按量计费', base_url: 'https://api.bing.microsoft.com', model_name: '', registration_url: 'https://www.microsoft.com/en-us/bing/apis/bing-web-search-api' },
-  { provider_name: 'OpenAI', provider_type: 'llm', api_key: '', priority: 1, enabled: true, monthly_quota_note: '按量计费', base_url: 'https://api.openai.com/v1', model_name: 'gpt-4o-mini', registration_url: 'https://platform.openai.com' },
-  { provider_name: 'Anthropic', provider_type: 'llm', api_key: '', priority: 2, enabled: false, monthly_quota_note: '按量计费', base_url: 'https://api.anthropic.com', model_name: 'claude-3-haiku-20240307', registration_url: 'https://www.anthropic.com' },
-];
+// ==================== API Providers (compat exports used by Settings) ====================
+export const PRESET_PROVIDERS = PRESET_PROVIDER_TEMPLATES;
+
+export async function ensurePresetProviders() {
+  const d = await getDb();
+  try {
+    await d.execute(`
+      DELETE FROM api_providers
+      WHERE is_preset = 1
+        AND IFNULL(api_key, '') = ''
+        AND EXISTS (
+          SELECT 1 FROM api_providers q
+          WHERE q.provider_type = api_providers.provider_type
+            AND q.provider_name = api_providers.provider_name
+            AND q.id <> api_providers.id
+            AND (IFNULL(q.api_key, '') <> '' OR q.id < api_providers.id)
+        )
+    `);
+  } catch {}
+  let priority = 20;
+  for (const preset of PRESET_PROVIDER_TEMPLATES) {
+    await d.execute(
+      `INSERT INTO api_providers
+        (provider_type, provider_name, api_key, base_url, model_name, is_active, priority, is_preset, monthly_quota_note, registration_url)
+       SELECT ?,?,?,?,?,0,?,1,?,?
+       WHERE NOT EXISTS (
+         SELECT 1 FROM api_providers
+         WHERE provider_type = ? AND provider_name = ?
+       )`,
+      [
+        preset.provider_type, preset.provider_name, '', preset.base_url || '', (preset as any).model_name || '', priority++, preset.monthly_quota_note || '', preset.registration_url || '',
+        preset.provider_type, preset.provider_name,
+      ]
+    );
+  }
+}
 
 export async function getApiProviders() {
-  return (await getDb()).select<any[]>('SELECT * FROM api_providers ORDER BY provider_type, priority');
+  return getAllApiProviders();
 }
 
 export async function saveApiProvider(data: any) {
-  const d = await getDb();
+  const normalized = {
+    ...data,
+    is_active: data.is_active ?? data.enabled ?? 0,
+    is_preset: data.is_preset ?? 0,
+    base_url: data.base_url || '',
+    model_name: data.model_name || '',
+    monthly_quota_note: data.monthly_quota_note || '',
+    registration_url: data.registration_url || '',
+  };
   if (data.id) {
-    await d.execute(
-      'UPDATE api_providers SET provider_name=?, provider_type=?, api_key=?, priority=?, enabled=? WHERE id=?',
-      [data.provider_name, data.provider_type, data.api_key, data.priority, data.enabled ? 1 : 0, data.id]
-    );
-    return data.id;
-  } else {
-    const r = await d.execute(
-      'INSERT INTO api_providers (provider_name, provider_type, api_key, priority, enabled) VALUES (?,?,?,?,?)',
-      [data.provider_name, data.provider_type, data.api_key, data.priority || 0, data.enabled ? 1 : 0]
-    );
-    return r.lastInsertId;
+    return updateApiProvider(normalized);
   }
+  return addApiProvider(normalized);
 }
 
 export async function deleteApiProvider(id: number) {
@@ -426,14 +567,17 @@ export async function deleteApiProvider(id: number) {
 
 export async function setActiveProvider(providerType: string, providerId: number) {
   const d = await getDb();
-  await d.execute('UPDATE api_providers SET enabled = 0 WHERE provider_type = ?', [providerType]);
-  await d.execute('UPDATE api_providers SET enabled = 1 WHERE id = ?', [providerId]);
+  await d.execute('UPDATE api_providers SET is_active = 0 WHERE provider_type = ?', [providerType]);
+  await d.execute('UPDATE api_providers SET is_active = 1 WHERE id = ?', [providerId]);
 }
 
 export async function updateProviderPriorities(providers: any[]) {
   const d = await getDb();
-  for (const p of providers) {
-    await d.execute('UPDATE api_providers SET priority = ? WHERE id = ?', [p.priority, p.id]);
+  for (let index = 0; index < providers.length; index++) {
+    const item = providers[index];
+    const id = typeof item === 'number' ? item : item.id;
+    const priority = typeof item === 'number' ? index + 1 : (item.priority ?? index + 1);
+    if (id != null) await d.execute('UPDATE api_providers SET priority = ? WHERE id = ?', [priority, id]);
   }
 }
 
@@ -470,23 +614,33 @@ export async function getDecompositionNode(id: number) {
 
 export async function saveDecompositionNode(data: any) {
   const d = await getDb();
+  const parentId = data.parent_id ?? null;
+  let rootPartId = data.root_part_id ?? null;
+  if (parentId && !rootPartId) {
+    const parent = await d.select<any[]>('SELECT root_part_id FROM decomposition_tree WHERE id = ?', [parentId]);
+    rootPartId = parent[0]?.root_part_id || parentId;
+  }
   if (data.id) {
     await d.execute(
-      'UPDATE decomposition_tree SET node_name=?, node_type=?, estimated_cost=?, remark=?, ai_insights=? WHERE id=?',
-      [data.node_name, data.node_type, data.estimated_cost, data.remark, data.ai_insights, data.id]
+      'UPDATE decomposition_tree SET root_part_id=?, parent_id=?, component_name=?, cost_ratio_estimate=?, source_type=?, node_type=?, insight_status=?, trend_item_id=?, remark=?, updated_at=datetime(\'now\',\'localtime\') WHERE id=?',
+      [rootPartId || data.id, parentId, data.component_name || data.node_name || '', data.cost_ratio_estimate ?? null, data.source_type || 'user_confirmed', data.node_type || 'structural', data.insight_status || 'pending', data.trend_item_id ?? null, data.remark || '', data.id]
     );
     return data.id;
   } else {
     const r = await d.execute(
-      'INSERT INTO decomposition_tree (root_part_id, parent_id, node_name, node_type, estimated_cost, remark, ai_insights, created_at) VALUES (?,?,?,?,?,?,?,datetime(\'now\',\'localtime\'))',
-      [data.root_part_id, data.parent_id, data.node_name, data.node_type, data.estimated_cost || 0, data.remark, data.ai_insights]
+      'INSERT INTO decomposition_tree (root_part_id, parent_id, component_name, cost_ratio_estimate, source_type, node_type, insight_status, trend_item_id, remark, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,datetime(\'now\',\'localtime\'),datetime(\'now\',\'localtime\'))',
+      [rootPartId, parentId, data.component_name || data.node_name || '', data.cost_ratio_estimate ?? null, data.source_type || 'user_confirmed', data.node_type || 'structural', data.insight_status || 'pending', data.trend_item_id ?? null, data.remark || '']
     );
+    if (!rootPartId) await d.execute('UPDATE decomposition_tree SET root_part_id = ? WHERE id = ?', [r.lastInsertId, r.lastInsertId]);
     return r.lastInsertId;
   }
 }
 
 export async function deleteDecompositionNode(id: number) {
-  await (await getDb()).execute('DELETE FROM decomposition_tree WHERE id = ?', [id]);
+  await (await getDb()).execute(
+    'WITH RECURSIVE descendants(id) AS (SELECT id FROM decomposition_tree WHERE id = ? UNION ALL SELECT dt.id FROM decomposition_tree dt JOIN descendants d ON dt.parent_id = d.id) DELETE FROM decomposition_tree WHERE id IN (SELECT id FROM descendants)',
+    [id]
+  );
 }
 
 export async function getDecompositionHistory(rootPartId: number) {
@@ -494,14 +648,14 @@ export async function getDecompositionHistory(rootPartId: number) {
 }
 
 export async function searchDecompositionNodes(query: string) {
-  return (await getDb()).select<any[]>('SELECT * FROM decomposition_tree WHERE node_name LIKE ? ORDER BY id', [`%${query}%`]);
+  return (await getDb()).select<any[]>('SELECT * FROM decomposition_tree WHERE component_name LIKE ? ORDER BY id', [`%${query}%`]);
 }
 
 export async function saveRollupContribution(data: any) {
   const d = await getDb();
   const r = await d.execute(
-    'INSERT INTO rollup_contributions (project_id, node_id, contribution_amount, contribution_type, remark) VALUES (?,?,?,?,?)',
-    [data.project_id, data.node_id, data.contribution_amount, data.contribution_type, data.remark]
+    'INSERT INTO rollup_contributions (parent_snapshot_id, child_component_id, cost_ratio_used, direction_used, created_at) VALUES (?,?,?,?,datetime(\'now\',\'localtime\'))',
+    [data.parent_snapshot_id, data.child_component_id, data.cost_ratio_used ?? null, data.direction_used || '']
   );
   return r.lastInsertId;
 }
@@ -509,8 +663,8 @@ export async function saveRollupContribution(data: any) {
 export async function saveRollupFeedback(data: any) {
   const d = await getDb();
   const r = await d.execute(
-    'INSERT INTO rollup_feedback (rollup_id, feedback_type, feedback_content, created_at) VALUES (?,?,?,datetime(\'now\',\'localtime\'))',
-    [data.rollup_id, data.feedback_type, data.feedback_content]
+    'INSERT INTO rollup_feedback (component_id, component_name, ai_direction, ai_summary, ai_confidence_level, user_corrected_direction, user_corrected_confidence_level, correction_reason, user_corrected_summary, created_at) VALUES (?,?,?,?,?,?,?,?,?,datetime(\'now\',\'localtime\'))',
+    [data.component_id, data.component_name || '', data.ai_direction || '', data.ai_summary || '', data.ai_confidence_level || '', data.user_corrected_direction || '', data.user_corrected_confidence_level || '', data.correction_reason || data.user_reason || '', data.user_corrected_summary || '']
   );
   return r.lastInsertId;
 }
@@ -519,12 +673,21 @@ export async function saveRollupFeedback(data: any) {
 export async function getAllChecklistWithLogs() {
   const d = await getDb();
   const items = await d.select<any[]>('SELECT * FROM analysis_checklist ORDER BY category, check_order');
-  const logs = await d.select<any[]>('SELECT * FROM checklist_logs ORDER BY checked_at DESC LIMIT 1000');
-  return { items, logs };
+  const logs = await d.select<any[]>('SELECT * FROM checklist_logs ORDER BY created_at DESC LIMIT 1000');
+  const logMap: Record<number, any[]> = {};
+  for (const log of logs) {
+    const id = log.checklist_id;
+    if (!logMap[id]) logMap[id] = [];
+    logMap[id].push(log);
+  }
+  return {
+    items: items.map((item: any) => ({ ...item, trigger_logs: logMap[item.id] || [] })),
+    logs,
+  };
 }
 
 export async function updateChecklistActive(id: number, active: boolean) {
-  await (await getDb()).execute('UPDATE analysis_checklist SET active = ? WHERE id = ?', [active ? 1 : 0, id]);
+  await (await getDb()).execute('UPDATE analysis_checklist SET is_active = ? WHERE id = ?', [active ? 1 : 0, id]);
 }
 
 export async function deleteAnalysisChecklistItem(id: number) {
@@ -532,7 +695,7 @@ export async function deleteAnalysisChecklistItem(id: number) {
 }
 
 export async function getRollupContributions(projectId: number) {
-  return (await getDb()).select<any[]>('SELECT * FROM rollup_contributions WHERE project_id = ?', [projectId]);
+  return (await getDb()).select<any[]>('SELECT * FROM rollup_contributions WHERE parent_snapshot_id = ?', [projectId]);
 }
 
 export async function getAllRollupFeedback() {
@@ -541,27 +704,37 @@ export async function getAllRollupFeedback() {
 
 // ==================== Part Suppliers ====================
 export async function getAllPartSuppliers() {
-  return (await getDb()).select<any[]>('SELECT * FROM part_suppliers ORDER BY part_id, priority');
+  return (await getDb()).select<any[]>('SELECT *, COALESCE(price, unit_price, 0) as price FROM part_suppliers ORDER BY part_id, priority');
 }
 
 export async function getPartSuppliers(partId: number) {
-  return (await getDb()).select<any[]>('SELECT * FROM part_suppliers WHERE part_id = ? ORDER BY priority', [partId]);
+  return (await getDb()).select<any[]>('SELECT *, COALESCE(price, unit_price, 0) as price FROM part_suppliers WHERE part_id = ? ORDER BY priority', [partId]);
 }
 
 export async function addPartSupplier(data: any) {
   const d = await getDb();
+  const price = data.price ?? data.unit_price ?? 0;
   const r = await d.execute(
-    'INSERT INTO part_suppliers (part_id, supplier_name, unit_price, moq, lead_time, priority, remark) VALUES (?,?,?,?,?,?,?)',
-    [data.part_id, data.supplier_name, data.unit_price, data.moq, data.lead_time, data.priority || 0, data.remark]
+    'INSERT INTO part_suppliers (part_id, supplier_name, unit_price, price, moq, lead_time, priority, share_ratio, is_active, remark) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    [data.part_id, data.supplier_name, price, price, data.moq || 0, data.lead_time || '', data.priority || 0, data.share_ratio || 0, data.is_active ?? 1, data.remark || '']
   );
   return r.lastInsertId;
 }
 
 export async function updatePartSupplier(data: any) {
   const d = await getDb();
+  const old = await d.select<any[]>('SELECT * FROM part_suppliers WHERE id = ?', [data.id]);
+  const price = data.price ?? data.unit_price ?? 0;
+  const oldPrice = old[0]?.price ?? old[0]?.unit_price ?? 0;
+  if (old[0] && Math.abs(oldPrice - price) > 0.0001) {
+    await d.execute(
+      'INSERT INTO supplier_price_history (part_id, supplier_name, old_price, new_price, change_reason, changed_at) VALUES (?,?,?,?,?,datetime(\'now\',\'localtime\'))',
+      [data.part_id ?? old[0].part_id, data.supplier_name ?? old[0].supplier_name, oldPrice, price, data.change_reason || '手动更新']
+    );
+  }
   await d.execute(
-    'UPDATE part_suppliers SET supplier_name=?, unit_price=?, moq=?, lead_time=?, priority=?, remark=? WHERE id=?',
-    [data.supplier_name, data.unit_price, data.moq, data.lead_time, data.priority, data.remark, data.id]
+    'UPDATE part_suppliers SET part_id=?, supplier_name=?, unit_price=?, price=?, moq=?, lead_time=?, priority=?, share_ratio=?, is_active=?, remark=? WHERE id=?',
+    [data.part_id ?? old[0]?.part_id, data.supplier_name, price, price, data.moq || 0, data.lead_time || '', data.priority || 0, data.share_ratio || 0, data.is_active ?? 1, data.remark || '', data.id]
   );
   return data.id;
 }
@@ -571,11 +744,25 @@ export async function deletePartSupplier(id: number) {
 }
 
 export async function getProjectSuppliers(projectId: number) {
-  return (await getDb()).select<any[]>('SELECT DISTINCT supplier_name FROM part_suppliers ps JOIN project_boms pb ON ps.part_id = pb.part_id WHERE pb.project_id = ?', [projectId]);
+  return (await getDb()).select<any[]>(
+    `SELECT
+       MIN(ps.id) as id,
+       pb.project_id,
+       ps.supplier_name,
+       SUM(COALESCE(ps.price, ps.unit_price, 0) * pb.quantity) as quoted_price,
+       AVG(COALESCE(ps.share_ratio, 0)) as share_ratio,
+       MAX(COALESCE(ps.is_active, 1)) as is_active
+     FROM part_suppliers ps
+     JOIN project_boms pb ON ps.part_id = pb.part_id
+     WHERE pb.project_id = ?
+     GROUP BY pb.project_id, ps.supplier_name
+     ORDER BY ps.supplier_name`,
+    [projectId]
+  );
 }
 
 export async function getSupplierPriceHistory(partId: number, supplierName: string) {
-  return (await getDb()).select<any[]>('SELECT * FROM supplier_price_history WHERE part_id = ? AND supplier_name = ? ORDER BY recorded_at DESC', [partId, supplierName]);
+  return (await getDb()).select<any[]>('SELECT * FROM supplier_price_history WHERE part_id = ? AND supplier_name = ? ORDER BY changed_at DESC', [partId, supplierName]);
 }
 
 // ==================== API Providers ====================

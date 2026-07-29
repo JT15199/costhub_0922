@@ -3,7 +3,7 @@ import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Tag, mes
 import { PlusOutlined, EditOutlined, DeleteOutlined, CopyOutlined, UploadOutlined, DownloadOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import ReactECharts from 'echarts-for-react';
-import { getProjects, saveProject, deleteProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, getTargets, saveTarget, deleteTarget, updateBOMRefProject } from '../db';
+import { getProjects, saveProject, deleteProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot } from '../db';
 import { TIERS, PROJECT_STATUSES, PROJECT_TYPES, SCREEN_SIZES, RESOLUTIONS, REFRESH_RATES, PANEL_TYPES, MAIN_CATEGORIES, SUB_CATEGORIES, MEASURE_STATUSES, CATEGORY_COLORS } from '../constants';
 import { getMainCategories } from '../db';
 
@@ -17,6 +17,7 @@ export default function Projects() {
   const [selectedPid, setSelectedPid] = useState<number | null>(null);
   const [boms, setBoms] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
+  const [costSnapshots, setCostSnapshots] = useState<any[]>([]);
   const [measures, setMeasures] = useState<any[]>([]);
   const [targets, setTargets] = useState<any[]>([]);
   const [targetModal, setTargetModal] = useState(false);
@@ -46,9 +47,10 @@ export default function Projects() {
 
   const loadBOM = async (pid: number) => setBoms(await getProjectBOMs(pid));
   const loadReviews = async (pid: number) => setReviews(await getCostReviews(pid));
+  const loadCostSnapshots = async (pid: number) => setCostSnapshots(await getProjectCostSnapshots(pid));
   const loadMeasures = async (pid: number) => setMeasures(await getMeasures(pid));
 
-  const selectProject = (pid: number) => { setSelectedPid(pid); loadBOM(pid); loadReviews(pid); loadMeasures(pid); loadTargets(pid); };
+  const selectProject = (pid: number) => { setSelectedPid(pid); loadBOM(pid); loadReviews(pid); loadCostSnapshots(pid); loadMeasures(pid); loadTargets(pid); };
   const loadTargets = async (pid: number) => setTargets(await getTargets(pid));
   const loadModRef = async (modName: string, pid: number) => {
     if (!pid) { setModRefMap(prev => { const n = { ...prev }; delete n[modName]; return n; }); return; }
@@ -62,6 +64,10 @@ export default function Projects() {
   const handleSaveProject = async () => {
     const vals = await form.validateFields();
     await saveProject({ ...editing, ...vals });
+    if (editing?.id && selectedPid === editing.id) {
+      await recordProjectCostSnapshot(editing.id, 'rate_changed', '项目费率或基础信息调整');
+      await loadCostSnapshots(editing.id);
+    }
     setModalOpen(false); setEditing(null); form.resetFields(); loadProjects(); message.success('保存成功');
   };
 
@@ -75,6 +81,7 @@ export default function Projects() {
       const nameKeys = ['器件名称', 'name', '名称', 'part_name', 'Description'];
       const modelKeys = ['型号', 'model', 'part_model', 'MPN', '料号'];
       const moduleKeys = ['模块', 'module', '模块名', 'module_name', '功能模块'];
+      const moduleCategoryKeys = ['模块分类', '模块类别', 'module_category', 'moduleCategory', '分类'];
       const mainKeys = ['大类', 'main_category', '主类'];
       const subKeys = ['子类', 'sub_category', '小类', '类型'];
       const costKeys = ['单价', 'cost', '价格', 'price', '成本'];
@@ -87,6 +94,7 @@ export default function Projects() {
         project_code: getVal(r, ['项目代号', 'project_code', 'code']),
         project_name: getVal(r, ['项目名称', 'project_name']),
         module_name: getVal(r, moduleKeys) || '未归类',
+        module_category: getVal(r, moduleCategoryKeys),
         main_category: getVal(r, mainKeys) || '硬件类',
         sub_category: getVal(r, subKeys) || getVal(r, subKeys.includes('类型') ? subKeys : []),
         name: getVal(r, nameKeys),
@@ -125,11 +133,26 @@ export default function Projects() {
     // Auto-create modules that don't exist yet
     const modNames = [...new Set(importData.map(r => r.module_name).filter(Boolean))].filter(m => m !== '未归类');
     const existingMods = await getModules(targetPid!);
+    const allExistingModules = (await Promise.all(projects.map(async (p: any) => getModules(p.id)))).flat();
+    const categoryByModuleName: Record<string, string> = {};
+    for (const m of allExistingModules) {
+      if (m.name && m.module_category && m.module_category !== '未分类') categoryByModuleName[m.name] = m.module_category;
+    }
+    for (const row of importData) {
+      if (row.module_name && row.module_category) categoryByModuleName[row.module_name] = row.module_category;
+    }
     const modIdMap: Record<string, number> = {};
     for (const mn of modNames) {
       const exists = existingMods.find((m: any) => m.name === mn);
-      if (exists) { modIdMap[mn] = exists.id; continue; }
-      const mid = await saveModule({ project_id: targetPid!, name: mn, description: `从BOM导入自动创建` });
+      const moduleCategory = categoryByModuleName[mn] || exists?.module_category || '未分类';
+      if (exists) {
+        modIdMap[mn] = exists.id;
+        if ((exists.module_category || '未分类') !== moduleCategory) {
+          await saveModule({ ...exists, module_category: moduleCategory });
+        }
+        continue;
+      }
+      const mid = await saveModule({ project_id: targetPid!, name: mn, module_category: moduleCategory, description: `从BOM导入自动创建` });
       modIdMap[mn] = mid;
     }
     // For each row: save to parts library, then add to BOM with module_name
@@ -141,22 +164,26 @@ export default function Projects() {
       if (match) {
         partId = match.id!;
         if (Math.abs(match.cost - row.cost) > 0.0001) {
-          await savePart({ ...match, cost: row.cost, main_category: row.main_category, sub_category: row.sub_category, projects: match.projects ? `${match.projects},${projects.find(p => p.id === selectedPid)?.code || ''}` : (projects.find(p => p.id === selectedPid)?.code || '') });
+          await savePart({ ...match, cost: row.cost, main_category: row.main_category, sub_category: row.sub_category, projects: match.projects ? `${match.projects},${projects.find(p => p.id === selectedPid)?.code || ''}` : (projects.find(p => p.id === selectedPid)?.code || '') }, false);
         }
       } else {
-        partId = await savePart({ main_category: row.main_category, sub_category: row.sub_category, category: row.main_category, name: row.name, model: row.model, cost: row.cost, specs: '', projects: projects.find(p => p.id === selectedPid)?.code || '', remark: row.remark });
+        partId = await savePart({ main_category: row.main_category, sub_category: row.sub_category, category: row.main_category, name: row.name, model: row.model, cost: row.cost, specs: '', projects: projects.find(p => p.id === selectedPid)?.code || '', remark: row.remark }, false);
       }
-      await addBOMItem(targetPid!, partId, row.quantity, row.module_name, row.remark);
+      await addBOMItem(targetPid!, partId, row.quantity, row.module_name, row.remark, 0, false);
       // Also add to module_items
       if (row.module_name && row.module_name !== '未归类' && modIdMap[row.module_name]) {
         await saveModuleItem({ module_id: modIdMap[row.module_name], part_id: partId, part_name: row.name, part_model: row.model, main_category: row.main_category, sub_category: row.sub_category, cost: row.cost, quantity: row.quantity, remark: row.remark });
       }
     }
+    await recordProjectCostSnapshot(targetPid!, 'bom_import', `BOM批量导入 ${importData.length} 条`);
+    await loadCostSnapshots(targetPid!);
     setImportModal(false); loadBOM(targetPid!); loadProjects();
     message.success(`导入完成: ${importData.length} 条`);
   };
 
   const bomTotal = boms.reduce((s, b) => s + (b.part_cost || 0) * b.quantity, 0);
+  const selectedProject = projects.find(p => p.id === selectedPid);
+  const wholeMachineCost = bomTotal * (1 + (((selectedProject?.platform_fee_rate || 0) + (selectedProject?.profit_rate || 0)) / 100));
   // Module grouping
   const moduleSummary: Record<string, number> = {};
   const groupedBOMs: Record<string, any[]> = {};
@@ -180,7 +207,7 @@ export default function Projects() {
               // Sync all BOM parts to parts library
               const b = await getProjectBOMs(r.id);
               for (const item of b) {
-                await savePart({ id: item.part_id, main_category: item.main_category, sub_category: item.sub_category, category: item.main_category, name: item.part_name, model: item.part_model, cost: item.part_cost, specs: item.part_specs || '', projects: r.code, remark: '' });
+                await savePart({ id: item.part_id, main_category: item.main_category, sub_category: item.sub_category, category: item.main_category, name: item.part_name, model: item.part_model, cost: item.part_cost, specs: item.part_specs || '', projects: r.code, remark: '' }, false);
               }
               message.success(`项目 [${r.code}] 已定型为已完成`);
               loadProjects();
@@ -204,7 +231,7 @@ export default function Projects() {
     { title: '操作', width: 75, render: (_: any, r: any) => (
       <Space size="small">
         <Button type="link" size="small" onClick={() => { setBomEdit(r); bomForm.setFieldsValue({ ...r, _part_name: r.part_name, _part_model: r.part_model, _main_category: r.main_category, _sub_category: r.sub_category, _cost: r.part_cost }); setBomModal(true); }}>编辑</Button>
-        <Popconfirm title="移除？" onConfirm={async () => { await deleteBOMItem(r.id); loadBOM(selectedPid!); }}><Button type="link" size="small" danger>删除</Button></Popconfirm>
+        <Popconfirm title="移除？" onConfirm={async () => { await deleteBOMItem(r.id); loadBOM(selectedPid!); loadCostSnapshots(selectedPid!); }}><Button type="link" size="small" danger>删除</Button></Popconfirm>
       </Space>
     )},
   ];
@@ -227,8 +254,10 @@ export default function Projects() {
       {selectedPid && (
         <div className="content-card" style={{ marginTop: 14 }}>
           <Row gutter={14} style={{ marginBottom: 14 }}>
-            <Col span={6}><Card size="small"><Statistic title="BOM总成本" value={bomTotal} precision={2} prefix="¥" valueStyle={{ color: '#CF0A2C' }} /></Card></Col>
-            <Col span={18}>
+            <Col span={5}><Card size="small"><Statistic title="BOM总成本" value={bomTotal} precision={2} prefix="¥" valueStyle={{ color: '#CF0A2C' }} /></Card></Col>
+            <Col span={5}><Card size="small"><Statistic title="整机成本" value={wholeMachineCost} precision={2} prefix="¥" valueStyle={{ color: '#2563EB' }} /></Card></Col>
+            <Col span={4}><Card size="small"><Statistic title="费率" value={`${selectedProject?.platform_fee_rate || 0}% + ${selectedProject?.profit_rate || 0}%`} valueStyle={{ fontSize: 18 }} /></Card></Col>
+            <Col span={10}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {Object.entries(moduleSummary).map(([name, cost]) => (
                   <Tag key={name} color="blue" style={{ fontSize: 12, padding: '4px 10px' }}>{name}: ¥{cost.toFixed(2)}</Tag>
@@ -250,7 +279,7 @@ export default function Projects() {
                       <Space>
                         <Tag color="blue">{bomSelKeys.length} 项选中</Tag>
                         <Tag color="red">合计: ¥{boms.filter(b => bomSelKeys.includes(b.id)).reduce((s, b) => s + (b.part_cost || 0) * b.quantity, 0).toFixed(2)}</Tag>
-                        <Popconfirm title={`删除选中 ${bomSelKeys.length} 项？`} onConfirm={async () => { for (const id of bomSelKeys) await deleteBOMItem(Number(id)); setBomSelKeys([]); loadBOM(selectedPid!); message.success('已删除'); }}>
+                        <Popconfirm title={`删除选中 ${bomSelKeys.length} 项？`} onConfirm={async () => { for (const id of bomSelKeys) await deleteBOMItem(Number(id), false); await recordProjectCostSnapshot(selectedPid!, 'parts_deleted', `批量删除 ${bomSelKeys.length} 个BOM项`); setBomSelKeys([]); loadBOM(selectedPid!); loadCostSnapshots(selectedPid!); message.success('已删除'); }}>
                           <Button size="small" danger icon={<DeleteOutlined />}>批量删除</Button>
                         </Popconfirm>
                       </Space>
@@ -389,6 +418,77 @@ export default function Projects() {
               })(),
             },
             {
+              key: 'cost-history', label: `📈 整机成本历史 (${costSnapshots.length})`, children: (() => {
+                const sortedSnapshots = [...costSnapshots].sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')) || (b.id || 0) - (a.id || 0));
+                return (
+                  <div>
+                    <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <Space>
+                        <Tag color="red">当前BOM: ¥{bomTotal.toFixed(2)}</Tag>
+                        <Tag color="blue">当前整机: ¥{wholeMachineCost.toFixed(2)}</Tag>
+                        <Tag>公式: BOM × (1 + {selectedProject?.platform_fee_rate || 0}% + {selectedProject?.profit_rate || 0}%)</Tag>
+                      </Space>
+                      <Button size="small" onClick={async () => { await recordProjectCostSnapshot(selectedPid!, 'manual_snapshot', '手动记录当前整机成本'); await loadCostSnapshots(selectedPid!); message.success('已生成当前快照'); }}>生成当前快照</Button>
+                    </div>
+                    {costSnapshots.length > 0 ? (
+                      <div style={{ maxHeight: 560, overflowY: 'auto', paddingRight: 6 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                          {sortedSnapshots.map((snap: any, index: number) => (
+                            <div key={snap.id} style={{ display: 'flex', gap: 12, alignItems: 'stretch' }}>
+                              <div style={{ width: 90, flexShrink: 0, textAlign: 'right', paddingTop: 6 }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: '#1E293B' }}>{(snap.created_at || '').slice(0, 10)}</div>
+                                <div style={{ fontSize: 11, color: '#64748B' }}>{(snap.created_at || '').slice(11, 19)}</div>
+                              </div>
+                              <div style={{ position: 'relative', width: 16, flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
+                                <div style={{ width: 2, background: '#CBD5E1', borderRadius: 999, flex: 1 }} />
+                                <div style={{ position: 'absolute', top: 10, width: 10, height: 10, borderRadius: 999, background: '#CF0A2C', border: '2px solid #FFF', boxShadow: '0 0 0 2px rgba(207,10,44,0.18)' }} />
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ padding: 14, border: '1px solid #E2E8F0', borderRadius: 10, background: '#FFF' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                                    <Space size={6} wrap>
+                                      <Tag color={snap.snapshot_type === 'manual_snapshot' ? 'blue' : 'red'}>{snap.snapshot_type}</Tag>
+                                      <span style={{ fontWeight: 600 }}>{snap.change_reason || '自动记录'}</span>
+                                    </Space>
+                                    <Tag color="blue" style={{ margin: 0 }}>{index + 1}</Tag>
+                                  </div>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10 }}>
+                                    <div>
+                                      <div style={{ fontSize: 11, color: '#64748B' }}>BOM总成本</div>
+                                      <div style={{ fontWeight: 700, color: '#CF0A2C' }}>¥{Number(snap.bom_cost || 0).toFixed(2)}</div>
+                                    </div>
+                                    <div>
+                                      <div style={{ fontSize: 11, color: '#64748B' }}>整机成本</div>
+                                      <div style={{ fontWeight: 700, color: '#2563EB' }}>¥{Number(snap.total_cost || 0).toFixed(2)}</div>
+                                    </div>
+                                    <div>
+                                      <div style={{ fontSize: 11, color: '#64748B' }}>费率</div>
+                                      <div style={{ fontWeight: 600 }}>{Number(snap.platform_fee_rate || 0)}% + {Number(snap.profit_rate || 0)}%</div>
+                                    </div>
+                                    <div>
+                                      <div style={{ fontSize: 11, color: '#64748B' }}>模块 / 器件</div>
+                                      <div style={{ fontWeight: 600 }}>{snap.module_count || 0} / {snap.item_count || 0}</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <Alert
+                        type="info"
+                        showIcon
+                        message="还没有自动快照"
+                        description="后续添加、删除、编辑BOM项或导入模块时会自动记录。也可以先点击右侧按钮生成当前快照。"
+                      />
+                    )}
+                  </div>
+                );
+              })(),
+            },
+            {
               key: 'reviews', label: '📊 成本测算', children: (
                 <div>
                   <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { setEditing(null); form.resetFields(); setReviewModal(true); }} style={{ marginBottom: 12 }}>添加测算</Button>
@@ -485,11 +585,12 @@ export default function Projects() {
         const v = await bomForm.validateFields();
         const mode = v._addMode || 'manual';
         if (bomEdit) {
-          await updateBOMItem(bomEdit.id, v.quantity, v.module_name || '', v.remark || '');
+          await updateBOMItem(bomEdit.id, v.quantity, v.module_name || '', v.remark || '', false);
           // Sync to parts library
           if (bomEdit.part_id) {
-            await savePart({ id: bomEdit.part_id, main_category: v._main_category || bomEdit.main_category, sub_category: v._sub_category || bomEdit.sub_category, category: v._main_category || bomEdit.main_category, name: v._part_name || bomEdit.part_name, model: v._part_model || bomEdit.part_model, cost: v._cost ?? bomEdit.part_cost, specs: bomEdit.part_specs || '', projects: bomEdit.projects || '', remark: v.remark || '' });
+            await savePart({ id: bomEdit.part_id, main_category: v._main_category || bomEdit.main_category, sub_category: v._sub_category || bomEdit.sub_category, category: v._main_category || bomEdit.main_category, name: v._part_name || bomEdit.part_name, model: v._part_model || bomEdit.part_model, cost: v._cost ?? bomEdit.part_cost, specs: bomEdit.part_specs || '', projects: bomEdit.projects || '', remark: v.remark || '' }, false);
           }
+          await recordProjectCostSnapshot(selectedPid!, 'part_changed', `调整BOM项：${v._part_name || bomEdit.part_name || ''}`);
         } else if (mode === 'module') {
           // Import all items from selected module
           if (!v._moduleId) { message.warning('请选择模块'); return; }
@@ -502,19 +603,20 @@ export default function Projects() {
             if (!partId) {
               const existing = await getParts(item.part_name, '', '');
               const match = existing.find((p: any) => p.model === item.part_model);
-              partId = match?.id || await savePart({ main_category: item.main_category, sub_category: item.sub_category, category: item.main_category, name: item.part_name, model: item.part_model, cost: item.cost, specs: '', projects: '', remark: '' });
+              partId = match?.id || await savePart({ main_category: item.main_category, sub_category: item.sub_category, category: item.main_category, name: item.part_name, model: item.part_model, cost: item.cost, specs: '', projects: '', remark: '' }, false);
             }
-            await addBOMItem(selectedPid!, partId, item.quantity, item._modName || v._moduleName || '', item.remark || '', srcPid);
+            await addBOMItem(selectedPid!, partId, item.quantity, item._modName || v._moduleName || '', item.remark || '', srcPid, false);
           }
+          await recordProjectCostSnapshot(selectedPid!, 'module_imported', `从模块库导入「${v._moduleName}」 ${items.length} 件`);
           message.success(`已导入模块 [${v._moduleName}]: ${items.length} 件`);
         } else if (mode === 'parts') {
           await addBOMItem(selectedPid!, v.part_id, v.quantity, v.module_name || '', v.remark || '');
         } else {
           // Manual: create part first, then add to BOM
-          const partId = await savePart({ main_category: v._main_category || '硬件类', sub_category: v._sub_category || '', category: v._main_category || '硬件类', name: v._part_name, model: v._part_model || '', cost: v._cost || 0, specs: '', projects: '', remark: '' });
+          const partId = await savePart({ main_category: v._main_category || '硬件类', sub_category: v._sub_category || '', category: v._main_category || '硬件类', name: v._part_name, model: v._part_model || '', cost: v._cost || 0, specs: '', projects: '', remark: '' }, false);
           await addBOMItem(selectedPid!, partId, v._quantity || 1, v._module_name || '', v._remark || '');
         }
-        setBomModal(false); setBomEdit(null); loadBOM(selectedPid!);
+        setBomModal(false); setBomEdit(null); loadBOM(selectedPid!); loadCostSnapshots(selectedPid!);
       }} onCancel={() => { setBomModal(false); setBomEdit(null); }} width={680} destroyOnClose>
         <Form form={bomForm} layout="vertical" initialValues={{ _addMode: 'module', quantity: 1, _quantity: 1, _cost: 0 }}>
           {!bomEdit && (
@@ -574,7 +676,7 @@ export default function Projects() {
                         options={(() => {
                           // Load modules from all projects
                           return (modList || []).map((m: any) => ({
-                            label: `${m.name} — [${m.project_code}] ${m.project_name}${m.description ? ' | ' + m.description : ''}`,
+                            label: `[${m.module_category || '未分类'}] ${m.name} — [${m.project_code}] ${m.project_name}${m.description ? ' | ' + m.description : ''}`,
                             value: m.id,
                           }));
                         })()}

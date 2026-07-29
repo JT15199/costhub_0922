@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Table, Button, Select, Space, Modal, Form, Input, InputNumber, Tag, message, Popconfirm, Tooltip } from 'antd';
-import { PlusOutlined, CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, AppstoreOutlined } from '@ant-design/icons';
+import { Table, Button, Select, Space, Modal, Form, Input, InputNumber, Tag, message, Popconfirm, Tooltip, AutoComplete } from 'antd';
+import { PlusOutlined, CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, AppstoreOutlined, TagOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
-import { getProjects, getModules, getModuleItems, saveModule, deleteModule, saveModuleItem, deleteModuleItem, addBOMItem, getParts, getMainCategories } from '../db';
+import { getProjects, getModules, getModuleItems, saveModule, deleteModule, saveModuleItem, deleteModuleItem, addBOMItem, getParts, getMainCategories, getModuleCategories, recordProjectCostSnapshot } from '../db';
 import { MAIN_CATEGORIES, SUB_CATEGORIES, CATEGORY_COLORS } from '../constants';
 
 export default function ModuleLibrary() {
@@ -10,6 +10,8 @@ export default function ModuleLibrary() {
   const [mainCats, setMainCats] = useState(MAIN_CATEGORIES);
   useEffect(() => { (async () => { try { setMainCats(await getMainCategories()); } catch(e) {} })(); }, []);
   const [modGroups, setModGroups] = useState<any[]>([]);    // grouped by name: {name, projects: [{project, module, cost, count}]}
+  const [moduleCategories, setModuleCategories] = useState<string[]>(['未分类', '显示模块', '电源模块', '驱动模块', '结构模块', '包材模块']);
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [activeModName, setActiveModName] = useState<string | null>(null);
   const [activeGroup, setActiveGroup] = useState<any>(null);
   const [expandedPid, setExpandedPid] = useState<number | null>(null);
@@ -18,6 +20,9 @@ export default function ModuleLibrary() {
 
   const [modModal, setModModal] = useState(false);
   const [editMod, setEditMod] = useState<any>(null);
+  const [categoryModal, setCategoryModal] = useState(false);
+  const [categoryTarget, setCategoryTarget] = useState<any>(null);
+  const [categoryValue, setCategoryValue] = useState('');
   const [selProjectForNewMod, setSelProjectForNewMod] = useState<number | null>(null);
   const [itemModal, setItemModal] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
@@ -29,6 +34,10 @@ export default function ModuleLibrary() {
 
   const loadAll = async () => {
     const projs = await getProjects(); setProjects(projs);
+    try {
+      const cats = await getModuleCategories();
+      setModuleCategories([...new Set(['未分类', '显示模块', '电源模块', '驱动模块', '结构模块', '包材模块', ...cats.filter(Boolean)])]);
+    } catch {}
     const all: any[] = [];
     for (const p of projs) {
       const mods = await getModules(p.id);
@@ -42,8 +51,10 @@ export default function ModuleLibrary() {
     // Group by name
     const groups: Record<string, any> = {};
     for (const m of all) {
-      if (!groups[m.name]) groups[m.name] = { name: m.name, projects: [] };
-      groups[m.name].projects.push({ project_id: m.project_id, project_code: m.project_code, project_name: m.project_name, project_type: m.project_type, module_id: m.id, cost: m.totalCost, count: m.itemCount, description: m.description });
+      const moduleCategory = m.module_category || '未分类';
+      if (!groups[m.name]) groups[m.name] = { name: m.name, module_category: moduleCategory, projects: [] };
+      if (groups[m.name].module_category === '未分类' && moduleCategory !== '未分类') groups[m.name].module_category = moduleCategory;
+      groups[m.name].projects.push({ project_id: m.project_id, project_code: m.project_code, project_name: m.project_name, project_type: m.project_type, module_id: m.id, module_category: moduleCategory, cost: m.totalCost, count: m.itemCount, description: m.description });
     }
     setModGroups(Object.values(groups));
   };
@@ -61,12 +72,15 @@ export default function ModuleLibrary() {
   const handleSaveMod = async () => {
     const v = await form.validateFields();
     await saveModule({ ...editMod, project_id: selProjectForNewMod, ...v });
+    const snapshotPid = editMod?.project_id || selProjectForNewMod;
+    if (snapshotPid) await recordProjectCostSnapshot(snapshotPid, editMod?.id ? 'module_changed' : 'module_added', `${editMod?.id ? '编辑' : '新建'}模块：${v.name}`);
     setModModal(false); setEditMod(null); loadAll(); message.success('已保存');
   };
 
   const handleSaveItem = async () => {
     const v = await form.validateFields();
     await saveModuleItem({ ...editItem, module_id: expandedModId, ...v });
+    if (expandedPid) await recordProjectCostSnapshot(expandedPid, editItem?.id ? 'module_item_changed' : 'module_item_added', `${editItem?.id ? '编辑' : '新增'}模块器件：${v.part_name || ''}`);
     setItemModal(false); setEditItem(null);
     if (expandedModId) setExpandedItems(await getModuleItems(expandedModId));
     loadAll(); message.success('已保存');
@@ -75,22 +89,24 @@ export default function ModuleLibrary() {
   const copyModuleToProject = async () => {
     if (!expandedModId || !targetPid) { message.warning('请先选择目标项目'); return; }
     const srcMod = allMods.find(m => m.id === expandedModId); if (!srcMod) return;
-    const newModId = await saveModule({ project_id: targetPid, name: srcMod.name, description: srcMod.description });
+    const newModId = await saveModule({ project_id: targetPid, name: srcMod.name, module_category: srcMod.module_category || '未分类', description: srcMod.description });
     const items = await getModuleItems(expandedModId);
     for (const item of items) {
       let partId = item.part_id;
       if (!partId) {
         const allParts = await getParts(item.part_name, '', '');
         const match = allParts.find((p: any) => p.model === item.part_model);
-        partId = match?.id || await (await import('../db')).savePart({ main_category: item.main_category, sub_category: item.sub_category, category: item.main_category, name: item.part_name, model: item.part_model, cost: item.cost, specs: '', projects: '', remark: '' });
+        partId = match?.id || await (await import('../db')).savePart({ main_category: item.main_category, sub_category: item.sub_category, category: item.main_category, name: item.part_name, model: item.part_model, cost: item.cost, specs: '', projects: '', remark: '' }, false);
       }
       await saveModuleItem({ module_id: newModId, part_id: partId, part_name: item.part_name, part_model: item.part_model, main_category: item.main_category, sub_category: item.sub_category, cost: item.cost, quantity: item.quantity, remark: item.remark });
-      if (partId) { try { await addBOMItem(targetPid, partId, item.quantity, srcMod.name, ''); } catch (e) {} }
+      if (partId) { try { await addBOMItem(targetPid, partId, item.quantity, srcMod.name, '', 0, false); } catch (e) {} }
     }
+    await recordProjectCostSnapshot(targetPid, 'module_copied', `复制模块「${srcMod.name}」到项目`);
     message.success(`已复制到目标项目`); setTargetPid(null); loadAll();
   };
 
   const expTotal = expandedItems.reduce((s: number, i: any) => s + (i.cost || 0) * (i.quantity || 1), 0);
+  const filteredGroups = categoryFilter ? modGroups.filter(group => (group.module_category || '未分类') === categoryFilter) : modGroups;
   const bySubCat: Record<string, number> = {};
   expandedItems.forEach(i => { const k = i.sub_category || i.main_category || '其他'; bySubCat[k] = (bySubCat[k] || 0) + (i.cost || 0) * (i.quantity || 1); });
   const barData = Object.entries(bySubCat).map(([k, v]) => ({ name: k, value: Math.round(v * 100) / 100 })).sort((a, b) => b.value - a.value);
@@ -117,7 +133,7 @@ export default function ModuleLibrary() {
       render: (_: any, r: any) => (
         <Space size={0}>
           <Tooltip title="编辑"><Button type="link" size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); setEditItem(r); form.setFieldsValue(r); setItemModal(true); }} /></Tooltip>
-          <Popconfirm title="删除？" onConfirm={async () => { await deleteModuleItem(r.id); if (expandedModId) setExpandedItems(await getModuleItems(expandedModId)); loadAll(); }}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm>
+          <Popconfirm title="删除？" onConfirm={async () => { await deleteModuleItem(r.id); if (expandedPid) await recordProjectCostSnapshot(expandedPid, 'module_item_deleted', `删除模块器件：${r.part_name || ''}`); if (expandedModId) setExpandedItems(await getModuleItems(expandedModId)); loadAll(); }}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm>
         </Space>
       ),
     },
@@ -130,13 +146,25 @@ export default function ModuleLibrary() {
       {/* Module cards - all modules grouped by name */}
       <div className="content-card" style={{ marginBottom: 14, padding: '14px 18px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <Space><AppstoreOutlined style={{ color: '#CF0A2C', fontSize: 16 }} /><b style={{ fontSize: 14 }}>全部模块（跨项目）</b></Space>
+          <Space wrap>
+            <AppstoreOutlined style={{ color: '#CF0A2C', fontSize: 16 }} />
+            <b style={{ fontSize: 14 }}>全部模块（跨项目）</b>
+            <Select
+              size="small"
+              allowClear
+              placeholder="分类"
+              value={categoryFilter || undefined}
+              onChange={v => setCategoryFilter(v || '')}
+              style={{ width: 140 }}
+              options={moduleCategories.map(c => ({ label: c, value: c }))}
+            />
+          </Space>
           <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => {
-            setEditMod(null); setSelProjectForNewMod(null); form.resetFields(); setModModal(true);
+            setEditMod(null); setSelProjectForNewMod(null); form.resetFields(); form.setFieldsValue({ module_category: categoryFilter || '未分类' }); setModModal(true);
           }}>新建模块</Button>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 10 }}>
-          {modGroups.map(group => {
+          {filteredGroups.map(group => {
             const costs = group.projects.map((p: any) => p.cost);
             const minC = Math.min(...costs), maxC = Math.max(...costs);
             const active = activeModName === group.name;
@@ -155,6 +183,7 @@ export default function ModuleLibrary() {
               >
                 <div style={{ fontWeight: 600, fontSize: 14, color: active ? '#CF0A2C' : '#1E293B', marginBottom: 6 }}>{group.name}</div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Tag color="purple" style={{ margin: 0, fontSize: 11 }}>{group.module_category || '未分类'}</Tag>
                   <Tag style={{ margin: 0, fontSize: 11 }}>{group.projects.length} 个项目</Tag>
                   <span style={{ fontSize: 13, color: '#CF0A2C', fontWeight: 600 }}>
                     ¥{minC === maxC ? minC.toFixed(0) : `${minC.toFixed(0)}~${maxC.toFixed(0)}`}
@@ -169,7 +198,7 @@ export default function ModuleLibrary() {
       {/* Module comparison view */}
       {activeGroup && (
         <div className="content-card" style={{ padding: '16px 20px', marginBottom: 14 }}>
-          <h3 style={{ margin: '0 0 14px 0', fontSize: 16, color: '#CF0A2C' }}>{activeGroup.name} — 各项目成本对比</h3>
+          <h3 style={{ margin: '0 0 14px 0', fontSize: 16, color: '#CF0A2C' }}>{activeGroup.name} — 各项目成本对比 <Tag color="purple">{activeGroup.module_category || '未分类'}</Tag></h3>
           <Table
             dataSource={activeGroup.projects}
             rowKey="module_id"
@@ -178,17 +207,39 @@ export default function ModuleLibrary() {
             columns={[
               { title: '项目代号', dataIndex: 'project_code', width: 110, render: (v: string) => <b>{v}</b> },
               { title: '项目名称', dataIndex: 'project_name', ellipsis: true },
+              { title: '分类', dataIndex: 'module_category', width: 95, render: (v: string) => <Tag color="purple">{v || '未分类'}</Tag> },
               { title: '类型', dataIndex: 'project_type', width: 75, render: (v: string) => <Tag color={v === '已完成' ? 'green' : 'blue'}>{v}</Tag> },
               { title: '模块成本', dataIndex: 'cost', width: 120, align: 'right' as const, render: (v: number) => <b style={{ color: '#CF0A2C', fontSize: 15 }}>¥{v.toFixed(2)}</b> },
               { title: '器件数', dataIndex: 'count', width: 70, align: 'center' as const },
               {
                 title: '操作', width: 100,
                 render: (_: any, r: any) => (
-                  <Button type="link" size="small" icon={<EyeOutlined />}
-                    onClick={() => expandProject(r.project_id, r.module_id)}
-                    style={{ color: expandedPid === r.project_id ? '#CF0A2C' : undefined }}>
-                    查看明细
-                  </Button>
+                  <Space size={0}>
+                    <Button type="link" size="small" icon={<EyeOutlined />}
+                      onClick={() => expandProject(r.project_id, r.module_id)}
+                      style={{ color: expandedPid === r.project_id ? '#CF0A2C' : undefined }}>
+                      查看
+                    </Button>
+                    <Button type="link" size="small" icon={<TagOutlined />}
+                      onClick={() => {
+                        const mod = allMods.find(m => m.id === r.module_id);
+                        setEditMod(mod);
+                        setSelProjectForNewMod(mod?.project_id || r.project_id);
+                        form.setFieldsValue({ name: mod?.name || activeGroup.name, module_category: mod?.module_category || '未分类', description: mod?.description || '' });
+                        setModModal(true);
+                      }}>
+                      分类
+                    </Button>
+                    <Button type="link" size="small" icon={<EditOutlined />}
+                      onClick={() => {
+                        const mod = allMods.find(m => m.id === r.module_id);
+                        setEditMod(mod);
+                        setSelProjectForNewMod(mod?.project_id || r.project_id);
+                        form.setFieldsValue({ name: mod?.name || activeGroup.name, module_category: mod?.module_category || '未分类', description: mod?.description || '' });
+                        setModModal(true);
+                      }}
+                    />
+                  </Space>
                 ),
               },
             ]}
@@ -211,7 +262,7 @@ export default function ModuleLibrary() {
                     options={projects.filter(p => p.id !== expandedPid).map(p => ({ label: `[${p.code}] ${p.name}`, value: p.id }))} />
                   <Button size="small" icon={<CopyOutlined />} onClick={copyModuleToProject}>复制</Button>
                   <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { setEditItem(null); form.resetFields(); form.setFieldsValue({ main_category: '硬件类', sub_category: '', quantity: 1, cost: 0 }); setItemModal(true); }}>添加器件</Button>
-                  <Popconfirm title="删除模块？" onConfirm={async () => { await deleteModule(expandedModId!); setExpandedPid(null); setExpandedItems([]); loadAll(); }}>
+                  <Popconfirm title="删除模块？" onConfirm={async () => { await deleteModule(expandedModId!); if (expandedPid) await recordProjectCostSnapshot(expandedPid, 'module_deleted', `删除模块：${activeGroup.name}`); setExpandedPid(null); setExpandedItems([]); loadAll(); }}>
                     <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
                   </Popconfirm>
                 </Space>
@@ -235,9 +286,16 @@ export default function ModuleLibrary() {
         <Form form={form} layout="vertical">
           <Form.Item label="所属项目" required={!editMod?.id}>
             <Select placeholder="选择项目" value={selProjectForNewMod} onChange={v => setSelProjectForNewMod(v)}
+              disabled={!!editMod?.id}
               options={projects.map(p => ({ label: `[${p.code}] ${p.name}`, value: p.id }))} />
           </Form.Item>
           <Form.Item label="模块名称" name="name" rules={[{ required: true }]}><Input placeholder="如: LCM模块" /></Form.Item>
+          <Form.Item label="模块分类" name="module_category" initialValue="未分类">
+            <AutoComplete
+              placeholder="选择或输入分类"
+              options={moduleCategories.map(c => ({ label: c, value: c }))}
+            />
+          </Form.Item>
           <Form.Item label="描述" name="description"><Input.TextArea rows={2} /></Form.Item>
         </Form>
       </Modal>
