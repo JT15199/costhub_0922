@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Tag, message, Popconfirm, Tooltip, Upload, Row, Col } from 'antd';
 import type { TableRowSelection } from 'antd/es/table/interface';
-import { PlusOutlined, EditOutlined, DeleteOutlined, DownloadOutlined, UploadOutlined, HistoryOutlined, SearchOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, DownloadOutlined, UploadOutlined, HistoryOutlined, SearchOutlined, ShopOutlined, ToolOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
-import { getParts, savePart, deletePart, getCategories, getPriceHistory, getMainCategories } from '../db';
+import { getParts, savePart, deletePart, getCategories, getPriceHistory, getMainCategories, getPartSuppliers, addPartSupplier, updatePartSupplier, deletePartSupplier } from '../db';
 import { MAIN_CATEGORIES, SUB_CATEGORIES, CATEGORY_COLORS } from '../constants';
 
 export default function PartsLibrary() {
@@ -22,6 +22,14 @@ export default function PartsLibrary() {
   const [mainCats, setMainCats] = useState(MAIN_CATEGORIES);
   const [form] = Form.useForm();
 
+  // 供应商管理状态
+  const [supplierModalOpen, setSupplierModalOpen] = useState(false);
+  const [currentPart, setCurrentPart] = useState<any>(null);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [supplierForm] = Form.useForm();
+  const [editingSupplier, setEditingSupplier] = useState<any>(null);
+  const [supplierLoading, setSupplierLoading] = useState(false);
+
   useEffect(() => { (async () => { try { setMainCats(await getMainCategories()); } catch(e) {} })(); }, []);
   const load = useCallback(async () => {
     setLoading(true);
@@ -29,6 +37,83 @@ export default function PartsLibrary() {
     setLoading(false);
   }, [search, typeFilter, mainCat]);
   useEffect(() => { load(); }, [load]);
+
+  const handleImport = (file: File) => {
+    const r = new FileReader();
+    r.onload = async (e) => {
+      try {
+        const wb = XLSX.read(e.target?.result, { type: 'binary' });
+        const data = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]);
+        let successCount = 0;
+        const failures: string[] = [];
+        for (let i = 0; i < data.length; i++) {
+          const d = data[i];
+          const name = d['名称'] || d['name'] || d['器件名称'];
+          if (!name) continue;
+          try {
+            await savePart({
+              main_category: d['大类'] || d['main_category'] || '硬件类',
+              sub_category: d['子类'] || d['sub_category'] || '',
+              category: d['大类'] || d['main_category'] || '硬件类',
+              name: String(name).trim(),
+              model: String(d['型号'] || d['model'] || '').trim(),
+              cost: parseFloat(d['成本'] || d['cost'] || d['价格'] || '0') || 0,
+              specs: d['规格'] || d['specs'] || '',
+              projects: d['项目'] || d['projects'] || '',
+              remark: d['备注'] || d['remark'] || '',
+            });
+            successCount++;
+          } catch (err: any) {
+            failures.push(`第${i + 2}行「${name}」: ${err?.message || '未知错误'}`);
+          }
+        }
+        if (failures.length === 0) {
+          message.success(`导入完成，共 ${successCount} 条`);
+        } else {
+          message.warning(`导入完成：成功 ${successCount} 条，失败 ${failures.length} 条`);
+          Modal.warning({
+            title: `${failures.length} 条记录导入失败`,
+            content: (
+              <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+                {failures.map((f, i) => <div key={i} style={{ fontSize: 12, marginBottom: 4, color: '#EF4444' }}>{f}</div>)}
+              </div>
+            ),
+            okText: '知道了',
+          });
+        }
+        load();
+      } catch (err: any) {
+        message.error(`文件解析失败: ${err?.message || '请检查文件格式'}`);
+      }
+    };
+    r.readAsBinaryString(file);
+    return false;
+  };
+
+  const handleExport = () => {
+    const hasFilter = !!(search || typeFilter || mainCat);
+    const doExport = () => {
+      const ws = XLSX.utils.json_to_sheet(parts.map(p => ({
+        ID: p.id, 大类: p.main_category, 子类: p.sub_category,
+        名称: p.name, 型号: p.model, 成本: p.cost, 项目: p.projects, 备注: p.remark,
+      })));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, '器件库');
+      XLSX.writeFile(wb, `器件库${hasFilter ? '_筛选结果' : ''}.xlsx`);
+      message.success(`已导出 ${parts.length} 条`);
+    };
+    if (hasFilter) {
+      Modal.confirm({
+        title: '导出筛选结果',
+        content: `当前有过滤条件，将只导出筛选后的 ${parts.length} 条记录（非全量数据）。`,
+        okText: '确认导出',
+        cancelText: '取消',
+        onOk: doExport,
+      });
+    } else {
+      doExport();
+    }
+  };
 
   const handleSave = async () => {
     const v = await form.validateFields();
@@ -46,6 +131,105 @@ export default function PartsLibrary() {
     setModalOpen(true);
   };
 
+  // 供应商管理函数
+  const openSupplierModal = async (part: any) => {
+    setCurrentPart(part);
+    setSupplierLoading(true);
+    try {
+      const partSuppliers = await getPartSuppliers(part.id);
+      setSuppliers(partSuppliers);
+    } catch (e) {
+      console.error('Failed to load suppliers:', e);
+      message.error('加载供应商失败');
+    } finally {
+      setSupplierLoading(false);
+    }
+    setSupplierModalOpen(true);
+  };
+
+  const handleSupplierSave = async () => {
+    try {
+      const values = await supplierForm.validateFields();
+      const data = {
+        ...editingSupplier,
+        ...values,
+        part_id: currentPart.id,
+      };
+
+      if (editingSupplier?.id) {
+        await updatePartSupplier(data);
+        message.success('供应商已更新');
+      } else {
+        await addPartSupplier(data);
+        message.success('供应商已添加');
+      }
+
+      // 刷新供应商列表和器件列表（因为成本可能变化）
+      const partSuppliers = await getPartSuppliers(currentPart.id);
+      setSuppliers(partSuppliers);
+      load(); // 刷新器件列表以显示更新后的成本
+
+      supplierForm.resetFields();
+      setEditingSupplier(null);
+    } catch (e) {
+      console.error('Failed to save supplier:', e);
+      message.error('保存失败');
+    }
+  };
+
+  const handleSupplierDelete = async (supplierId: number) => {
+    try {
+      await deletePartSupplier(supplierId);
+      message.success('供应商已删除');
+
+      // 刷新供应商列表和器件列表
+      const partSuppliers = await getPartSuppliers(currentPart.id);
+      setSuppliers(partSuppliers);
+      load();
+    } catch (e) {
+      console.error('Failed to delete supplier:', e);
+      message.error('删除失败');
+    }
+  };
+
+  const openSupplierEdit = (supplier?: any) => {
+    setEditingSupplier(supplier || null);
+    supplierForm.setFieldsValue(supplier ? { ...supplier } : {
+      supplier_name: '',
+      price: 0,
+      share_ratio: 0,
+      is_active: 1,
+      remark: ''
+    });
+  };
+
+  const setAsPrimarySupplier = async (supplier: any) => {
+    try {
+      // 将该供应商设为100%份额，其他设为0
+      for (const s of suppliers) {
+        await updatePartSupplier({
+          id: s.id,
+          part_id: currentPart.id,
+          supplier_name: s.supplier_name,
+          price: s.price,
+          share_ratio: s.id === supplier.id ? 100 : 0,
+          is_active: s.id === supplier.id ? 1 : s.is_active,
+          remark: s.remark,
+        });
+      }
+
+      message.success(`已设置 ${supplier.supplier_name} 为主供应商`);
+
+      // 刷新
+      const partSuppliers = await getPartSuppliers(currentPart.id);
+      setSuppliers(partSuppliers);
+      load();
+    } catch (e) {
+      console.error('Failed to set primary supplier:', e);
+      message.error('设置失败');
+    }
+  };
+
   const cols = [
     { title: 'ID', dataIndex: 'id', width: 55 },
     { title: '大类', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={CATEGORY_COLORS[v]}>{v}</Tag> },
@@ -54,9 +238,10 @@ export default function PartsLibrary() {
     { title: '型号', dataIndex: 'model', ellipsis: true },
     { title: '成本(¥)', dataIndex: 'cost', width: 100, align: 'right' as const, render: (v: number) => <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>{v?.toFixed(4)}</span> },
     { title: '项目', dataIndex: 'projects', width: 100, ellipsis: true },
-    { title: '操作', width: 130, render: (_: any, r: any) => (
+    { title: '操作', width: 180, render: (_: any, r: any) => (
       <Space size="small">
         <Tooltip title="编辑"><Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} /></Tooltip>
+        <Tooltip title="供应商"><Button type="link" size="small" icon={<ShopOutlined />} onClick={() => openSupplierModal(r)} /></Tooltip>
         <Tooltip title="价格历史"><Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => showHistory(r)} /></Tooltip>
         <Popconfirm title="删除？" onConfirm={() => handleDelete(r.id)}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm>
       </Space>
@@ -65,7 +250,7 @@ export default function PartsLibrary() {
 
   return (
     <div>
-      <div className="page-title">🔧 器件库</div>
+      <div className="page-title"><ToolOutlined /> 器件库</div>
       <div className="content-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
           <Space wrap>
@@ -74,8 +259,8 @@ export default function PartsLibrary() {
             <Select placeholder="子类" value={typeFilter || undefined} onChange={v => setTypeFilter(v || '')} allowClear style={{ width: 130 }} options={categories.map(c => ({ label: c, value: c }))} />
           </Space>
           <Space>
-            <Upload beforeUpload={(f) => { const r = new FileReader(); r.onload = (e) => { const wb = XLSX.read(e.target?.result, { type: 'binary' }); const data = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]); (async () => { let n = 0; for (const d of data) { const name = d['名称'] || d['name'] || d['器件名称']; if (!name) continue; await savePart({ main_category: d['大类'] || d['main_category'] || '硬件类', sub_category: d['子类'] || d['sub_category'] || '', category: d['大类'] || d['main_category'] || '硬件类', name: String(name).trim(), model: String(d['型号'] || d['model'] || '').trim(), cost: parseFloat(d['成本'] || d['cost'] || d['价格'] || '0') || 0, specs: d['规格'] || d['specs'] || '', projects: d['项目'] || d['projects'] || '', remark: d['备注'] || d['remark'] || '' }); n++; } message.success(`导入 ${n} 条`); load(); })(); }; r.readAsBinaryString(f); return false; }} showUploadList={false}><Button icon={<UploadOutlined />}>导入Excel</Button></Upload>
-            <Button icon={<DownloadOutlined />} onClick={() => { const ws = XLSX.utils.json_to_sheet(parts.map(p => ({ ID: p.id, 大类: p.main_category, 子类: p.sub_category, 名称: p.name, 型号: p.model, 成本: p.cost, 项目: p.projects, 备注: p.remark }))); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '器件库'); XLSX.writeFile(wb, '器件库.xlsx'); message.success('已导出'); }}>导出Excel</Button>
+            <Upload beforeUpload={handleImport} showUploadList={false}><Button icon={<UploadOutlined />}>导入Excel</Button></Upload>
+            <Button icon={<DownloadOutlined />} onClick={handleExport}>导出Excel</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit()}>新增器件</Button>
           </Space>
         </div>
@@ -115,6 +300,201 @@ export default function PartsLibrary() {
       <Modal title={`价格历史 - ${historyName}`} open={historyOpen} onCancel={() => setHistoryOpen(false)} footer={null} width={600}>
         <Table dataSource={historyData} rowKey="id" size="small" pagination={false}
           columns={[{ title: '旧价', dataIndex: 'old_cost', render: (v: number) => v?.toFixed(4) }, { title: '新价', dataIndex: 'new_cost', render: (v: number) => v?.toFixed(4) }, { title: '变动', key: 'd', render: (_: any, r: any) => <span style={{ color: r.new_cost > r.old_cost ? '#EF4444' : '#10B981' }}>{(r.new_cost - r.old_cost).toFixed(4)}</span> }, { title: '时间', dataIndex: 'changed_at' }]} />
+      </Modal>
+
+      <Modal
+        title={`供应商管理 - ${currentPart?.name} [${currentPart?.model}]`}
+        open={supplierModalOpen}
+        onCancel={() => {
+          setSupplierModalOpen(false);
+          setCurrentPart(null);
+          setSuppliers([]);
+          setEditingSupplier(null);
+          supplierForm.resetFields();
+        }}
+        footer={null}
+        width={800}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Form form={supplierForm} layout="inline" onFinish={handleSupplierSave}>
+            <Form.Item label="供应商" name="supplier_name" rules={[{ required: true, message: '请输入供应商名称' }]}>
+              <Input placeholder="供应商名称" style={{ width: 150 }} />
+            </Form.Item>
+            <Form.Item label="报价(¥)" name="price" rules={[{ required: true, message: '请输入报价' }]}>
+              <InputNumber min={0} precision={4} style={{ width: 110 }} placeholder="0.0000" />
+            </Form.Item>
+            <Form.Item label="份额(%)" name="share_ratio" rules={[{ required: true, message: '请输入份额' }]}>
+              <InputNumber min={0} max={100} precision={2} style={{ width: 90 }} placeholder="0" />
+            </Form.Item>
+            <Form.Item label="状态" name="is_active">
+              <Select style={{ width: 80 }} options={[{ label: '启用', value: 1 }, { label: '停用', value: 0 }]} />
+            </Form.Item>
+            <Form.Item>
+              <Space>
+                <Button type="primary" htmlType="submit">{editingSupplier ? '更新' : '添加'}</Button>
+                {editingSupplier && (
+                  <Button onClick={() => {
+                    setEditingSupplier(null);
+                    supplierForm.resetFields();
+                  }}>取消</Button>
+                )}
+              </Space>
+            </Form.Item>
+          </Form>
+        </div>
+
+        <Table
+          dataSource={suppliers}
+          rowKey="id"
+          size="small"
+          loading={supplierLoading}
+          pagination={false}
+          columns={[
+            {
+              title: '供应商',
+              dataIndex: 'supplier_name',
+              width: 150,
+              ellipsis: true,
+              render: (text: string, record: any) => {
+                const isLowest = suppliers.length > 1 && record.price === Math.min(...suppliers.map(s => s.price));
+                return (
+                  <Space>
+                    <span>{text}</span>
+                    {isLowest && <Tag color="green">最低价</Tag>}
+                  </Space>
+                );
+              }
+            },
+            {
+              title: '报价(¥)',
+              dataIndex: 'price',
+              width: 110,
+              align: 'right' as const,
+              render: (v: number) => {
+                const isLowest = suppliers.length > 1 && v === Math.min(...suppliers.map(s => s.price));
+                const isHighest = suppliers.length > 1 && v === Math.max(...suppliers.map(s => s.price));
+                return (
+                  <span style={{
+                    fontFamily: 'monospace',
+                    fontWeight: 500,
+                    color: isLowest ? '#10B981' : isHighest ? '#EF4444' : undefined
+                  }}>
+                    ¥{v?.toFixed(4)}
+                  </span>
+                );
+              }
+            },
+            {
+              title: '份额',
+              dataIndex: 'share_ratio',
+              width: 90,
+              align: 'right' as const,
+              render: (v: number) => (
+                <span style={{ fontWeight: 500, color: v > 0 ? '#10B981' : '#94A3B8' }}>
+                  {v || 0}%
+                </span>
+              )
+            },
+            {
+              title: '状态',
+              dataIndex: 'is_active',
+              width: 70,
+              render: (v: number) => <Tag color={v ? 'green' : 'default'}>{v ? '启用' : '停用'}</Tag>
+            },
+            { title: '备注', dataIndex: 'remark', ellipsis: true, width: 120 },
+            {
+              title: '操作',
+              width: 180,
+              render: (_: any, record: any) => (
+                <Space size="small">
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => openSupplierEdit(record)}
+                  >
+                    编辑
+                  </Button>
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => setAsPrimarySupplier(record)}
+                  >
+                    设为主供应商
+                  </Button>
+                  <Popconfirm
+                    title="确定删除？"
+                    onConfirm={() => handleSupplierDelete(record.id)}
+                  >
+                    <Button type="link" size="small" danger>删除</Button>
+                  </Popconfirm>
+                </Space>
+              ),
+            },
+          ]}
+          footer={() => {
+            // 计算统计信息
+            const activeSuppliers = suppliers.filter(s => s.is_active);
+            const totalShare = activeSuppliers.reduce((sum, s) => sum + (Number(s.share_ratio) || 0), 0);
+
+            let weightedPrice = 0;
+            if (totalShare > 0) {
+              weightedPrice = activeSuppliers.reduce((sum, s) => {
+                const share = Number(s.share_ratio) || 0;
+                const price = Number(s.price) || 0;
+                return sum + (price * share / totalShare);
+              }, 0);
+            } else if (activeSuppliers.length > 0) {
+              weightedPrice = Number(activeSuppliers[0]?.price) || 0;
+            }
+
+            const minPrice = suppliers.length > 0 ? Math.min(...suppliers.map(s => s.price)) : 0;
+            const maxPrice = suppliers.length > 0 ? Math.max(...suppliers.map(s => s.price)) : 0;
+
+            return (
+              <div style={{ padding: '12px 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <div>
+                    <span style={{ color: '#64748B', marginRight: 8 }}>供应商数量:</span>
+                    <span style={{ fontSize: 16, fontWeight: 600 }}>{suppliers.length}</span>
+                    <span style={{ color: '#64748B', marginLeft: 16, marginRight: 8 }}>启用:</span>
+                    <span style={{ fontSize: 16, fontWeight: 600, color: '#10B981' }}>{activeSuppliers.length}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748B', marginRight: 8 }}>价格区间:</span>
+                    <span style={{ fontFamily: 'monospace', fontWeight: 500, color: '#10B981' }}>
+                      ¥{minPrice.toFixed(4)}
+                    </span>
+                    <span style={{ margin: '0 8px', color: '#94A3B8' }}>~</span>
+                    <span style={{ fontFamily: 'monospace', fontWeight: 500, color: '#EF4444' }}>
+                      ¥{maxPrice.toFixed(4)}
+                    </span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 12, borderTop: '1px solid #E2E8F0' }}>
+                  <div>
+                    <span style={{ color: '#64748B', marginRight: 8 }}>份额总和:</span>
+                    <span style={{
+                      fontSize: 16,
+                      fontWeight: 600,
+                      color: Math.abs(totalShare - 100) < 0.01 ? '#10B981' : (totalShare > 100 ? '#EF4444' : '#F59E0B')
+                    }}>
+                      {totalShare.toFixed(2)}%
+                    </span>
+                    {Math.abs(totalShare - 100) < 0.01 && <span style={{ color: '#10B981', marginLeft: 8 }}>✓</span>}
+                    {totalShare > 100 && <span style={{ color: '#EF4444', marginLeft: 8, fontSize: 12 }}>超出100%</span>}
+                    {totalShare < 100 && totalShare > 0 && <span style={{ color: '#F59E0B', marginLeft: 8, fontSize: 12 }}>未达100%</span>}
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748B', marginRight: 8 }}>加权成本:</span>
+                    <span style={{ fontSize: 18, fontWeight: 700, color: '#CF0A2C', fontFamily: 'monospace' }}>
+                      ¥{weightedPrice.toFixed(4)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          }}
+        />
       </Modal>
     </div>
   );

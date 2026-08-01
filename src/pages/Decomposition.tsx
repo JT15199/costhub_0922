@@ -1,13 +1,15 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Table, Button, Input, Select, Space, Modal, Form, Tag, message,
-  Popconfirm, Spin, Empty, Descriptions, Tooltip, Progress, Radio, List, Card, Row, Col, Typography, Alert,
+  Popconfirm, Spin, Empty, Tooltip, Progress, Radio, List, Card, Row, Col, Typography, Alert, Timeline,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, ThunderboltOutlined,
   CheckOutlined, SearchOutlined, DownloadOutlined, SendOutlined, QuestionCircleOutlined,
   RadarChartOutlined, ApartmentOutlined, MergeCellsOutlined,
-  ArrowLeftOutlined, BranchesOutlined, SafetyCertificateOutlined,
+  ArrowLeftOutlined, BranchesOutlined, SafetyCertificateOutlined, BugOutlined,
+  RiseOutlined, FallOutlined, MinusOutlined,
+  BarsOutlined, BarChartOutlined, ClockCircleOutlined, HistoryOutlined, InboxOutlined,
 } from '@ant-design/icons';
 import {
   ReactFlow, MiniMap, Controls, Background, Panel, useNodesState, useEdgesState,
@@ -75,14 +77,26 @@ function parseDecompositionItems(response: string): any[] {
   return normalized;
 }
 
-function openExternal(url: string) {
+async function openExternal(url: string) {
   if (!url) return;
-  const win = window.open(url, '_blank', 'noopener,noreferrer');
-  if (!win) window.location.href = url;
+  try {
+    // 直接导入 Tauri shell 插件
+    const { open } = await import('@tauri-apps/plugin-shell');
+    await open(url);
+  } catch (err) {
+    console.error('打开链接失败:', err);
+    // 降级：尝试用window.open
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
 }
 
 const TREND_COLORS: Record<string, string> = { '上涨': '#EF4444', '下降': '#10B981', '震荡': '#F59E0B', '信号不明确': '#94A3B8' };
-const TREND_ICONS: Record<string, string> = { '上涨': '🔺', '下降': '🔻', '震荡': '▬', '信号不明确': '？' };
+const TREND_ICONS: Record<string, React.ReactNode> = {
+  '上涨': <RiseOutlined />,
+  '下降': <FallOutlined />,
+  '震荡': <MinusOutlined />,
+  '信号不明确': <QuestionCircleOutlined />
+};
 const DIRECTION_VALUES: Record<string, number> = { '上涨': 1, '下降': -1, '震荡': 0 };
 
 // ====== 自定义 React Flow 节点 ======
@@ -173,6 +187,7 @@ export default function Decomposition(_props: any) {
   const [convLoading, setConvLoading] = useState(false);
   const [conversations, setConversations] = useState<any[]>([]);
   const [trendSources, setTrendSources] = useState<any[]>([]);
+  const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [insightLoading, setInsightLoading] = useState(false);
   const [rollupLoading, setRollupLoading] = useState(false);
   const [insightDimensions, setInsightDimensions] = useState<any[]>([]);
@@ -531,35 +546,57 @@ export default function Decomposition(_props: any) {
   const handleNodeInsight = async (node: any) => {
     setInsightLoading(true);
     try {
+      console.log('开始洞察节点:', node);
       const hasLLM = await hasLLMConfig();
-      if (!hasLLM) { message.warning('未配置 LLM API Key，请先在「设置」中完成供应商配置'); return; }
+      if (!hasLLM) {
+        message.warning('未配置 LLM API Key，请先在「设置」中完成供应商配置');
+        setInsightLoading(false);
+        return;
+      }
+
       let workingNode = { ...node };
+      console.log('工作节点:', workingNode);
+
       if (!workingNode.trend_item_id) {
+        console.log('创建 trend_item...');
         const catType = workingNode.component_name?.includes('合金') || workingNode.component_name?.includes('树脂') || workingNode.component_name?.includes('钢') || workingNode.component_name?.includes('铝') ? '原材料映射' : '直接查询';
         workingNode.trend_item_id = await ensureTrendItem(workingNode.component_name, catType);
         await saveDecompositionNode({ ...workingNode, trend_item_id: workingNode.trend_item_id });
+        console.log('trend_item_id:', workingNode.trend_item_id);
       }
-      if (!workingNode.trend_item_id) { message.warning('无法创建趋势条目'); return; }
+      if (!workingNode.trend_item_id) {
+        message.warning('无法创建趋势条目');
+        setInsightLoading(false);
+        return;
+      }
 
       // 获取激活的Skill列表（支持多选）
+      console.log('获取 Skill 列表...');
       const { getActiveSkills } = await import('../trendService');
       const skills = getActiveSkills();
+      console.log('激活的 Skills:', skills);
 
       if (skills.length === 0) {
         message.warning('未选择任何Skill，请在设置中选择');
+        setInsightLoading(false);
         return;
       }
 
       // 先搜索一次，然后用多个Skill分析
+      console.log('开始搜索:', workingNode.component_name);
       message.loading({ content: `正在为「${workingNode.component_name}」搜索信息...`, key: 'insight', duration: 0 });
       const result = await agentSearchLoop(workingNode.component_name, '直接查询', undefined,
         (progress: string) => message.loading({ content: progress, key: 'insight', duration: 0 }));
+      console.log('搜索结果:', result);
 
       // 对每个激活的Skill生成洞察
       for (let i = 0; i < skills.length; i++) {
         const skill = skills[i];
+        console.log(`生成洞察 ${i + 1}/${skills.length}:`, skill.name);
         message.loading({ content: `正在按「${skill.name}」生成采购结论 (${i + 1}/${skills.length})...`, key: 'insight', duration: 0 });
         const structured = await createStructuredInsight(workingNode.component_name, skill, result.allSources, result.summary);
+        console.log('结构化洞察结果:', structured);
+
         const snapshotId = await saveTrendSnapshot({
           trend_item_id: workingNode.trend_item_id, source_type: 'direct_query', skill_used: skill.id,
           direction: structured.trend_direction, confidence_level: structured.confidence_level,
@@ -567,6 +604,8 @@ export default function Decomposition(_props: any) {
           magnitude_reference: structured.magnitude_reference, summary: structured.summary,
           suggested_action: structured.suggested_action, raw_search_results: JSON.stringify(result.allSources),
         });
+        console.log('保存快照ID:', snapshotId);
+
         await saveTrendInsightDimensions(snapshotId!, structured.dimensions || []);
         for (const event of structured.key_events || []) {
           if (event.event_description) await saveTrendKeyEvent({ ...event, trend_snapshot_id: snapshotId! });
@@ -583,27 +622,186 @@ export default function Decomposition(_props: any) {
       await loadTree();
       if (selectedId === workingNode.id) await selectNode(workingNode);
     } catch (e: any) {
+      console.error('洞察失败 - 完整错误:', e);
+      console.error('错误类型:', typeof e);
+      console.error('错误字符串:', String(e));
+      console.error('错误堆栈:', e?.stack);
       message.destroy('insight');
-      message.error(`趋势查询失败：${e.message || '未知错误'}`);
+      const errorMsg = e?.message || e?.toString() || JSON.stringify(e) || '未知错误';
+      message.error(`趋势查询失败：${errorMsg}`);
     } finally {
       setInsightLoading(false);
     }
   };
 
   // ====== 节点追问 ======
+  const [followUpModalOpen, setFollowUpModalOpen] = useState(false);
+
   const handleNodeAsk = async () => {
     if (!convAsk.trim() || !selectedNode?.trend_item_id) return;
     const q = convAsk.trim(); setConvAsk(''); setConvLoading(true);
+
+    // 添加一条"正在思考"的临时消息
+    const thinkingMsgId = Date.now();
+    const thinkingMsg = {
+      id: thinkingMsgId,
+      question: q,
+      answer: '',
+      trend_item_id: selectedNode.trend_item_id,
+      created_at: new Date().toISOString(),
+      isStreaming: true,
+    };
+    setConversations(prev => [...prev, thinkingMsg]);
+
     try {
       const hasLLM = await hasLLMConfig();
-      if (!hasLLM) { message.warning('LLM 未配置'); setConvLoading(false); return; }
-      const answer = await (await import('../trendService')).multiTurnAsk(
-        snapshots.length > 0 ? snapshots[snapshots.length - 1]?.raw_search_results || '' : '',
-        '', await getTrendConversations(selectedNode.trend_item_id), q
+      if (!hasLLM) {
+        message.warning('LLM 未配置');
+        setConvLoading(false);
+        setConversations(prev => prev.filter(c => c.id !== thinkingMsgId));
+        return;
+      }
+
+      // 1. 执行联网搜索
+      // 更新临时消息显示搜索状态
+      setConversations(prev => {
+        const newConvs = [...prev];
+        const idx = newConvs.findIndex(c => c.id === thinkingMsgId);
+        if (idx !== -1) newConvs[idx] = { ...newConvs[idx], answer: '🔍 正在搜索相关信息...' };
+        return newConvs;
+      });
+      setConversations(prev => {
+        const newConvs = [...prev];
+        const idx = newConvs.findIndex(c => c.id === thinkingMsgId);
+        if (idx !== -1) newConvs[idx] = { ...newConvs[idx], answer: '🔍 正在搜索相关信息...' };
+        return newConvs;
+      });
+
+      const searchResult = await agentSearchLoop(
+        q,
+        '追问',
+        selectedNode.component_name,
+        (progress: string) => {
+          setConversations(prev => {
+            const newConvs = [...prev];
+            const idx = newConvs.findIndex(c => c.id === thinkingMsgId);
+            if (idx !== -1) newConvs[idx] = { ...newConvs[idx], answer: `🔍 ${progress}` };
+            return newConvs;
+          });
+        }
       );
+
+      // 2. 携带历史对话上下文和搜索结果调用 LLM
+      setConversations(prev => {
+        const newConvs = [...prev];
+        const idx = newConvs.findIndex(c => c.id === thinkingMsgId);
+        if (idx !== -1) newConvs[idx] = { ...newConvs[idx], answer: '💭 正在生成回答...' };
+        return newConvs;
+      });
+
+      const conversationHistory = await getTrendConversations(selectedNode.trend_item_id);
+      const latestSnapshot = snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
+
+      const contextPrompt = `# 追问上下文
+
+物料名称：${selectedNode.component_name}
+
+最新洞察结论：
+${latestSnapshot ? `- 趋势方向：${latestSnapshot.direction}
+- 置信度：${latestSnapshot.confidence_level}
+- 摘要：${latestSnapshot.summary}` : '尚未洞察'}
+
+历史对话：
+${conversationHistory.filter((c: any) => c.id !== thinkingMsgId).map((c: any) => `Q: ${c.question}\nA: ${c.answer}`).join('\n\n')}
+
+最新搜索结果：
+${searchResult.allSources.map((s: any, idx: number) => `${idx + 1}. ${s.title}\n${s.snippet}\n来源: ${s.url}`).join('\n\n')}
+
+请基于以上上下文和最新搜索结果回答用户的追问。`;
+
+      const answer = await askLLM(contextPrompt, q);
+
+      // 模拟流式输出效果
+      let currentText = '';
+      const chars = answer.split('');
+      const chunkSize = Math.max(1, Math.floor(chars.length / 50)); // 分50次输出
+
+      for (let i = 0; i < chars.length; i += chunkSize) {
+        currentText += chars.slice(i, i + chunkSize).join('');
+        setConversations(prev => {
+          const newConvs = [...prev];
+          const idx = newConvs.findIndex(c => c.id === thinkingMsgId);
+          if (idx !== -1) newConvs[idx] = { ...newConvs[idx], answer: currentText };
+          return newConvs;
+        });
+        await new Promise(resolve => setTimeout(resolve, 20)); // 每20ms输出一次
+      }
+
+      // 流式完成后，保存到数据库
       await (await import('../db')).saveTrendConversation({ trend_item_id: selectedNode.trend_item_id, question: q, answer });
+
+      // 追问完成后，异步更新洞察摘要（不阻塞UI）
+      if (selectedNode.trend_item_id) {
+        (async () => {
+          try {
+            const allConversations = await getTrendConversations(selectedNode.trend_item_id);
+            const latestSnap = snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
+            if (!latestSnap) return;
+
+            const updatePrompt = `你是物料采购分析专家。请综合以下信息，更新「${selectedNode.component_name}」的洞察结论。
+
+## 原始洞察结论
+趋势方向：${latestSnap.direction}
+置信度：${latestSnap.confidence_level}
+摘要：${latestSnap.summary}
+
+## 追问对话记录（最近5条）
+${allConversations.slice(-5).map((c: any) => `Q: ${c.question}\nA: ${c.answer}`).join('\n\n')}
+
+## 任务
+1. 综合原始洞察和追问信息，更新摘要（80字以内）
+2. 如果追问信息改变了判断，更新趋势方向
+3. 输出JSON：{"trend_direction":"上涨|下降|震荡|信号不明确","confidence_level":"高|中|低","summary":"更新后的摘要"}`;
+
+            const raw = await askLLM(updatePrompt, '请综合更新洞察结论');
+            let parsed: any;
+            try {
+              parsed = JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, ''));
+            } catch {
+              // 解析失败则不更新
+              return;
+            }
+            if (!parsed.trend_direction || !parsed.summary) return;
+
+            const { saveTrendSnapshot } = await import('../db');
+            await saveTrendSnapshot({
+              trend_item_id: selectedNode.trend_item_id,
+              source_type: 'followup_update',
+              direction: parsed.trend_direction,
+              confidence_level: parsed.confidence_level || latestSnap.confidence_level,
+              magnitude_min: latestSnap.magnitude_min,
+              magnitude_max: latestSnap.magnitude_max,
+              magnitude_reference: latestSnap.magnitude_reference,
+              summary: parsed.summary,
+              suggested_action: latestSnap.suggested_action,
+              raw_search_results: latestSnap.raw_search_results,
+            });
+            // 刷新洞察数据
+            if (selectedNode) await selectNode(selectedNode);
+          } catch (e) {
+            console.error('更新洞察摘要失败:', e);
+          }
+        })();
+      }
+
+      // 重新加载对话列表（移除临时消息，加载真实数据）
       setConversations(await getTrendConversations(selectedNode.trend_item_id));
-    } catch (e: any) { message.error(`追问失败：${e.message}`); setConvAsk(q); }
+      message.success('已获取回答');
+    } catch (e: any) {
+      message.error(`追问失败：${e.message}`);
+      setConvAsk(q);
+      setConversations(prev => prev.filter(c => c.id !== thinkingMsgId));
+    }
     setConvLoading(false);
   };
 
@@ -682,115 +880,273 @@ export default function Decomposition(_props: any) {
     setFeedbackHistoryOpen(true);
   };
 
+  // AI分析过程状态
+  const [aiAnalysisSteps, setAiAnalysisSteps] = useState<string[]>([]);
+
   // ====== AI 起草 ======
   const handleAiDraft = async () => {
     if (!aiDraftName.trim()) return;
     setAiDraftLoading(true);
+    setAiAnalysisSteps([]);
     try {
       const hasLLM = await hasLLMConfig();
       if (!hasLLM) { message.warning('未配置 LLM'); setAiDraftLoading(false); return; }
+
+      // 步骤1：收集上下文
+      setAiAnalysisSteps(['📋 正在收集上下文信息...']);
       const parentInfo = aiDraftParentId ? await getDecompositionNode(aiDraftParentId) : null;
-      const response = await askLLM(
-        `你是物料结构专家。将"${aiDraftName}"分解为子组件。${parentInfo ? `这是「${parentInfo.component_name}」的子组件。` : ''}
-输出 JSON 数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type":"structural|terminal"}]
-规则：3-8个，成本占比≤100。terminal表示末端物料，structural表示需继续拆解的。`,
-        `请分解：${aiDraftName}`
-      );
-      setAiDraftResult(parseDecompositionItems(response));
-    } catch (e: any) { message.error(`AI 起草失败：${e.message}`); }
+
+      // 获取完整的祖先链路（从根节点到当前节点）
+      const ancestorChain: string[] = [];
+      if (parentInfo) {
+        let currentNode = parentInfo;
+        ancestorChain.unshift(currentNode.component_name);
+
+        // 向上追溯到根节点
+        while (currentNode.parent_id) {
+          try {
+            currentNode = await getDecompositionNode(currentNode.parent_id);
+            if (currentNode) {
+              ancestorChain.unshift(currentNode.component_name);
+            } else {
+              break;
+            }
+          } catch {
+            break;
+          }
+        }
+      }
+
+      const contextInfo = ancestorChain.length > 0
+        ? `完整层级：${ancestorChain.join(' → ')} → ${aiDraftName}`
+        : `顶层物料：${aiDraftName}`;
+
+      setAiAnalysisSteps(prev => [...prev, `✓ 上下文：${contextInfo}`]);
+
+      // 步骤2：分析拆解策略
+      setAiAnalysisSteps(prev => [...prev, '🧠 AI正在分析拆解策略...']);
+      await new Promise(r => setTimeout(r, 500)); // 让用户看到过程
+
+      // 改进的Prompt：融入完整上下文和Serenity产业链方法论
+      const systemPrompt = `你是资深的电子产品BOM结构分析专家。你的任务是将物料按照产业链层级和功能模块科学拆解。
+
+## 拆解方法论（基于Serenity产业链分析框架）
+
+### 1. 产业链视角
+- **上游原材料层**：基础材料、化工原料（如FR-4基板、铜箔、树脂）
+- **中游零组件层**：标准器件、芯片、连接器、被动元件
+- **下游模组层**：功能模块、子系统（如电源模块、驱动板）
+
+### 2. 功能模块视角
+- **核心功能**：实现主要产品功能的关键部件（如显示面板、主控芯片）
+- **辅助功能**：支持核心功能的部件（如电源转换、信号处理）
+- **结构保护**：机械结构、外壳、散热、固定件
+
+### 3. 成本占比估算原则
+- **核心器件**：通常占总成本30-50%
+- **标准器件**：占15-25%
+- **结构件**：占10-20%
+- **其他辅料**：占5-15%
+
+### 4. 节点类型判断
+- **terminal（终端物料）**：不可再拆的最小单元，如单个芯片、电阻、螺丝
+- **structural（结构节点）**：可继续拆解的组件，如"电源模块"可拆为"AC-DC转换器 + EMI滤波器 + 保护电路"
+
+## 重要原则：保持上下文一致性
+- 拆解时必须考虑当前组件在整体产品中的位置和作用
+- 子组件的功能必须服务于父组件的功能
+- 拆解粒度要与层级深度相匹配（越往下拆越细）
+
+## 输出格式
+JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type":"structural|terminal"}]
+
+## 约束
+1. 输出3-8个子组件
+2. 成本占比总和必须接近100%（允许95-105%的误差）
+3. 名称要专业、具体，避免"其他"、"辅料"等模糊表述
+4. 优先按功能模块拆解，而非简单罗列零散器件
+5. 同一层级的拆解粒度要一致`;
+
+      let userPrompt = '';
+      if (ancestorChain.length > 0) {
+        // 子组件拆解：提供完整上下文
+        userPrompt = `## 拆解任务
+请将「${aiDraftName}」科学拆解为子组件。
+
+## 上下文信息
+- **完整层级链**：${ancestorChain.join(' → ')} → ${aiDraftName}
+- **父组件**：${parentInfo?.component_name}
+- **当前组件**：${aiDraftName}
+- **层级深度**：第 ${ancestorChain.length + 1} 层
+
+## 拆解要求
+1. **功能关联性**：子组件必须服务于「${aiDraftName}」的功能，并最终支撑「${ancestorChain[0]}」的整体功能
+2. **层级一致性**：拆解粒度要与当前层级深度相匹配
+   - 如果是第2-3层，按功能模块拆解（如"电源模块"、"信号处理模块"）
+   - 如果是第4-5层，按具体器件拆解（如"主控芯片"、"电容组"）
+   - 如果是第6层以上，应该到达terminal节点（单个元器件）
+3. **成本合理性**：考虑「${aiDraftName}」在「${parentInfo?.component_name}」中的占比，合理分配子组件成本
+
+## 分析步骤
+1. 确定「${aiDraftName}」在整体产品中的作用
+2. 识别核心功能→辅助功能→结构保护
+3. 估算各子组件成本占比
+4. 判断是structural还是terminal
+
+请输出JSON数组。`;
+      } else {
+        // 顶层拆解
+        userPrompt = `## 拆解任务
+请将顶层物料「${aiDraftName}」科学拆解为一级子组件。
+
+## 拆解要求
+1. 识别核心功能模块（通常2-4个）
+2. 识别标准器件/辅料模块（1-3个）
+3. 识别结构/包装模块（1-2个）
+4. 估算各模块成本占比
+5. 所有一级模块通常都是structural（可继续拆解）
+
+请输出JSON数组。`;
+      }
+
+      // 步骤3：调用LLM
+      setAiAnalysisSteps(prev => [...prev, '🤖 AI正在生成拆解方案...']);
+      const response = await askLLM(systemPrompt, userPrompt);
+
+      // 步骤4：解析结果
+      setAiAnalysisSteps(prev => [...prev, '🔍 正在解析和验证结果...']);
+      const items = parseDecompositionItems(response);
+
+      // 步骤5：验证合理性
+      const totalRatio = items.reduce((sum, item) => sum + (item.cost_ratio_estimate || 0), 0);
+      const validationMsg = totalRatio >= 95 && totalRatio <= 105
+        ? `✓ 成本占比验证通过（${totalRatio.toFixed(1)}%）`
+        : `⚠ 成本占比需要调整（${totalRatio.toFixed(1)}%）`;
+      setAiAnalysisSteps(prev => [...prev, validationMsg]);
+
+      // 步骤6：完成
+      setAiAnalysisSteps(prev => [...prev, `✅ 分析完成！生成了 ${items.length} 个子组件`]);
+      setAiDraftResult(items);
+
+    } catch (e: any) {
+      setAiAnalysisSteps(prev => [...prev, `❌ 分析失败：${e.message}`]);
+      message.error(`AI 起草失败：${e.message}`);
+    }
     setAiDraftLoading(false);
   };
   const confirmAiDraft = async () => {
-    let count = 0;
-    // 如果是顶层起草（parent_id == null），先创建根节点
-    let rootId = aiDraftParentId;
-    if (rootId === null && aiDraftName.trim()) {
-      rootId = await saveDecompositionNode({
-        parent_id: null,
-        component_name: aiDraftName.trim(),
-        cost_ratio_estimate: null,
-        source_type: 'ai_draft',
-        node_type: 'structural',
-        insight_status: 'pending',
-        trend_item_id: null,
-      });
-      count++;
+    try {
+      if (aiDraftResult.length === 0) {
+        message.warning('请先生成分解结果');
+        return;
+      }
+
+      let count = 0;
+      // 如果是顶层起草（parent_id == null），先创建根节点
+      let rootId = aiDraftParentId;
+      if (rootId === null && aiDraftName.trim()) {
+        console.log('创建顶层节点:', aiDraftName.trim());
+        rootId = await saveDecompositionNode({
+          parent_id: null,
+          component_name: aiDraftName.trim(),
+          cost_ratio_estimate: null,
+          source_type: 'ai_draft',
+          node_type: 'structural',
+          insight_status: 'pending',
+          trend_item_id: null,
+        });
+        console.log('顶层节点ID:', rootId);
+        count++;
+      }
+      for (const item of aiDraftResult) {
+        if (!item.component_name) continue;
+        console.log('保存子节点:', item.component_name, 'parent_id:', rootId);
+        await saveDecompositionNode({
+          parent_id: rootId, component_name: item.component_name,
+          cost_ratio_estimate: item.cost_ratio_estimate ?? null,
+          source_type: 'ai_draft', node_type: item.node_type || 'structural',
+          insight_status: 'pending', trend_item_id: null,
+        });
+        count++;
+      }
+      message.success(`已入库 ${count} 个节点`);
+      setAiDraftOpen(false); setAiDraftName(''); setAiDraftResult([]); setAiDraftParentId(null);
+      await loadTree();
+    } catch (e: any) {
+      console.error('确认入库失败 - 完整错误:', e);
+      console.error('错误类型:', typeof e);
+      console.error('错误字符串:', String(e));
+      console.error('错误堆栈:', e?.stack);
+      const errorMsg = e?.message || e?.toString() || JSON.stringify(e) || '未知错误';
+      message.error(`入库失败：${errorMsg}`);
     }
-    for (const item of aiDraftResult) {
-      if (!item.component_name) continue;
-      await saveDecompositionNode({
-        parent_id: rootId, component_name: item.component_name,
-        cost_ratio_estimate: item.cost_ratio_estimate ?? null,
-        source_type: 'ai_draft', node_type: item.node_type || 'structural',
-        insight_status: 'pending', trend_item_id: null,
-      });
-      count++;
-    }
-    message.success(`已入库 ${count} 个节点`);
-    setAiDraftOpen(false); setAiDraftName(''); setAiDraftResult([]); setAiDraftParentId(null);
-    loadTree();
   };
 
   const confirmNode = async (node: any) => {
-    // 如果是草稿节点，检查其父节点的所有子节点成本占比总和
-    if (node.source_type === 'ai_draft' && node.parent_id) {
-      const siblings = nodes.filter((n: any) => n.parent_id === node.parent_id);
-      const draftSiblings = siblings.filter((n: any) => n.source_type === 'ai_draft');
+    try {
+      // 如果是草稿节点，检查其父节点的所有子节点成本占比总和
+      if (node.source_type === 'ai_draft' && node.parent_id) {
+        const siblings = nodes.filter((n: any) => n.parent_id === node.parent_id);
+        const draftSiblings = siblings.filter((n: any) => n.source_type === 'ai_draft');
 
-      // 如果存在多个草稿子节点，检查成本占比总和
-      if (draftSiblings.length > 1) {
-        const totalRatio = draftSiblings.reduce((sum, n) => sum + (n.cost_ratio_estimate || 0), 0);
+        // 如果存在多个草稿子节点，检查成本占比总和
+        if (draftSiblings.length > 1) {
+          const totalRatio = draftSiblings.reduce((sum, n) => sum + (n.cost_ratio_estimate || 0), 0);
 
-        // 允许99%-101%的误差范围
-        if (totalRatio < 99 || totalRatio > 101) {
-          const confirmed = await new Promise<boolean>((resolve) => {
-            Modal.confirm({
-              title: '⚠️ 成本占比校验失败',
-              content: (
-                <div>
-                  <p>当前父节点下的子节点成本占比总和为 <strong>{totalRatio.toFixed(1)}%</strong>，不在合理范围（99%-101%）内。</p>
-                  <p>建议使用"按比例归一化"功能调整后再确认。</p>
-                </div>
-              ),
-              okText: '仍然确认',
-              cancelText: '取消',
-              onOk: () => resolve(true),
-              onCancel: () => resolve(false),
+          // 允许99%-101%的误差范围
+          if (totalRatio < 99 || totalRatio > 101) {
+            const confirmed = await new Promise<boolean>((resolve) => {
+              Modal.confirm({
+                title: '⚠️ 成本占比校验失败',
+                content: (
+                  <div>
+                    <p>当前父节点下的子节点成本占比总和为 <strong>{totalRatio.toFixed(1)}%</strong>，不在合理范围（99%-101%）内。</p>
+                    <p>建议使用"按比例归一化"功能调整后再确认。</p>
+                  </div>
+                ),
+                okText: '仍然确认',
+                cancelText: '取消',
+                onOk: () => resolve(true),
+                onCancel: () => resolve(false),
+              });
             });
-          });
 
-          if (!confirmed) return;
+            if (!confirmed) return;
+          }
         }
       }
-    }
 
-    let tid = node.trend_item_id;
-    if (node.node_type === 'terminal' && !tid) {
-      const catType = node.component_name?.includes('合金') || node.component_name?.includes('树脂') || node.component_name?.includes('钢') ? '原材料映射' : '直接查询';
-      tid = await ensureTrendItem(node.component_name, catType);
+      let tid = node.trend_item_id;
+      if (node.node_type === 'terminal' && !tid) {
+        const catType = node.component_name?.includes('合金') || node.component_name?.includes('树脂') || node.component_name?.includes('钢') ? '原材料映射' : '直接查询';
+        tid = await ensureTrendItem(node.component_name, catType);
+      }
+      await saveDecompositionNode({ ...node, source_type: 'user_confirmed', trend_item_id: tid });
+      message.success('已确认');
+      await selectNode(node);
+      await loadTree();
+    } catch (e: any) {
+      console.error('确认节点失败:', e);
+      message.error(`确认失败：${e.message || '未知错误'}`);
     }
-    await saveDecompositionNode({ ...node, source_type: 'user_confirmed', trend_item_id: tid });
-    message.success('已确认');
-    selectNode(node); loadTree();
   };
 
   const handleSaveNode = async () => {
-    if (!editingNode?.component_name) { message.warning('请输入名称'); return; }
-    const nt = editingNode.node_type || 'structural';
-    if (nt === 'terminal' && !editingNode.trend_item_id && editingNode.source_type === 'user_confirmed') {
-      const catType = editingNode.component_name?.includes('合金') || editingNode.component_name?.includes('树脂') || editingNode.component_name?.includes('钢') ? '原材料映射' : '直接查询';
-      editingNode.trend_item_id = await ensureTrendItem(editingNode.component_name, catType);
+    try {
+      if (!editingNode?.component_name) { message.warning('请输入名称'); return; }
+      const nt = editingNode.node_type || 'structural';
+      if (nt === 'terminal' && !editingNode.trend_item_id && editingNode.source_type === 'user_confirmed') {
+        const catType = editingNode.component_name?.includes('合金') || editingNode.component_name?.includes('树脂') || editingNode.component_name?.includes('钢') ? '原材料映射' : '直接查询';
+        editingNode.trend_item_id = await ensureTrendItem(editingNode.component_name, catType);
+      }
+      await saveDecompositionNode({ ...editingNode, node_type: nt });
+      setEditModalOpen(false); setEditingNode(null); message.success('已保存');
+      await loadTree();
+      if (selectedId) await selectNode(await getDecompositionNode(selectedId));
+    } catch (e: any) {
+      console.error('保存节点失败:', e);
+      message.error(`保存失败：${e.message || '未知错误'}`);
     }
-    await saveDecompositionNode({ ...editingNode, node_type: nt });
-    setEditModalOpen(false); setEditingNode(null); message.success('已保存');
-    loadTree(); if (selectedId) selectNode(await getDecompositionNode(selectedId));
-  };
-
-  const handleLinkTrend = async (nodeId: number, tid: number | null) => {
-    const node = await getDecompositionNode(nodeId);
-    await saveDecompositionNode({ ...node, trend_item_id: tid, insight_status: tid ? (node.insight_status === 'pending' ? 'pending' : 'queried') : 'pending' });
-    message.success(tid ? '已关联' : '已取消');
-    selectNode(node); loadTree();
   };
 
   const handleSearch = async () => {
@@ -818,18 +1174,26 @@ export default function Decomposition(_props: any) {
 
   // ====== 批量确认草稿 ======
   const handleBatchConfirmDrafts = async () => {
-    const drafts = nodes.filter((n: any) => checkedIds.has(n.id) && n.source_type === 'ai_draft');
-    if (drafts.length === 0) { message.warning('未选中任何草稿节点'); return; }
-    let done = 0, fail = 0;
-    for (const node of drafts) {
-      try {
-        await confirmNode(node);
-        done++;
-      } catch { fail++; }
+    try {
+      const drafts = nodes.filter((n: any) => checkedIds.has(n.id) && n.source_type === 'ai_draft');
+      if (drafts.length === 0) { message.warning('未选中任何草稿节点'); return; }
+      let done = 0, fail = 0;
+      for (const node of drafts) {
+        try {
+          await confirmNode(node);
+          done++;
+        } catch (e) {
+          console.error('确认节点失败:', e);
+          fail++;
+        }
+      }
+      message.success(`批量确认完成：${done} 成功${fail > 0 ? `，${fail} 失败` : ''}`);
+      setCheckedIds(new Set());
+      await loadTree();
+    } catch (e: any) {
+      console.error('批量确认失败:', e);
+      message.error(`批量确认失败：${e.message || '未知错误'}`);
     }
-    message.success(`批量确认完成：${done} 成功${fail > 0 ? `，${fail} 失败` : ''}`);
-    setCheckedIds(new Set());
-    loadTree();
   };
 
   // ====== 批量拆解（先生成草稿预览，不自动入库） ======
@@ -848,12 +1212,23 @@ export default function Decomposition(_props: any) {
     const allResults: { parentId: number; parentName: string; items: any[] }[] = [];
     const failures: string[] = [];
     let done = 0;
+
+    const systemPrompt = `你是资深的电子产品BOM结构分析专家。运用Serenity产业链拆解方法论，按照产业链层级（上游原材料→中游零组件→下游模组）和功能模块（核心功能→辅助功能→结构保护）科学拆解物料。
+
+输出JSON数组：[{"component_name":"专业准确的名称","cost_ratio_estimate":成本占比百分比,"node_type":"structural|terminal"}]
+
+约束：
+1. 3-8个子组件
+2. 成本占比总和必须在95-105%之间
+3. 名称专业具体，避免"其他"等模糊词
+4. terminal=终端物料（不可再拆），structural=结构节点（可继续拆）
+5. 同层级拆解粒度一致`;
+
     for (const node of selected) {
       try {
         const response = await askLLM(
-          `将"${node.component_name}"分解为子组件。输出JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字（占${node.component_name}的百分比，所有子项之和应为100）, "node_type":"structural|terminal"}]
-规则：3-8个子项，cost_ratio_estimate之和应接近100；terminal表示不可再拆的终端物料，structural表示可继续拆解的结构节点。`,
-          `分解：${node.component_name}`
+          systemPrompt,
+          `请将「${node.component_name}」科学拆解为子组件。分析其核心功能→辅助功能→结构保护，估算各部分成本占比。输出JSON数组。`
         );
         allResults.push({
           parentId: node.id,
@@ -924,61 +1299,66 @@ export default function Decomposition(_props: any) {
 
   // 确认批量拆解草稿入库（仅入库为草稿，不自动确认）
   const confirmBatchDecomposeDrafts = async () => {
-    // 校验每个父节点下的子节点成本占比总和
-    const warnings: string[] = [];
-    for (const result of batchDecomposeResults) {
-      const itemsWithRatio = result.items.filter(i => i.cost_ratio_estimate != null && i.component_name);
-      if (itemsWithRatio.length > 1) {
-        const totalRatio = itemsWithRatio.reduce((sum, i) => sum + i.cost_ratio_estimate, 0);
-        if (totalRatio < 99 || totalRatio > 101) {
-          warnings.push(`「${result.parentName}」的子节点占比总和为 ${totalRatio.toFixed(1)}%`);
+    try {
+      // 校验每个父节点下的子节点成本占比总和
+      const warnings: string[] = [];
+      for (const result of batchDecomposeResults) {
+        const itemsWithRatio = result.items.filter(i => i.cost_ratio_estimate != null && i.component_name);
+        if (itemsWithRatio.length > 1) {
+          const totalRatio = itemsWithRatio.reduce((sum, i) => sum + i.cost_ratio_estimate, 0);
+          if (totalRatio < 99 || totalRatio > 101) {
+            warnings.push(`「${result.parentName}」的子节点占比总和为 ${totalRatio.toFixed(1)}%`);
+          }
         }
       }
-    }
 
-    if (warnings.length > 0) {
-      const confirmed = await new Promise<boolean>((resolve) => {
-        Modal.confirm({
-          title: '⚠️ 成本占比校验失败',
-          content: (
-            <div>
-              <p>以下父节点的子节点成本占比总和不在合理范围（99%-101%）内：</p>
-              <ul style={{ marginTop: 8 }}>
-                {warnings.map((w, idx) => <li key={idx}>{w}</li>)}
-              </ul>
-              <p style={{ marginTop: 12 }}>建议先使用"自动归一化到100%"功能调整后再确认入库。</p>
-            </div>
-          ),
-          okText: '仍然入库',
-          cancelText: '取消',
-          onOk: () => resolve(true),
-          onCancel: () => resolve(false),
+      if (warnings.length > 0) {
+        const confirmed = await new Promise<boolean>((resolve) => {
+          Modal.confirm({
+            title: '⚠️ 成本占比校验失败',
+            content: (
+              <div>
+                <p>以下父节点的子节点成本占比总和不在合理范围（99%-101%）内：</p>
+                <ul style={{ marginTop: 8 }}>
+                  {warnings.map((w, idx) => <li key={idx}>{w}</li>)}
+                </ul>
+                <p style={{ marginTop: 12 }}>建议先使用"自动归一化到100%"功能调整后再确认入库。</p>
+              </div>
+            ),
+            okText: '仍然入库',
+            cancelText: '取消',
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          });
         });
-      });
 
-      if (!confirmed) return;
-    }
-
-    let count = 0;
-    for (const result of batchDecomposeResults) {
-      const parentId = result.parentId;
-      for (const item of result.items) {
-        if (!item.component_name) continue;
-        await saveDecompositionNode({
-          parent_id: parentId, component_name: item.component_name,
-          cost_ratio_estimate: item.cost_ratio_estimate ?? null,
-          source_type: 'ai_draft', node_type: item.node_type || 'structural',
-          insight_status: 'pending', trend_item_id: null,
-        });
-        count++;
+        if (!confirmed) return;
       }
+
+      let count = 0;
+      for (const result of batchDecomposeResults) {
+        const parentId = result.parentId;
+        for (const item of result.items) {
+          if (!item.component_name) continue;
+          await saveDecompositionNode({
+            parent_id: parentId, component_name: item.component_name,
+            cost_ratio_estimate: item.cost_ratio_estimate ?? null,
+            source_type: 'ai_draft', node_type: item.node_type || 'structural',
+            insight_status: 'pending', trend_item_id: null,
+          });
+          count++;
+        }
+      }
+      message.success(`已入库 ${count} 个草稿节点，请勾选后使用「批量确认」完成确认`);
+      setBatchDecomposeOpen(false);
+      setBatchDecomposeResults([]);
+      setCostRatioWarning(null);
+      setCheckedIds(new Set());
+      await loadTree();
+    } catch (e: any) {
+      console.error('批量入库失败:', e);
+      message.error(`入库失败：${e.message || '未知错误'}`);
     }
-    message.success(`已入库 ${count} 个草稿节点，请勾选后使用「批量确认」完成确认`);
-    setBatchDecomposeOpen(false);
-    setBatchDecomposeResults([]);
-    setCostRatioWarning(null);
-    setCheckedIds(new Set());
-    loadTree();
   };
 
   // ====== 批量洞察 ======
@@ -1233,7 +1613,7 @@ export default function Decomposition(_props: any) {
 
         {/* 顶层物料标题 */}
         <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: 'var(--text-secondary)' }}>
-          🌳 顶层物料清单
+          <ApartmentOutlined /> 顶层物料清单
         </h3>
 
         {topLevelNodes.length === 0 ? (
@@ -1283,7 +1663,7 @@ export default function Decomposition(_props: any) {
                       description={
                         <div style={{ fontSize: 12, lineHeight: '2' }}>
                           {snap && <Tag color={TREND_COLORS[trendDir]} style={{ fontSize: 10 }}>{TREND_ICONS[trendDir]} {trendDir}</Tag>}
-                          <div>📦 {stats.total} 个节点 · {stats.confirmed} 已确认</div>
+                          <div><InboxOutlined /> {stats.total} 个节点 · {stats.confirmed} 已确认</div>
                           <Space size={6} style={{ marginTop: 4 }}>
                             <Button size="small" type="primary" icon={<BranchesOutlined />} onClick={() => enterTreeView(node.id)}>查看分解树</Button>
                             <Button size="small" icon={<RadarChartOutlined />} onClick={() => requestInsightWithPreview(node)}>AI 洞察</Button>
@@ -1348,6 +1728,35 @@ export default function Decomposition(_props: any) {
                 setEditingNode({ parent_id: selectedId || rootNodeId, component_name: '', cost_ratio_estimate: null, source_type: 'user_confirmed', node_type: 'structural', insight_status: 'pending', trend_item_id: null });
                 setEditModalOpen(true);
               }}>手动加节点</Button>
+
+            {/* 调试按钮：打开控制台 */}
+            <Button
+              size="small"
+              icon={<BugOutlined />}
+              onClick={() => {
+                // 提示用户右键打开控制台
+                Modal.info({
+                  title: '打开开发者控制台',
+                  content: (
+                    <div>
+                      <p>请按以下方式打开控制台查看调试信息：</p>
+                      <ol>
+                        <li>在窗口任意位置<strong>右键点击</strong></li>
+                        <li>选择"<strong>Inspect Element</strong>"或"<strong>检查元素</strong>"</li>
+                        <li>控制台会显示详细的错误信息</li>
+                      </ol>
+                      <p style={{ marginTop: 12, color: '#666', fontSize: 12 }}>
+                        或者尝试按 <code>F12</code> 或 <code>Ctrl+Shift+I</code>
+                      </p>
+                    </div>
+                  ),
+                  okText: '知道了'
+                });
+              }}
+            >
+              🐛 调试
+            </Button>
+
             <div style={{ flex: 1 }} />
             {selectedNode?.source_type === 'ai_draft' && (
               <Button size="small" type="primary" icon={<CheckOutlined />} onClick={() => confirmNode(selectedNode)}>确认草稿</Button>
@@ -1403,7 +1812,7 @@ export default function Decomposition(_props: any) {
                 />
                 <Panel position="top-left">
                   <div style={{ padding: '8px 10px', borderRadius: 10, background: 'color-mix(in srgb, var(--card-bg, #fff) 92%, transparent)', border: '1px solid var(--card-border, #E2E8F0)', boxShadow: '0 4px 12px rgba(15,23,42,0.08)', fontSize: 11, color: 'var(--text-secondary, #475569)' }}>
-                    <div style={{ fontWeight: 700, marginBottom: 3 }}>🌳 智能分解画布</div>
+                    <div style={{ fontWeight: 700, marginBottom: 3 }}><ApartmentOutlined /> 智能分解画布</div>
                     {canvasHintVisible ? '点击节点查看详情；终端节点可直接洞察，结构节点可继续拆解。' : '拖拽调整布局 · 滚轮缩放 · 点击空白处取消选择'}
                   </div>
                 </Panel>
@@ -1436,21 +1845,21 @@ export default function Decomposition(_props: any) {
                       {selectedNode.node_type === 'terminal' ? '终端' : '结构'}
                     </Tag>
                     {selectedNode.insight_status === 'pending' && selectedNode.node_type === 'terminal' && <Tag color="gold">⏳待洞察</Tag>}
-                    {rollupResult?.source_type === 'aggregated' && <Tag color="purple">📊已汇总</Tag>}
+                    {rollupResult?.source_type === 'aggregated' && <Tag color="purple" icon={<BarChartOutlined />}>已汇总</Tag>}
                   </div>
                   <Space wrap>
                     {selectedNode.source_type === 'ai_draft' && (
                       <Button size="small" type="primary" icon={<CheckOutlined />} onClick={() => confirmNode(selectedNode)}>确认</Button>
                     )}
                     {selectedNode.source_type === 'user_confirmed' && selectedNode.node_type !== 'terminal' && (
-                      <Button size="small" icon={<ThunderboltOutlined />} onClick={() => { setAiDraftParentId(selectedNode.id); setAiDraftName(selectedNode.component_name); setAiDraftResult([]); setAiDraftOpen(true); }}>⚡拆解</Button>
+                      <Button size="small" icon={<ThunderboltOutlined />} onClick={() => { setAiDraftParentId(selectedNode.id); setAiDraftName(selectedNode.component_name); setAiDraftResult([]); setAiDraftOpen(true); }}>AI拆解</Button>
                     )}
                     {/* 终端节点：发起洞察 */}
                     {selectedNode.source_type === 'user_confirmed' && selectedNode.node_type === 'terminal' && (
                       <Tooltip title="只发送物料通用名称，不包含本地价格、供应商和 BOM 数据。">
                         <Button size="small" type="primary" icon={<RadarChartOutlined />}
                           onClick={() => requestInsightWithPreview(selectedNode)} loading={insightLoading}>
-                          🔍 {selectedNode.insight_status === 'queried' ? '重新洞察行情' : 'AI 洞察行情'}
+                          {selectedNode.insight_status === 'queried' ? '重新洞察行情' : 'AI 洞察行情'}
                         </Button>
                       </Tooltip>
                     )}
@@ -1460,7 +1869,7 @@ export default function Decomposition(_props: any) {
                         <Tooltip title="直接对该结构节点发起市场行情洞察">
                           <Button size="small" icon={<RadarChartOutlined />} type="primary"
                             onClick={() => requestInsightWithPreview(selectedNode)} loading={insightLoading}>
-                            🔍 洞察行情
+                            洞察行情
                           </Button>
                         </Tooltip>
                         {canRollup && childrenTotal.length > 0 && childrenQueried.length > 0 && (
@@ -1496,7 +1905,9 @@ export default function Decomposition(_props: any) {
 
                 {rollupResult?.source_type === 'aggregated' && (
                   <div style={{ marginBottom: 12, padding: 12, background: 'var(--main-bg)', borderRadius: 10, border: '1px solid #C4B5FD' }}>
-                    <div style={{ fontWeight: 600, marginBottom: 6 }}>📊 趋势汇总</div>
+                    <div style={{ fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <ApartmentOutlined /> 趋势汇总
+                    </div>
                     <Space><Tag color={TREND_COLORS[rollupResult.direction]} style={{ fontSize: 13 }}>{TREND_ICONS[rollupResult.direction]} {rollupResult.direction}</Tag><Tag>{rollupResult.confidence_level}置信</Tag><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{rollupResult.query_time?.slice(0, 10)}</span></Space>
                     <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.6 }}><ReactMarkdown remarkPlugins={[remarkGfm]}>{rollupResult.summary}</ReactMarkdown></div>
                   </div>
@@ -1509,14 +1920,18 @@ export default function Decomposition(_props: any) {
                   if (!s) return null;
                   return (
                     <div style={{ marginBottom: 12, padding: 12, background: 'var(--main-bg)', borderRadius: 10, border: '1px solid var(--card-border)' }}>
-                      <div style={{ fontWeight: 600, marginBottom: 6 }}>📡 最新洞察 {s.skill_used ? <Tag style={{ fontSize: 10 }}>框架：{s.skill_used}</Tag> : null}</div>
-                      <Space><Tag color={TREND_COLORS[s.direction]} style={{ fontSize: 13 }}>{TREND_ICONS[s.direction]} {s.direction}</Tag><Tag>{s.confidence_level}置信</Tag>{s.magnitude_min != null && <Tag>幅度 {s.magnitude_min}%~{s.magnitude_max}%</Tag>}<span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.query_time?.slice(0, 10)}</span></Space>
+                      <div style={{ fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <RadarChartOutlined /> 最新洞察 {s.skill_used ? <Tag style={{ fontSize: 10 }}>框架：{s.skill_used}</Tag> : null}
+                      </div>
+                      <Space><Tag color={TREND_COLORS[s.direction]} style={{ fontSize: 13 }}>{TREND_ICONS[s.direction]} {s.direction}</Tag><Tag>{s.confidence_level}置信</Tag>{s.magnitude_min != null && <Tag>幅度 {String(s.magnitude_min).replace('%', '')}% ~ {String(s.magnitude_max).replace('%', '')}%</Tag>}<span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.query_time?.slice(0, 10)}</span></Space>
                       <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.6 }}><ReactMarkdown remarkPlugins={[remarkGfm]}>{s.summary}</ReactMarkdown></div>
                       {/* 维度展示 */}
                       {insightDimensions.length > 0 && (
                         <div style={{ marginTop: 12, borderTop: '1px solid var(--card-border)', paddingTop: 12 }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>📋 分维度分析</div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <BarsOutlined /> 分维度分析
+                            </div>
                             {availableHistoryTimes.length > 1 && (
                               <Select
                                 size="small"
@@ -1529,7 +1944,7 @@ export default function Decomposition(_props: any) {
                                 style={{ width: 180, fontSize: 11 }}
                                 options={availableHistoryTimes.map(time => ({
                                   value: time,
-                                  label: time ? new Date(time).toLocaleString('zh-CN') : '未知时间'
+                                  label: time ? new Date(time).toLocaleString('zh-CN') : '早期记录'
                                 }))}
                               />
                             )}
@@ -1691,15 +2106,29 @@ export default function Decomposition(_props: any) {
                   );
                 })()}
 
-                <Descriptions column={2} size="small" bordered>
-                  <Descriptions.Item label="来源"><Tag color={selectedNode.source_type === 'ai_draft' ? 'orange' : 'green'}>{selectedNode.source_type === 'ai_draft' ? 'AI草稿' : '已确认'}</Tag></Descriptions.Item>
-                  <Descriptions.Item label="成本%">{selectedNode.cost_ratio_estimate != null ? `${selectedNode.cost_ratio_estimate}%` : '-'}</Descriptions.Item>
-                  <Descriptions.Item label="父节点">{selectedNode.parent_id ? (nodes.find((n: any) => n.id === selectedNode.parent_id)?.component_name || '-') : '顶层'}</Descriptions.Item>
-                  <Descriptions.Item label="趋势条目">{selectedNode.trend_item_id ? <Tag color="blue">📡{trendItems.find((t: any) => t.id === selectedNode.trend_item_id)?.query_category || ''}<Button size="small" type="link" danger onClick={() => handleLinkTrend(selectedNode.id, null)}>取消</Button></Tag> :
-                    <Select size="small" placeholder="关联" style={{ width: 130 }} value={undefined} onChange={v => handleLinkTrend(selectedNode.id, v ?? null)} allowClear>{trendItems.map((t: any) => <Select.Option key={t.id} value={t.id}>{t.query_category}</Select.Option>)}</Select>}</Descriptions.Item>
-                  <Descriptions.Item label="洞察"><Tag color={selectedNode.insight_status === 'queried' ? 'green' : 'gold'}>{selectedNode.insight_status === 'queried' ? '✅已查询' : '⏳待洞察'}</Tag></Descriptions.Item>
-                  <Descriptions.Item label="更新">{selectedNode.updated_at || '-'}</Descriptions.Item>
-                </Descriptions>
+                {/* 节点关键信息 - 紧凑展示 */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 12, fontSize: 12 }}>
+                  <Tag color={selectedNode.source_type === 'ai_draft' ? 'orange' : 'green'}>
+                    {selectedNode.source_type === 'ai_draft' ? 'AI草稿' : '已确认'}
+                  </Tag>
+                  {selectedNode.cost_ratio_estimate != null && (
+                    <Tag>成本占比 {selectedNode.cost_ratio_estimate}%</Tag>
+                  )}
+                  <Tag color={selectedNode.insight_status === 'queried' ? 'green' : 'gold'} icon={selectedNode.insight_status === 'queried' ? <CheckOutlined /> : <ClockCircleOutlined />}>
+                    {selectedNode.insight_status === 'queried' ? '已洞察' : '待洞察'}
+                  </Tag>
+                  {selectedNode.updated_at && (
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      <ClockCircleOutlined style={{ marginRight: 4 }} />
+                      {new Date(selectedNode.updated_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                  {selectedNode.parent_id && (
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      父节点: {nodes.find((n: any) => n.id === selectedNode.parent_id)?.component_name || '-'}
+                    </span>
+                  )}
+                </div>
 
                 {trendSources.length > 0 && (
                   <div style={{ marginTop: 12, padding: 12, border: '1px solid #E2E8F0', borderRadius: 8, background: '#F8FAFC' }}>
@@ -1709,7 +2138,7 @@ export default function Decomposition(_props: any) {
                     </div>
                     <List
                       size="small"
-                      dataSource={trendSources.slice(0, 8)}
+                      dataSource={sourcesExpanded ? trendSources : trendSources.slice(0, 3)}
                       renderItem={(source: any, index) => (
                         <List.Item style={{ alignItems: 'flex-start', padding: '8px 0' }}>
                           <div style={{ width: '100%' }}>
@@ -1733,6 +2162,53 @@ export default function Decomposition(_props: any) {
                           </div>
                         </List.Item>
                       )}
+                    />
+                    {trendSources.length > 3 && (
+                      <div
+                        onClick={() => setSourcesExpanded(v => !v)}
+                        style={{ marginTop: 6, fontSize: 12, color: '#3B82F6', cursor: 'pointer', textAlign: 'center', padding: '4px 0', borderTop: '1px solid #E2E8F0' }}
+                      >
+                        {sourcesExpanded ? '▲ 收起' : `▼ 展开剩余 ${trendSources.length - 3} 条来源`}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 历史记录时间线 */}
+                {snapshots.length > 1 && (
+                  <div style={{ marginTop: 12, padding: 12, border: '1px solid #E2E8F0', borderRadius: 8, background: '#F8FAFC' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <HistoryOutlined /> 历史洞察记录
+                      </h4>
+                      <Tag color="purple" style={{ margin: 0 }}>{snapshots.length} 次</Tag>
+                    </div>
+                    <Timeline
+                      mode="left"
+                      items={snapshots.slice().reverse().map((snap: any) => ({
+                        color: TREND_COLORS[snap.direction] || '#94A3B8',
+                        dot: snap.source_type === 'aggregated' ? <ApartmentOutlined /> : <RadarChartOutlined />,
+                        children: (
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                              <Tag color={TREND_COLORS[snap.direction]} style={{ margin: 0 }}>
+                                {TREND_ICONS[snap.direction]} {snap.direction}
+                              </Tag>
+                              {snap.confidence_level && <Tag style={{ margin: 0 }}>{snap.confidence_level}置信</Tag>}
+                              {snap.source_type === 'aggregated' && <Tag color="purple" style={{ margin: 0 }}>汇总</Tag>}
+                              {snap.skill_used && <Tag color="blue" style={{ margin: 0, fontSize: 10 }}>{snap.skill_used}</Tag>}
+                            </div>
+                            <div style={{ fontSize: 11, color: '#64748B', marginBottom: 4 }}>
+                              <ClockCircleOutlined /> {snap.query_time ? new Date(snap.query_time).toLocaleString('zh-CN') : `第 ${snapshots.length - snapshots.slice().reverse().indexOf(snap) - 1 + 1} 次洞察`}
+                            </div>
+                            {snap.summary && (
+                              <div style={{ fontSize: 12, lineHeight: 1.5, color: '#475569', marginTop: 6 }}>
+                                {snap.summary.slice(0, 100)}{snap.summary.length > 100 ? '...' : ''}
+                              </div>
+                            )}
+                          </div>
+                        ),
+                      }))}
                     />
                   </div>
                 )}
@@ -1763,28 +2239,29 @@ export default function Decomposition(_props: any) {
               </div>
 
               <div className="content-card" style={{ flexShrink: 0 }}>
-                <h4>💬 节点追问</h4>
+                <h4 style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span><QuestionCircleOutlined /> 智能追问</span>
+                  {conversations.length > 0 && (
+                    <Tag color="blue">{conversations.length} 条对话</Tag>
+                  )}
+                </h4>
                 {conversations.length > 0 && (
-                  <div style={{ maxHeight: 120, overflow: 'auto', marginBottom: 8 }}>
-                    {conversations.map((c: any, i: number) => (
-                      <div key={c.id || i} style={{ marginBottom: 6 }}>
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 2, fontSize: 12 }}>
-                          <div style={{ background: 'var(--brand-gradient)', color: '#fff', padding: '4px 10px', borderRadius: '12px 12px 3px 12px', maxWidth: '80%' }}>{c.question}</div>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'flex-start', fontSize: 12 }}>
-                          <div style={{ background: 'var(--card-bg)', border: '1px solid var(--card-border)', padding: '4px 10px', borderRadius: '12px 12px 12px 3px', maxWidth: '85%', fontSize: 13, lineHeight: 1.6 }}><ReactMarkdown remarkPlugins={[remarkGfm]}>{c.answer}</ReactMarkdown></div>
-                        </div>
-                      </div>
-                    ))}
+                  <div style={{ marginBottom: 8, padding: '8px 12px', background: 'var(--main-bg)', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+                    最近追问：{conversations[conversations.length - 1]?.question}
                   </div>
                 )}
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <Input placeholder="追问..." value={convAsk} onChange={e => setConvAsk(e.target.value)}
-                    onPressEnter={handleNodeAsk} style={{ flex: 1, borderRadius: 20 }} size="small"
-                    prefix={<QuestionCircleOutlined />} disabled={!selectedNode?.trend_item_id} />
-                  <Button type="primary" icon={<SendOutlined />} onClick={handleNodeAsk}
-                    disabled={!convAsk.trim() || convLoading || !selectedNode?.trend_item_id}
-                    shape="circle" size="small" loading={convLoading} />
+                <Button
+                  type="primary"
+                  block
+                  icon={<SendOutlined />}
+                  onClick={() => setFollowUpModalOpen(true)}
+                  disabled={!selectedNode?.trend_item_id}
+                  style={{ borderRadius: 8 }}
+                >
+                  {conversations.length > 0 ? '继续追问' : '开始追问'}
+                </Button>
+                <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
+                  💡 点击打开对话窗口，自动联网搜索最新信息
                 </div>
               </div>
             </div>
@@ -1819,10 +2296,60 @@ export default function Decomposition(_props: any) {
           onCancel={() => setAiDraftOpen(false)} width={650} footer={[
           <Button key="cancel" onClick={() => setAiDraftOpen(false)}>取消</Button>,
           <Button key="retry" onClick={handleAiDraft} loading={aiDraftLoading}>重生成</Button>,
+          aiDraftResult.length > 0 && (() => {
+            const totalRatio = aiDraftResult.reduce((sum, item) => sum + (item.cost_ratio_estimate || 0), 0);
+            const needsNormalize = totalRatio < 95 || totalRatio > 105;
+            return needsNormalize ? <Button key="normalize" onClick={() => {
+              const sum = aiDraftResult.reduce((s, i) => s + (i.cost_ratio_estimate || 0), 0);
+              if (sum > 0) {
+                const ratio = 100 / sum;
+                setAiDraftResult(aiDraftResult.map(i => ({
+                  ...i,
+                  cost_ratio_estimate: i.cost_ratio_estimate != null ? Math.round(i.cost_ratio_estimate * ratio * 10) / 10 : null,
+                })));
+                message.success('已归一化到100%');
+              }
+            }}>归一化到100%</Button> : null;
+          })(),
           <Button key="confirm" type="primary" onClick={confirmAiDraft}>确认入库</Button>,
         ]}>
           <Form><Form.Item label="名称"><Input value={aiDraftName} onChange={e => setAiDraftName(e.target.value)} placeholder="输入物料名称" onPressEnter={handleAiDraft} size="large" /></Form.Item></Form>
-          {aiDraftLoading && <Spin tip="AI分析中..." style={{ display: 'block', margin: '20px auto' }} />}
+
+          {/* AI分析过程显示 */}
+          {aiDraftLoading && (
+            <div style={{ margin: '20px 0', padding: '16px', background: 'var(--main-bg)', borderRadius: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+                <Spin size="small" style={{ marginRight: 8 }} />
+                <span style={{ fontWeight: 600, fontSize: 14 }}>AI 分析中...</span>
+              </div>
+              <div style={{ fontSize: 12, lineHeight: 2, color: 'var(--text-secondary)' }}>
+                {aiAnalysisSteps.map((step, idx) => (
+                  <div key={idx} style={{
+                    paddingLeft: 16,
+                    opacity: idx === aiAnalysisSteps.length - 1 ? 1 : 0.6,
+                    fontWeight: idx === aiAnalysisSteps.length - 1 ? 600 : 400,
+                  }}>
+                    {step}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {aiDraftResult.length > 0 && (() => {
+            const totalRatio = aiDraftResult.reduce((sum, item) => sum + (item.cost_ratio_estimate || 0), 0);
+            const needsWarning = totalRatio < 95 || totalRatio > 105;
+            return needsWarning ? (
+              <Alert type="warning" showIcon
+                message={`成本占比总和为 ${totalRatio.toFixed(1)}%，不在合理范围（95%-105%）`}
+                description="建议点击「归一化到100%」按钮调整，或手动修改各项占比。"
+                style={{ marginBottom: 12 }} />
+            ) : (
+              <Alert type="success" showIcon
+                message={`成本占比总和为 ${totalRatio.toFixed(1)}%，符合要求 ✓`}
+                style={{ marginBottom: 12 }} />
+            );
+          })()}
           {aiDraftResult.length > 0 && (
             <Table dataSource={aiDraftResult.map((item: any, i: number) => ({ ...item, key: i }))}
               columns={[
@@ -1873,7 +2400,7 @@ export default function Decomposition(_props: any) {
               )}
               {batchDecomposeResults.map((result, idx) => (
                 <div key={idx} style={{ marginBottom: 16, padding: 12, background: 'var(--main-bg)', borderRadius: 8 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 8 }}>📦 {result.parentName}</div>
+                  <div style={{ fontWeight: 600, marginBottom: 8 }}><InboxOutlined /> {result.parentName}</div>
                   <Table
                     dataSource={result.items.map((item, i) => ({ ...item, key: i }))}
                     columns={[
@@ -1948,6 +2475,125 @@ export default function Decomposition(_props: any) {
               </Select></Form.Item>
             </Form>
           )}
+        </Modal>
+
+        {/* 追问对话历史弹窗 */}
+        <Modal
+          title={
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <QuestionCircleOutlined style={{ color: '#8B5CF6' }} />
+              <span>智能追问对话</span>
+              {selectedNode && <Tag color="blue">{selectedNode.component_name}</Tag>}
+            </div>
+          }
+          open={followUpModalOpen}
+          onCancel={() => setFollowUpModalOpen(false)}
+          width={900}
+          footer={null}
+          bodyStyle={{ padding: 0 }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', height: 600 }}>
+            {/* 对话历史区域 */}
+            <div style={{ flex: 1, overflow: 'auto', padding: '20px 24px', background: '#F9FAFB' }}>
+              {conversations.length === 0 ? (
+                <Empty
+                  description="还没有对话记录"
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  style={{ marginTop: 60 }}
+                />
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {conversations.map((c: any, i: number) => (
+                    <div key={c.id || i} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {/* 用户问题 */}
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <div style={{
+                          maxWidth: '75%',
+                          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                          color: '#fff',
+                          padding: '12px 16px',
+                          borderRadius: '16px 16px 4px 16px',
+                          boxShadow: '0 2px 8px rgba(102, 126, 234, 0.3)',
+                        }}>
+                          <div style={{ fontSize: 13, lineHeight: 1.6, fontWeight: 500 }}>
+                            {c.question}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* AI 回答 */}
+                      <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                        <div style={{
+                          maxWidth: '85%',
+                          background: '#fff',
+                          border: '1px solid #E5E7EB',
+                          padding: '14px 18px',
+                          borderRadius: '16px 16px 16px 4px',
+                          boxShadow: '0 2px 6px rgba(0, 0, 0, 0.05)',
+                        }}>
+                          {c.isStreaming && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, color: '#8B5CF6' }}>
+                              <Spin size="small" />
+                              <span style={{ fontSize: 11 }}>思考中...</span>
+                            </div>
+                          )}
+                          <div style={{ fontSize: 13, lineHeight: 1.7, color: '#1F2937' }}>
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{c.answer}</ReactMarkdown>
+                          </div>
+                          {!c.isStreaming && (
+                            <div style={{ marginTop: 8, fontSize: 11, color: '#9CA3AF', display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <ClockCircleOutlined />
+                              <span>{c.created_at ? new Date(c.created_at).toLocaleString('zh-CN') : '刚刚'}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 输入区域 */}
+            <div style={{
+              borderTop: '1px solid #E5E7EB',
+              padding: '16px 24px',
+              background: '#fff',
+            }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
+                <Input.TextArea
+                  placeholder="继续追问物料行情..."
+                  value={convAsk}
+                  onChange={e => setConvAsk(e.target.value)}
+                  onPressEnter={(e) => {
+                    if (!e.shiftKey) {
+                      e.preventDefault();
+                      handleNodeAsk();
+                    }
+                  }}
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                  style={{ flex: 1, borderRadius: 12, fontSize: 13 }}
+                  disabled={!selectedNode?.trend_item_id || convLoading}
+                />
+                <Tooltip title="Shift+Enter 换行，Enter 发送">
+                  <Button
+                    type="primary"
+                    icon={<SearchOutlined />}
+                    size="large"
+                    onClick={handleNodeAsk}
+                    disabled={!convAsk.trim() || convLoading || !selectedNode?.trend_item_id}
+                    loading={convLoading}
+                    style={{ height: 40, borderRadius: 12, paddingLeft: 20, paddingRight: 20 }}
+                  >
+                    🔍 搜索并回答
+                  </Button>
+                </Tooltip>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 11, color: '#6B7280' }}>
+                💡 追问会自动联网搜索最新信息，并结合历史对话上下文回答
+              </div>
+            </div>
+          </div>
         </Modal>
       </>
     );

@@ -24,6 +24,119 @@ async function ignoreSchemaError(task: Promise<any>) {
 }
 
 async function ensureSchema(d: Database) {
+  // 首先确保关键表存在（防止迁移未执行）
+  try {
+    await d.execute(`
+      CREATE TABLE IF NOT EXISTS decomposition_tree (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        root_part_id INTEGER,
+        parent_id INTEGER,
+        component_name TEXT NOT NULL,
+        cost_ratio_estimate REAL DEFAULT NULL,
+        source_type TEXT DEFAULT 'user_confirmed',
+        node_type TEXT DEFAULT 'structural',
+        insight_status TEXT DEFAULT 'pending',
+        trend_item_id INTEGER DEFAULT NULL,
+        remark TEXT DEFAULT '',
+        ai_insights TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT DEFAULT (datetime('now','localtime'))
+      )
+    `);
+    console.log('✓ decomposition_tree 表已确保存在');
+  } catch (e) {
+    console.error('创建 decomposition_tree 表失败:', e);
+  }
+
+  // 确保 decomposition_history 表存在
+  try {
+    await d.execute(`
+      CREATE TABLE IF NOT EXISTS decomposition_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        root_part_id INTEGER NOT NULL,
+        timestamp TEXT DEFAULT (datetime('now','localtime')),
+        summary TEXT DEFAULT ''
+      )
+    `);
+    console.log('✓ decomposition_history 表已确保存在');
+  } catch (e) {
+    console.error('创建 decomposition_history 表失败:', e);
+  }
+
+  // 确保 trend_part_mapping 表存在
+  try {
+    await d.execute(`
+      CREATE TABLE IF NOT EXISTS trend_part_mapping (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        part_id INTEGER NOT NULL,
+        trend_item_id INTEGER NOT NULL,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+      )
+    `);
+    console.log('✓ trend_part_mapping 表已确保存在');
+  } catch (e) {
+    console.error('创建 trend_part_mapping 表失败:', e);
+  }
+
+  // 确保 material_categories 表存在
+  try {
+    await d.execute(`
+      CREATE TABLE IF NOT EXISTS material_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category_name TEXT NOT NULL UNIQUE
+      )
+    `);
+    console.log('✓ material_categories 表已确保存在');
+  } catch (e) {
+    console.error('创建 material_categories 表失败:', e);
+  }
+
+  // 确保 ai_request_logs 表存在（用于审计）
+  try {
+    await d.execute(`
+      CREATE TABLE IF NOT EXISTS ai_request_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        request_type TEXT NOT NULL,
+        material_name TEXT DEFAULT '',
+        system_prompt TEXT DEFAULT '',
+        user_prompt TEXT DEFAULT '',
+        response_summary TEXT DEFAULT '',
+        success INTEGER DEFAULT 1,
+        error_message TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+      )
+    `);
+    console.log('✓ ai_request_logs 表已确保存在');
+  } catch (e) {
+    console.error('创建 ai_request_logs 表失败:', e);
+  }
+
+  // 为 trend_items 表添加缺失的列
+  await ignoreSchemaError(d.execute('ALTER TABLE trend_items ADD COLUMN magnitude_min REAL DEFAULT NULL'));
+  await ignoreSchemaError(d.execute('ALTER TABLE trend_items ADD COLUMN magnitude_max REAL DEFAULT NULL'));
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_items ADD COLUMN magnitude_reference TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_items ADD COLUMN source_type TEXT DEFAULT 'decomposition'"));
+
+  // 为 trend_snapshots 表添加缺失的列
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_snapshots ADD COLUMN confidence TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_snapshots ADD COLUMN confidence_level TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_snapshots ADD COLUMN magnitude_min REAL DEFAULT NULL"));
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_snapshots ADD COLUMN magnitude_max REAL DEFAULT NULL"));
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_snapshots ADD COLUMN magnitude_reference TEXT DEFAULT ''"));
+
+  // 为 trend_insight_dimensions 表添加缺失的列
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_insight_dimensions ADD COLUMN data_points TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_insight_dimensions ADD COLUMN source_title TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_insight_dimensions ADD COLUMN source_url TEXT DEFAULT ''"));
+
+  // 为 trend_key_events 表添加缺失的列（确保所有列都存在）
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_key_events ADD COLUMN event_date TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_key_events ADD COLUMN event_description TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_key_events ADD COLUMN impact_direction TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_key_events ADD COLUMN source_title TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE trend_key_events ADD COLUMN source_url TEXT DEFAULT ''"));
+
+  // 原有的列补齐逻辑
   await ignoreSchemaError(d.execute('ALTER TABLE parts ADD COLUMN trend_enabled INTEGER DEFAULT 0'));
   await ignoreSchemaError(d.execute("ALTER TABLE parts ADD COLUMN trend_query_category TEXT DEFAULT ''"));
   await ignoreSchemaError(d.execute("ALTER TABLE parts ADD COLUMN trend_category_type TEXT DEFAULT '直接查询'"));
@@ -31,6 +144,7 @@ async function ensureSchema(d: Database) {
   await ignoreSchemaError(d.execute('ALTER TABLE part_suppliers ADD COLUMN price REAL DEFAULT 0'));
   await ignoreSchemaError(d.execute('ALTER TABLE part_suppliers ADD COLUMN share_ratio REAL DEFAULT 0'));
   await ignoreSchemaError(d.execute('ALTER TABLE part_suppliers ADD COLUMN is_active INTEGER DEFAULT 1'));
+  await ignoreSchemaError(d.execute('ALTER TABLE part_suppliers ADD COLUMN unit_price REAL DEFAULT 0'));
 
   await ignoreSchemaError(d.execute("ALTER TABLE trend_snapshots ADD COLUMN source_type TEXT DEFAULT 'direct_query'"));
   await ignoreSchemaError(d.execute("ALTER TABLE trend_snapshots ADD COLUMN confidence_level TEXT DEFAULT ''"));
@@ -52,6 +166,96 @@ async function ensureSchema(d: Database) {
   await ignoreSchemaError(d.execute('ALTER TABLE project_boms ADD COLUMN is_reference INTEGER DEFAULT 0'));
   await ignoreSchemaError(d.execute("ALTER TABLE project_boms ADD COLUMN reference_remark TEXT DEFAULT ''"));
   await ignoreSchemaError(d.execute('ALTER TABLE project_boms ADD COLUMN is_deleted INTEGER DEFAULT 0'));
+
+  // ====== 性能优化：添加关键索引 ======
+  // 这些索引可以显著提升查询性能，特别是数据量大时
+  console.log('正在创建数据库索引...');
+
+  // trend_items 索引
+  await ignoreSchemaError(d.execute('CREATE INDEX IF NOT EXISTS idx_trend_items_part_id ON trend_items(part_id)'));
+
+  // trend_snapshots 索引
+  await ignoreSchemaError(d.execute('CREATE INDEX IF NOT EXISTS idx_trend_snapshots_trend_item_id ON trend_snapshots(trend_item_id)'));
+  await ignoreSchemaError(d.execute('CREATE INDEX IF NOT EXISTS idx_trend_snapshots_query_time ON trend_snapshots(query_time DESC)'));
+
+  // trend_sources 索引
+  await ignoreSchemaError(d.execute('CREATE INDEX IF NOT EXISTS idx_trend_sources_trend_item_id ON trend_sources(trend_item_id)'));
+
+  // trend_conversations 索引
+  await ignoreSchemaError(d.execute('CREATE INDEX IF NOT EXISTS idx_trend_conversations_trend_item_id ON trend_conversations(trend_item_id)'));
+
+  // trend_insight_dimensions 索引
+  await ignoreSchemaError(d.execute('CREATE INDEX IF NOT EXISTS idx_trend_insight_dimensions_snapshot_id ON trend_insight_dimensions(trend_snapshot_id)'));
+
+  // trend_key_events 索引
+  await ignoreSchemaError(d.execute('CREATE INDEX IF NOT EXISTS idx_trend_key_events_snapshot_id ON trend_key_events(trend_snapshot_id)'));
+
+  // decomposition_tree 索引
+  await ignoreSchemaError(d.execute('CREATE INDEX IF NOT EXISTS idx_decomposition_tree_root_part_id ON decomposition_tree(root_part_id)'));
+  await ignoreSchemaError(d.execute('CREATE INDEX IF NOT EXISTS idx_decomposition_tree_parent_id ON decomposition_tree(parent_id)'));
+  await ignoreSchemaError(d.execute('CREATE INDEX IF NOT EXISTS idx_decomposition_tree_trend_item_id ON decomposition_tree(trend_item_id)'));
+
+  // part_suppliers 索引
+  await ignoreSchemaError(d.execute('CREATE INDEX IF NOT EXISTS idx_part_suppliers_part_id ON part_suppliers(part_id)'));
+
+  // parts 索引
+  await ignoreSchemaError(d.execute('CREATE INDEX IF NOT EXISTS idx_parts_main_category ON parts(main_category)'));
+  await ignoreSchemaError(d.execute('CREATE INDEX IF NOT EXISTS idx_parts_trend_enabled ON parts(trend_enabled)'));
+
+  console.log('✓ 数据库索引创建完成');
+
+  // Migrate project_cost_snapshots table - rebuild if it has old schema with snapshot_name
+  try {
+    await d.execute(
+      `INSERT INTO project_cost_snapshots (project_id, snapshot_type, change_reason, bom_cost, total_cost, platform_fee_rate, profit_rate, module_count, item_count) VALUES (?,?,?,?,?,?,?,?,?)`,
+      [-999, 'test', 'test', 0, 0, 0, 0, 0, 0]
+    );
+    await d.execute('DELETE FROM project_cost_snapshots WHERE project_id = -999');
+  } catch (e) {
+    // If insert fails, rebuild the table
+    console.log('Rebuilding project_cost_snapshots table...');
+    await ignoreSchemaError(d.execute('ALTER TABLE project_cost_snapshots RENAME TO project_cost_snapshots_old'));
+    await d.execute(`
+      CREATE TABLE IF NOT EXISTS project_cost_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        snapshot_type TEXT DEFAULT 'bom_change',
+        change_reason TEXT DEFAULT '',
+        bom_cost REAL DEFAULT 0,
+        total_cost REAL DEFAULT 0,
+        platform_fee_rate REAL DEFAULT 0,
+        profit_rate REAL DEFAULT 0,
+        module_count INTEGER DEFAULT 0,
+        item_count INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+      )
+    `);
+    await ignoreSchemaError(d.execute(`
+      INSERT INTO project_cost_snapshots (id, project_id, snapshot_type, change_reason, bom_cost, total_cost, platform_fee_rate, profit_rate, module_count, item_count, created_at)
+      SELECT id, project_id,
+        COALESCE(snapshot_type, 'bom_change'),
+        COALESCE(change_reason, ''),
+        COALESCE(bom_cost, 0),
+        COALESCE(total_cost, 0),
+        COALESCE(platform_fee_rate, 0),
+        COALESCE(profit_rate, 0),
+        COALESCE(module_count, 0),
+        COALESCE(item_count, 0),
+        created_at
+      FROM project_cost_snapshots_old
+    `));
+    await ignoreSchemaError(d.execute('DROP TABLE project_cost_snapshots_old'));
+  }
+
+  await ignoreSchemaError(d.execute("ALTER TABLE project_cost_snapshots ADD COLUMN snapshot_type TEXT DEFAULT 'bom_change'"));
+  await ignoreSchemaError(d.execute("ALTER TABLE project_cost_snapshots ADD COLUMN change_reason TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute('ALTER TABLE project_cost_snapshots ADD COLUMN bom_cost REAL DEFAULT 0'));
+  await ignoreSchemaError(d.execute('ALTER TABLE project_cost_snapshots ADD COLUMN total_cost REAL DEFAULT 0'));
+  await ignoreSchemaError(d.execute('ALTER TABLE project_cost_snapshots ADD COLUMN platform_fee_rate REAL DEFAULT 0'));
+  await ignoreSchemaError(d.execute('ALTER TABLE project_cost_snapshots ADD COLUMN profit_rate REAL DEFAULT 0'));
+  await ignoreSchemaError(d.execute('ALTER TABLE project_cost_snapshots ADD COLUMN module_count INTEGER DEFAULT 0'));
+  await ignoreSchemaError(d.execute('ALTER TABLE project_cost_snapshots ADD COLUMN item_count INTEGER DEFAULT 0'));
+  await ignoreSchemaError(d.execute("ALTER TABLE project_cost_snapshots ADD COLUMN change_details TEXT DEFAULT ''"));
   await ignoreSchemaError(d.execute(`
     CREATE TABLE IF NOT EXISTS project_cost_snapshots (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,20 +371,52 @@ export async function recordProjectCostSnapshot(projectId: number, snapshotType 
   const d = await getDb();
   const project = await d.select<any[]>('SELECT * FROM projects WHERE id = ?', [projectId]).then(rows => rows[0]);
   if (!project) return 0;
+
+  // Get current BOM data with part details
   const rows = await d.select<any[]>(
-    `SELECT pb.module_name, pb.quantity, p.cost
+    `SELECT pb.id, pb.module_name, pb.quantity, p.name as part_name, p.model as part_model, p.cost
      FROM project_boms pb
      JOIN parts p ON pb.part_id = p.id
      WHERE pb.project_id = ? AND COALESCE(pb.is_deleted, 0) = 0`,
     [projectId]
   );
+
   const bomCost = rows.reduce((sum, row) => sum + (Number(row.cost) || 0) * (Number(row.quantity) || 0), 0);
   const totalCost = bomCost * (1 + ((Number(project.platform_fee_rate) || 0) + (Number(project.profit_rate) || 0)) / 100);
   const modules = new Set(rows.map(row => row.module_name || '未归类'));
+
+  // Get previous snapshot to compare
+  const prevSnapshots = await d.select<any[]>(
+    'SELECT * FROM project_cost_snapshots WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1',
+    [projectId]
+  );
+  const prevSnap = prevSnapshots[0];
+
+  // Build change details
+  let changeDetails = '';
+  if (prevSnap && snapshotType === 'part_changed') {
+    // For part changes, extract which part changed from changeReason
+    const match = changeReason.match(/调整BOM项：(.+)/);
+    if (match) {
+      const partName = match[1];
+      const currentPart = rows.find(r => r.part_name === partName);
+      if (currentPart) {
+        changeDetails = `${partName} (${currentPart.part_model || ''}): 成本变化`;
+      }
+    }
+  }
+
+  if (changeDetails === '' && prevSnap) {
+    const bomDiff = bomCost - Number(prevSnap.bom_cost || 0);
+    if (Math.abs(bomDiff) > 0.01) {
+      changeDetails = `BOM总成本: ¥${Number(prevSnap.bom_cost || 0).toFixed(2)} → ¥${bomCost.toFixed(2)} (${bomDiff > 0 ? '+' : ''}${bomDiff.toFixed(2)})`;
+    }
+  }
+
   const result = await d.execute(
     `INSERT INTO project_cost_snapshots
-      (project_id, snapshot_type, change_reason, bom_cost, total_cost, platform_fee_rate, profit_rate, module_count, item_count)
-     VALUES (?,?,?,?,?,?,?,?,?)`,
+      (project_id, snapshot_type, change_reason, bom_cost, total_cost, platform_fee_rate, profit_rate, module_count, item_count, change_details)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
     [
       projectId,
       snapshotType,
@@ -191,12 +427,32 @@ export async function recordProjectCostSnapshot(projectId: number, snapshotType 
       Number(project.profit_rate) || 0,
       modules.size,
       rows.length,
+      changeDetails,
     ]
   );
   return result.lastInsertId;
 }
 export async function getProjectCostSnapshots(projectId: number) {
   return (await getDb()).select<any[]>('SELECT * FROM project_cost_snapshots WHERE project_id = ? ORDER BY created_at DESC, id DESC', [projectId]);
+}
+export async function getSnapshotBOMDetail(projectId: number, snapshotTime: string) {
+  // Get BOM details at the time of snapshot (or closest before)
+  const d = await getDb();
+  const rows = await d.select<any[]>(
+    `SELECT pb.module_name, pb.quantity, pb.remark,
+            p.name as part_name, p.model as part_model, p.main_category, p.sub_category, p.cost
+     FROM project_boms pb
+     JOIN parts p ON pb.part_id = p.id
+     WHERE pb.project_id = ?
+       AND COALESCE(pb.is_deleted, 0) = 0
+       AND pb.created_at <= ?
+     ORDER BY pb.module_name, p.main_category, p.name`,
+    [projectId, snapshotTime]
+  );
+  return rows;
+}
+export async function deleteProjectCostSnapshot(snapshotId: number) {
+  await (await getDb()).execute('DELETE FROM project_cost_snapshots WHERE id = ?', [snapshotId]);
 }
 export async function addBOMItem(projectId: number, partId: number, quantity = 1, moduleName = '', remark = '', refProjectId = 0, autoSnapshot = true) {
   await (await getDb()).execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, ref_project_id) VALUES (?,?,?,?,?,?)', [projectId, partId, moduleName, quantity, remark, refProjectId]);
@@ -232,6 +488,9 @@ export async function getModuleCategories() {
   ).then(rows => rows.map(r => r.module_category));
 }
 export async function deleteModule(id: number) { await (await getDb()).execute('DELETE FROM modules WHERE id = ?', [id]); }
+export async function updateModuleCategoryByName(name: string, category: string) {
+  await (await getDb()).execute('UPDATE modules SET module_category = ? WHERE name = ?', [category || '未分类', name]);
+}
 export async function saveModuleItem(data: any) {
   const d = await getDb();
   if (data.id) { await d.execute('UPDATE module_items SET part_id=?, part_name=?, part_model=?, main_category=?, sub_category=?, cost=?, quantity=?, remark=? WHERE id=?', [data.part_id, data.part_name, data.part_model, data.main_category || '硬件类', data.sub_category || '', data.cost || 0, data.quantity || 1, data.remark || '', data.id]); return data.id; }
@@ -455,7 +714,7 @@ export async function saveTrendSnapshot(data: any) {
   const confidenceLevel = data.confidence_level ?? data.confidence ?? '';
   const r = await d.execute(
     'INSERT INTO trend_snapshots (trend_item_id, query_time, source_type, direction, confidence, confidence_level, summary, suggested_action, skill_used, magnitude_min, magnitude_max, magnitude_reference) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-    [data.trend_item_id, data.query_time, data.source_type || 'direct_query', data.direction, confidenceLevel, confidenceLevel, data.summary, data.suggested_action, data.skill_used, data.magnitude_min, data.magnitude_max, data.magnitude_reference]
+    [data.trend_item_id, data.query_time ?? new Date().toISOString(), data.source_type || 'direct_query', data.direction, confidenceLevel, confidenceLevel, data.summary, data.suggested_action, data.skill_used, data.magnitude_min, data.magnitude_max, data.magnitude_reference]
   );
   return r.lastInsertId;
 }
@@ -704,43 +963,94 @@ export async function getAllRollupFeedback() {
 
 // ==================== Part Suppliers ====================
 export async function getAllPartSuppliers() {
-  return (await getDb()).select<any[]>('SELECT *, COALESCE(price, unit_price, 0) as price FROM part_suppliers ORDER BY part_id, priority');
+  return (await getDb()).select<any[]>('SELECT * FROM part_suppliers ORDER BY part_id, id DESC');
 }
 
 export async function getPartSuppliers(partId: number) {
-  return (await getDb()).select<any[]>('SELECT *, COALESCE(price, unit_price, 0) as price FROM part_suppliers WHERE part_id = ? ORDER BY priority', [partId]);
+  return (await getDb()).select<any[]>('SELECT * FROM part_suppliers WHERE part_id = ? ORDER BY id DESC', [partId]);
 }
 
 export async function addPartSupplier(data: any) {
   const d = await getDb();
-  const price = data.price ?? data.unit_price ?? 0;
   const r = await d.execute(
-    'INSERT INTO part_suppliers (part_id, supplier_name, unit_price, price, moq, lead_time, priority, share_ratio, is_active, remark) VALUES (?,?,?,?,?,?,?,?,?,?)',
-    [data.part_id, data.supplier_name, price, price, data.moq || 0, data.lead_time || '', data.priority || 0, data.share_ratio || 0, data.is_active ?? 1, data.remark || '']
+    'INSERT INTO part_suppliers (part_id, supplier_name, price, share_ratio, is_active, remark) VALUES (?,?,?,?,?,?)',
+    [data.part_id, data.supplier_name, data.price || 0, data.share_ratio || 0, data.is_active ?? 1, data.remark || '']
   );
+
+  // 更新器件加权成本
+  await updatePartWeightedCost(data.part_id);
+
   return r.lastInsertId;
 }
 
 export async function updatePartSupplier(data: any) {
   const d = await getDb();
   const old = await d.select<any[]>('SELECT * FROM part_suppliers WHERE id = ?', [data.id]);
-  const price = data.price ?? data.unit_price ?? 0;
-  const oldPrice = old[0]?.price ?? old[0]?.unit_price ?? 0;
+  const price = data.price || 0;
+  const oldPrice = old[0]?.price || 0;
+
+  // 价格变动时记录历史
   if (old[0] && Math.abs(oldPrice - price) > 0.0001) {
     await d.execute(
       'INSERT INTO supplier_price_history (part_id, supplier_name, old_price, new_price, change_reason, changed_at) VALUES (?,?,?,?,?,datetime(\'now\',\'localtime\'))',
       [data.part_id ?? old[0].part_id, data.supplier_name ?? old[0].supplier_name, oldPrice, price, data.change_reason || '手动更新']
     );
   }
+
   await d.execute(
-    'UPDATE part_suppliers SET part_id=?, supplier_name=?, unit_price=?, price=?, moq=?, lead_time=?, priority=?, share_ratio=?, is_active=?, remark=? WHERE id=?',
-    [data.part_id ?? old[0]?.part_id, data.supplier_name, price, price, data.moq || 0, data.lead_time || '', data.priority || 0, data.share_ratio || 0, data.is_active ?? 1, data.remark || '', data.id]
+    'UPDATE part_suppliers SET supplier_name=?, price=?, share_ratio=?, is_active=?, remark=? WHERE id=?',
+    [data.supplier_name, price, data.share_ratio || 0, data.is_active ?? 1, data.remark || '', data.id]
   );
+
+  // 更新器件加权成本
+  await updatePartWeightedCost(data.part_id ?? old[0]?.part_id);
+
   return data.id;
 }
 
 export async function deletePartSupplier(id: number) {
-  await (await getDb()).execute('DELETE FROM part_suppliers WHERE id = ?', [id]);
+  const d = await getDb();
+  const old = await d.select<any[]>('SELECT part_id FROM part_suppliers WHERE id = ?', [id]);
+  await d.execute('DELETE FROM part_suppliers WHERE id = ?', [id]);
+
+  // 删除后更新器件加权成本
+  if (old[0]?.part_id) {
+    await updatePartWeightedCost(old[0].part_id);
+  }
+}
+
+// 更新器件的加权成本
+async function updatePartWeightedCost(partId: number) {
+  const d = await getDb();
+  const suppliers = await d.select<any[]>(
+    'SELECT price, share_ratio FROM part_suppliers WHERE part_id = ? AND is_active = 1',
+    [partId]
+  );
+
+  if (suppliers.length === 0) {
+    // 没有启用的供应商，成本设为0
+    await d.execute('UPDATE parts SET cost = 0 WHERE id = ?', [partId]);
+    return;
+  }
+
+  // 计算加权成本
+  const totalShare = suppliers.reduce((sum, s) => sum + (Number(s.share_ratio) || 0), 0);
+
+  if (totalShare === 0) {
+    // 所有供应商份额都是0，取第一个供应商的价格
+    const firstPrice = Number(suppliers[0]?.price) || 0;
+    await d.execute('UPDATE parts SET cost = ? WHERE id = ?', [firstPrice, partId]);
+    return;
+  }
+
+  // 归一化并计算加权成本
+  const weightedCost = suppliers.reduce((sum, s) => {
+    const share = Number(s.share_ratio) || 0;
+    const price = Number(s.price) || 0;
+    return sum + (price * share / totalShare);
+  }, 0);
+
+  await d.execute('UPDATE parts SET cost = ? WHERE id = ?', [weightedCost, partId]);
 }
 
 export async function getProjectSuppliers(projectId: number) {
@@ -798,4 +1108,46 @@ export async function updateApiProvider(data: any) {
 
 export async function toggleApiProviderActive(id: number, isActive: boolean) {
   await (await getDb()).execute('UPDATE api_providers SET is_active = ? WHERE id = ?', [isActive ? 1 : 0, id]);
+}
+
+// ==================== AI Request Logs（AI请求审计日志） ====================
+
+export async function saveAIRequestLog(data: {
+  request_type: string;
+  material_name?: string;
+  system_prompt: string;
+  user_prompt: string;
+  response_summary: string;
+  success: boolean;
+  error_message?: string;
+}) {
+  const d = await getDb();
+  const r = await d.execute(
+    'INSERT INTO ai_request_logs (request_type, material_name, system_prompt, user_prompt, response_summary, success, error_message) VALUES (?,?,?,?,?,?,?)',
+    [
+      data.request_type,
+      data.material_name || '',
+      data.system_prompt,
+      data.user_prompt,
+      data.response_summary,
+      data.success ? 1 : 0,
+      data.error_message || ''
+    ]
+  );
+  return r.lastInsertId;
+}
+
+export async function getAllAIRequestLogs(limit = 100) {
+  return (await getDb()).select<any[]>(
+    'SELECT * FROM ai_request_logs ORDER BY created_at DESC LIMIT ?',
+    [limit]
+  );
+}
+
+export async function deleteAIRequestLog(id: number) {
+  await (await getDb()).execute('DELETE FROM ai_request_logs WHERE id = ?', [id]);
+}
+
+export async function clearAllAIRequestLogs() {
+  await (await getDb()).execute('DELETE FROM ai_request_logs');
 }
