@@ -11,6 +11,7 @@ import { startOllamaStream } from '../ollama';
 import { calcSkuCost as calcSkuCostFn, buildSkuBom as buildSkuBomFn } from '../skuCalc';
 import { estimateProjectCost } from '../specEstimate';
 import { computeProjectHealth, type HealthIssue } from '../projectHealth';
+import { computeProjectStatuses, statusPointMeta } from '../projectStatus';
 
 /** 往 parts.projects 追加项目代号（去重，避免重复拼接） */
 function appendProjectCode(existing: string | undefined, code: string): string {
@@ -108,6 +109,24 @@ export default function Projects() {
 
   const loadProjects = async () => { setLoading(true); try { setProjects(await getProjects('', typeFilter, categoryFilter)); } catch (e) { console.error(e); } setLoading(false); };
   useEffect(() => { loadProjects(); }, [typeFilter, categoryFilter]);
+  // ====== 项目状态点（目标超支/报价情报/成本异动 → 列表圆点，点击选中项目） ======
+  const [projectStatuses, setProjectStatuses] = useState<Record<number, any>>({});
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await getProjects('', '', '');
+        const [targetsByP, bomsByP, snapsByP, insights] = await Promise.all([
+          Promise.all(list.map((p: any) => getTargets(p.id))),
+          Promise.all(list.map((p: any) => getProjectBOMs(p.id))),
+          Promise.all(list.map((p: any) => getProjectCostSnapshots(p.id))),
+          getInsights(),
+        ]);
+        const tByP: Record<number, any[]> = {}; const bByP: Record<number, any[]> = {}; const sByP: Record<number, any[]> = {};
+        list.forEach((p: any, i: number) => { tByP[p.id] = targetsByP[i]; bByP[p.id] = bomsByP[i]; sByP[p.id] = snapsByP[i]; });
+        setProjectStatuses(computeProjectStatuses(list, tByP, bByP, insights, sByP));
+      } catch (e) { console.warn('状态点计算失败:', e); }
+    })();
+  }, []);
   // 品类→项目→SKU 树：全部 SKU（一次拉齐，与品类/项目组装成树）
   const [allSkus, setAllSkus] = useState<any[]>([]);
   const [skuTreeOpen, setSkuTreeOpen] = useState(false);
@@ -864,6 +883,21 @@ export default function Projects() {
   }, [groupedBOMs, modCatMap, bomCatOrder]);
 
   const projectCols = [
+    {
+      title: '状态点',
+      key: 'sp',
+      width: 60,
+      render: (_: any, r: any) => {
+        const sp = projectStatuses[r.id];
+        if (!sp || sp.level === 'none') return <span style={{ color: '#C0C8D0', fontSize: 16 }}>●</span>;
+        const meta = statusPointMeta(sp.level);
+        return (
+          <Tooltip title={<div style={{ fontSize: 12 }}>{sp.reasons.map((x: string, i: number) => <div key={i}>• {x}</div>)}</div>}>
+            <span style={{ color: meta.color, fontSize: 16, cursor: 'help' }}>●</span>
+          </Tooltip>
+        );
+      }
+    },
     { title: '代号', dataIndex: 'code', width: 95, render: (v: string) => <b>{v}</b> },
     { title: '名称', dataIndex: 'name', width: 180, ellipsis: true },
     { title: '品类', dataIndex: 'category', width: 75, render: (v: string) => <Tag color={v && v !== '显示器' ? 'purple' : 'default'}>{v || '显示器'}</Tag> },

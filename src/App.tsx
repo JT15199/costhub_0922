@@ -27,18 +27,36 @@ import {
   TeamOutlined, SettingOutlined, RobotOutlined, BookOutlined, BulbOutlined
 } from '@ant-design/icons';
 
-const NAV = [
-  { key: 'dashboard',          label: '仪表盘',     icon: <BarChartOutlined />,  iconBg: '#EFF6FF', iconColor: '#3B82F6' },
-  { key: 'parts',              label: '器件库',     icon: <ToolOutlined />,      iconBg: '#FFF7ED', iconColor: '#F97316' },
-  { key: 'modules',            label: '模块库',     icon: <AppstoreOutlined />,  iconBg: '#F5F3FF', iconColor: '#8B5CF6' },
-  { key: 'projects',           label: '项目管理',   icon: <ProjectOutlined />,   iconBg: '#F0FDF4', iconColor: '#16A34A' },
-  { key: 'competitors',        label: '竞品管理',   icon: <ShopOutlined />,      iconBg: '#FFF1F2', iconColor: '#F43F5E' },
-  { key: 'compare',            label: '对比分析',   icon: <LineChartOutlined />, iconBg: '#ECFEFF', iconColor: '#0891B2' },
-  { key: 'reports',            label: '成本报告',   icon: <FileTextOutlined />,  iconBg: '#FFFBEB', iconColor: '#D97706' },
-  { key: 'decomposition',      label: '物料趋势洞察', icon: <PartitionOutlined />, iconBg: '#EEF2FF', iconColor: '#6366F1' },
-  { key: 'supplierManagement', label: '供应商管理', icon: <TeamOutlined />,      iconBg: '#F0FDFA', iconColor: '#0D9488' },
-  { key: 'localAI',            label: '本地AI助手', icon: <RobotOutlined />,     iconBg: '#EEF2FF', iconColor: '#6366F1' },
-  { key: 'workLog',            label: '工作手账',   icon: <CalendarOutlined />,   iconBg: '#F0FDF4', iconColor: '#059669' },
+// 导航分区（v2.3.19 界面轻量化第一步：12 项平铺 → 驾驶舱 + 三区收敛，页面零改动）
+const NAV: { key: string; label: string; icon: any; iconBg: string; iconColor: string }[] = [
+  { key: 'dashboard',          label: '驾驶舱',     icon: <BarChartOutlined />,  iconBg: '#EFF6FF', iconColor: '#3B82F6' },
+];
+const NAV_GROUPS: { title: string; items: typeof NAV }[] = [
+  {
+    title: '项目中心',
+    items: [
+      { key: 'projects',           label: '项目管理',   icon: <ProjectOutlined />,   iconBg: '#F0FDF4', iconColor: '#16A34A' },
+      { key: 'competitors',        label: '竞品管理',   icon: <ShopOutlined />,      iconBg: '#FFF1F2', iconColor: '#F43F5E' },
+      { key: 'compare',            label: '对比分析',   icon: <LineChartOutlined />, iconBg: '#ECFEFF', iconColor: '#0891B2' },
+      { key: 'reports',            label: '成本报告',   icon: <FileTextOutlined />,  iconBg: '#FFFBEB', iconColor: '#D97706' },
+      { key: 'workLog',            label: '工作手账',   icon: <CalendarOutlined />,  iconBg: '#F0FDF4', iconColor: '#059669' },
+    ],
+  },
+  {
+    title: '数据资产',
+    items: [
+      { key: 'parts',              label: '器件库',     icon: <ToolOutlined />,      iconBg: '#FFF7ED', iconColor: '#F97316' },
+      { key: 'modules',            label: '模块库',     icon: <AppstoreOutlined />,  iconBg: '#F5F3FF', iconColor: '#8B5CF6' },
+      { key: 'supplierManagement', label: '供应商管理', icon: <TeamOutlined />,      iconBg: '#F0FDFA', iconColor: '#0D9488' },
+    ],
+  },
+  {
+    title: 'AI 趋势',
+    items: [
+      { key: 'decomposition',      label: '物料趋势洞察', icon: <PartitionOutlined />, iconBg: '#EEF2FF', iconColor: '#6366F1' },
+      { key: 'localAI',            label: '本地AI助手', icon: <RobotOutlined />,     iconBg: '#EEF2FF', iconColor: '#6366F1' },
+    ],
+  },
 ];
 
 const ZOOM_LEVELS = [80, 100, 125, 150];
@@ -259,7 +277,28 @@ export default function App() {
               {item.label}
             </div>
           ))}
-        </nav>
+          {NAV_GROUPS.map(group => (
+            <div key={group.title}>
+              <div style={{ padding: '10px 16px 4px', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--color-text-tertiary)', textTransform: 'uppercase' }}>{group.title}</div>
+              {group.items.map(item => (
+                <div key={item.key} className={`nav-item ${active === item.key ? 'active' : ''}`} onClick={() => navigate(item.key)}>
+                  <span className="nav-icon" style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+                    background: item.iconBg,
+                    color: item.iconColor,
+                    fontSize: 14,
+                    transition: 'transform 0.15s',
+                    boxShadow: active === item.key ? `0 2px 6px ${item.iconColor}30` : 'none',
+                  }}>
+                    {item.icon}
+                  </span>
+                  {item.label}
+                </div>
+              ))}
+            </div>
+          ))}
+</nav>
 
         {/* 报价情报（后台自动识别的报价差异提醒）——全局入口，任何页面可见 */}
         <div onClick={() => { setActive('projects'); window.dispatchEvent(new CustomEvent('costhub-open-insights')); }}
