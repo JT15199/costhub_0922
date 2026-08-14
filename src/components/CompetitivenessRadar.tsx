@@ -3,7 +3,7 @@
 // 整机成本口径统一用 BOM 成本：我方项目 = project_boms 快照累加（与 recordProjectCostSnapshot 一致），竞品 = competitors.bom_cost
 // 模块-特性关联：手动配置"哪些模块影响哪些特性"，评分时列出关联模块及其成本占比作为打分依据
 import { useEffect, useState } from 'react';
-import { Select, Button, Space, Modal, Slider, Tag, Input, Checkbox, message, Empty, Radio, Table, Row, Col } from 'antd';
+import { Select, Button, Space, Modal, Slider, Tag, Input, Checkbox, message, Empty, Radio, Table } from 'antd';
 import { RadarChartOutlined, LinkOutlined, EditOutlined, SearchOutlined, AimOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
@@ -269,31 +269,101 @@ export default function CompetitivenessRadar() {
       const r = niceCeil(m * 1.25);
       return { min: -r, max: r };
     };
-    const sAxis = adaptiveAxis(rivals.flatMap(r => features.map(f => scoreDiff(r, f.id))), 2);
-    const cAxis = adaptiveAxis(rivals.flatMap(r => features.map(f => costDiff(r, f.id))), 10);
+    // tooltip 判读（单图/子图共用）
+    const verdictOf = (spec: number | null, cost: number | null) => {
+      if (spec === null || cost === null) return '';
+      if (spec > 0 && cost < 0) return '<br/><b style="color:#10B981">💪 规格强 + 成本低——我方优势特性</b>';
+      if (spec < 0 && cost > 0) return '<br/><b style="color:#DC2626">⚠️ 规格弱 + 成本高——我方劣势特性</b>';
+      if (spec > 0) return '<br/><span style="color:#D97706">规格强但成本更高</span>';
+      return '<br/><span style="color:#D97706">规格弱但成本更低</span>';
+    };
+    // ===== 多竞品（≥2）：子图网格——每竞品独立双轴自适应，数值差异大的竞品互不拉爆 =====
+    if (rivals.length >= 2) {
+      const n = rivals.length;
+      const pct = 100 / n;
+      const rivalData = rivals.map((r, i) => {
+        const sVals = features.map(f => scoreDiff(r, f.id));
+        const cVals = features.map(f => costDiff(r, f.id));
+        return {
+          r, i,
+          sVals, cVals,
+          sAxis: adaptiveAxis(sVals, 2),
+          cAxis: adaptiveAxis(cVals, 10),
+          barColor: WALL_BAR_COLORS[i % WALL_BAR_COLORS.length],
+          lineColor: WALL_LINE_COLORS[i % WALL_LINE_COLORS.length],
+        };
+      });
+      return {
+        title: rivalData.map(d => ({
+          text: d.r.name, left: (d.i * pct + pct / 2) + '%', top: 2, textAlign: 'center',
+          textStyle: { fontSize: 11.5, fontWeight: 600, color: '#334155' },
+        })),
+        tooltip: {
+          ...chartTooltip('axis'),
+          formatter: (ps: any[]) => {
+            const name = ps[0]?.axisValue || '';
+            let spec: number | null = null, cost: number | null = null;
+            (ps || []).forEach(p => {
+              if (p.seriesName.includes('规格差')) spec = p.value;
+              if (p.seriesName.includes('成本差')) cost = p.value;
+            });
+            return `<b>${name}</b><br/>规格差：${spec === null ? '—' : (spec > 0 ? '+' : '') + spec} 分<br/>成本差：${cost === null ? '—' : (cost > 0 ? '+' : '') + cost} 元${verdictOf(spec, cost)}`;
+          },
+        },
+        grid: rivalData.map(d => ({
+          left: (d.i * pct + 2) + '%', right: (100 - (d.i + 1) * pct + 2) + '%', top: 30, bottom: 46,
+        })),
+        xAxis: rivalData.map(d => ({
+          type: 'category' as const, gridIndex: d.i, data: features.map(f => f.name),
+          axisLabel: { color: chartTextMuted(), fontSize: 9.5, interval: 0, rotate: n >= 4 ? 22 : 0 },
+          axisTick: { show: false }, axisLine: { lineStyle: { color: chartSplitLine() } },
+        })),
+        yAxis: rivalData.flatMap(d => [
+          { type: 'value' as const, gridIndex: d.i, name: '规格差', min: d.sAxis.min, max: d.sAxis.max, nameTextStyle: { fontSize: 8.5, color: chartTextMuted() }, axisLabel: { fontSize: 8.5, color: chartTextMuted() }, splitLine: { lineStyle: { color: 'rgba(0,0,0,0.05)' } } },
+          { type: 'value' as const, gridIndex: d.i, name: '成本差', min: d.cAxis.min, max: d.cAxis.max, nameTextStyle: { fontSize: 8.5, color: chartTextMuted() }, axisLabel: { fontSize: 8.5, color: chartTextMuted() }, splitLine: { show: false }, position: 'right' as const },
+        ]),
+        series: rivalData.flatMap(d => [
+          {
+            name: d.r.name + ' 规格差', type: 'bar' as const, xAxisIndex: d.i, yAxisIndex: d.i * 2, barWidth: '38%',
+            itemStyle: { color: d.barColor, borderRadius: [2, 2, 0, 0] },
+            label: { show: true, position: 'top', formatter: (p: any) => (p.value === null || p.value === undefined ? '' : (p.value > 0 ? '+' : '') + p.value), fontSize: 9, color: chartTextMuted() },
+            markLine: {
+              silent: true, symbol: 'none',
+              lineStyle: { color: 'rgba(148,163,184,0.55)', type: 'dashed', width: 1 },
+              label: { show: false },
+              data: [{ yAxis: 0 }],
+            },
+            data: d.sVals,
+          },
+          {
+            name: d.r.name + ' 成本差', type: 'line' as const, xAxisIndex: d.i, yAxisIndex: d.i * 2 + 1, symbol: 'circle', symbolSize: 5,
+            lineStyle: { width: 2 }, itemStyle: { color: d.lineColor, borderColor: '#fff', borderWidth: 1 }, connectNulls: false,
+            data: d.cVals,
+          },
+        ]),
+      };
+    }
+    // ===== 单竞品：保持单图（图例 + 全宽双轴）=====
+    const r = rivals[0];
+    const sAxis = adaptiveAxis(features.map(f => scoreDiff(r, f.id)), 2);
+    const cAxis = adaptiveAxis(features.map(f => costDiff(r, f.id)), 10);
+    const barColor = WALL_BAR_COLORS[0];
+    const lineColor = WALL_LINE_COLORS[0];
     return {
       tooltip: {
         ...chartTooltip('axis'),
         formatter: (ps: any[]) => {
           const name = ps[0]?.axisValue || '';
-          let spec = null, cost = null;
-          let specName = '', costName = '';
+          let spec: number | null = null, cost: number | null = null;
           (ps || []).forEach(p => {
-            if (p.seriesName.includes('规格差')) { spec = p.value; specName = p.seriesName.replace(' 规格差', ''); }
-            if (p.seriesName.includes('成本差')) { cost = p.value; costName = p.seriesName.replace(' 成本差', ''); }
+            if (p.seriesName.includes('规格差')) spec = p.value;
+            if (p.seriesName.includes('成本差')) cost = p.value;
           });
-          let verdict = '';
-          if (spec !== null && cost !== null) {
-            if (spec > 0 && cost < 0) verdict = '<br/><b style="color:#10B981">💪 规格强 + 成本低——我方优势特性</b>';
-            else if (spec < 0 && cost > 0) verdict = '<br/><b style="color:#DC2626">⚠️ 规格弱 + 成本高——我方劣势特性</b>';
-            else if (spec > 0) verdict = '<br/><span style="color:#D97706">规格强但成本更高</span>';
-            else verdict = '<br/><span style="color:#D97706">规格弱但成本更低</span>';
-          }
-          return `<b>${name}</b><br/>规格差（${specName}）：${spec === null ? '—' : (spec > 0 ? '+' : '') + spec} 分<br/>成本差（${costName}）：${cost === null ? '—' : (cost > 0 ? '+' : '') + cost} 元${verdict}`;
+          return `<b>${name}</b><br/>规格差：${spec === null ? '—' : (spec > 0 ? '+' : '') + spec} 分<br/>成本差：${cost === null ? '—' : (cost > 0 ? '+' : '') + cost} 元${verdictOf(spec, cost)}`;
         },
       },
       legend: {
-        data: rivals.flatMap(r => [`${r.name} 规格差`, `${r.name} 成本差`]),
+        data: [`${r.name} 规格差`, `${r.name} 成本差`],
         top: 0, right: 0, textStyle: { color: chartTextMuted(), fontSize: 11 },
       },
       grid: { left: 60, right: 70, top: 36, bottom: 5, containLabel: true },
@@ -302,30 +372,25 @@ export default function CompetitivenessRadar() {
         { type: 'value', name: '规格差(分)', min: sAxis.min, max: sAxis.max, axisLabel: { color: chartTextMuted(), fontSize: 10.5 }, splitLine: { lineStyle: { color: 'rgba(0,0,0,0.06)' } } },
         { type: 'value', name: '成本差(¥)', min: cAxis.min, max: cAxis.max, axisLabel: { color: chartTextMuted(), fontSize: 10.5 }, splitLine: { show: false } },
       ],
-      series: rivals.flatMap((r, i) => {
-        // 语义配色：柱（规格差）冷色蓝紫系、线（成本差）暖色琥珀系，同下标成对
-        const barColor = WALL_BAR_COLORS[i % WALL_BAR_COLORS.length];
-        const lineColor = WALL_LINE_COLORS[i % WALL_LINE_COLORS.length];
-        return [
-          {
-            name: `${r.name} 规格差`, type: 'bar' as const, yAxisIndex: 0, barGap: '10%',
-            itemStyle: { color: barColor, borderRadius: [3, 3, 0, 0] },
-            label: { show: true, position: 'top', formatter: (p: any) => (p.value === null || p.value === undefined ? '' : (p.value > 0 ? '+' : '') + p.value), fontSize: 9.5, color: chartTextMuted() },
-            markLine: {
-              silent: true, symbol: 'none',
-              lineStyle: { color: 'rgba(148,163,184,0.55)', type: 'dashed', width: 1 },
-              label: { show: false },
-              data: [{ yAxis: 0 }],
-            },
-            data: features.map(f => scoreDiff(r, f.id)),
+      series: [
+        {
+          name: `${r.name} 规格差`, type: 'bar' as const, yAxisIndex: 0, barWidth: '30%',
+          itemStyle: { color: barColor, borderRadius: [3, 3, 0, 0] },
+          label: { show: true, position: 'top', formatter: (p: any) => (p.value === null || p.value === undefined ? '' : (p.value > 0 ? '+' : '') + p.value), fontSize: 9.5, color: chartTextMuted() },
+          markLine: {
+            silent: true, symbol: 'none',
+            lineStyle: { color: 'rgba(148,163,184,0.55)', type: 'dashed', width: 1 },
+            label: { show: false },
+            data: [{ yAxis: 0 }],
           },
-          {
-            name: `${r.name} 成本差`, type: 'line' as const, yAxisIndex: 1, symbol: 'circle', symbolSize: 7,
-            lineStyle: { width: 2.5 }, itemStyle: { color: lineColor, borderColor: '#fff', borderWidth: 1 }, connectNulls: false,
-            data: features.map(f => costDiff(r, f.id)),
-          },
-        ];
-      }),
+          data: features.map(f => scoreDiff(r, f.id)),
+        },
+        {
+          name: `${r.name} 成本差`, type: 'line' as const, yAxisIndex: 1, symbol: 'circle', symbolSize: 7,
+          lineStyle: { width: 2.5 }, itemStyle: { color: lineColor, borderColor: '#fff', borderWidth: 1 }, connectNulls: false,
+          data: features.map(f => costDiff(r, f.id)),
+        },
+      ],
     };
   })() : null;
 
@@ -441,23 +506,24 @@ export default function CompetitivenessRadar() {
             <div style={{ fontSize: 11.5, color: '#64748B', marginBottom: 8 }}>
               每个特性的成本 = 该产品中与此特性关联的模块成本合计（一个模块计入其关联的所有维度）；<b>每分成本 = 特性成本 ÷ 特性评分</b>——同特性下谁低谁强（花更少的钱得到同样的表现）。💪 = 该特性组内每分成本最低。
             </div>
-            <Row gutter={14}>
-              <Col span={10}>
-                {perCostOption ? <ReactECharts echarts={echarts} option={perCostOption} style={{ height: 260 }} /> : (
-                  <div style={{ textAlign: 'center', padding: '70px 20px', color: '#94A3B8', fontSize: 12, border: '1px dashed #E2E8F0', borderRadius: 8 }}>
-                    配置模块-特性关联并完成评分后，这里显示各特性的每分成本对比（越低越强）
-                  </div>
-                )}
-              </Col>
-              <Col span={14}>
+            {/* 上下布局：图全宽（高度随竞品数自适应）+ 表全宽，避免侧栏挤压遮挡 */}
+            <div style={{ marginBottom: 12 }}>
+              {perCostOption ? <ReactECharts echarts={echarts} option={perCostOption} style={{ height: Math.max(240, radarProducts.length * 36 + 120) }} /> : (
+                <div style={{ textAlign: 'center', padding: '60px 20px', color: '#94A3B8', fontSize: 12, border: '1px dashed #E2E8F0', borderRadius: 8 }}>
+                  配置模块-特性关联并完成评分后，这里显示各特性的每分成本对比（越低越强）
+                </div>
+              )}
+            </div>
+            <div>
                 <Table size="small" pagination={false} rowKey="key" dataSource={costTable.map(ct => {
                   const best = ct.rows.filter(r => r.per !== null).sort((a, b) => (a.per || 0) - (b.per || 0))[0];
                   return { key: ct.feature.id, name: ct.feature.name, rows: ct.rows, best };
                 })}
+                  scroll={{ x: 90 + radarProducts.length * 96 + 100 }}
                   columns={[
                     { title: '特性', dataIndex: 'name', width: 90, render: (v: string) => <b style={{ fontSize: 12.5 }}>{v}</b> },
                     ...radarProducts.map(p => ({
-                      title: p.name, key: p.key, width: 130,
+                      title: p.name, key: p.key, width: 96,
                       render: (_: any, r: any) => {
                         const row = r.rows.find((x: any) => x.prod.key === p.key);
                         if (!row) return null;
@@ -482,8 +548,7 @@ export default function CompetitivenessRadar() {
                         : <span style={{ fontSize: 11, color: '#CBD5E1' }}>—</span>,
                     },
                   ]} />
-              </Col>
-            </Row>
+            </div>
           </div>
         </>
       ) : (
@@ -492,7 +557,7 @@ export default function CompetitivenessRadar() {
           <div style={{ border: '1px solid #E8ECF1', borderRadius: 10, padding: '12px 14px', background: '#FAFBFC' }}>
             <div style={{ marginBottom: 6 }}>
               <b style={{ fontSize: 13, color: '#1E3A6E' }}>成本长城图：规格差 vs 成本差</b>
-              <span style={{ fontSize: 11, color: '#94A3B8', marginLeft: 8 }}>柱（蓝紫系）= 我方规格评分 − 竞品（正=规格更强）；曲线（琥珀系）= 我方特性成本 − 竞品（负=成本更低）</span>
+              <span style={{ fontSize: 11, color: '#94A3B8', marginLeft: 8 }}>柱（蓝紫系）= 我方规格评分 − 竞品（正=规格更强）；曲线（琥珀系）= 我方特性成本 − 竞品（负=成本更低）；多竞品时每竞品一个子图、轴各自适配</span>
             </div>
             {wallOption ? (
               <ReactECharts echarts={echarts} option={wallOption} style={{ height: 400 }} />
