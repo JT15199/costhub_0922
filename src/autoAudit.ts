@@ -26,6 +26,7 @@ export function ruleFindings(ctx: RuleCtx): Omit<AuditFinding, 'id' | 'created_a
       type: 'rule_no_target', level: 'info', source: 'rule',
       title: `${p.code} 未设定目标成本`,
       detail: '在研项目建议设定领域目标成本，驾驶舱才能自动预警超支',
+      suggestion: '到「项目管理 → 成本分析」为关键领域设定目标，之后 AI 才能给出达成差距与降本思路',
       objects: JSON.stringify([p.code]), status: 'unread',
     });
   });
@@ -40,6 +41,7 @@ export function ruleFindings(ctx: RuleCtx): Omit<AuditFinding, 'id' | 'created_a
         type: 'rule_share_anomaly', level: 'warn', source: 'rule',
         title: `器件 #${partId} 供应商份额合计 ${total.toFixed(0)}%`,
         detail: '启用供应商份额合计 ' + total.toFixed(0) + '%，偏离 100%（' + active.map(s => s.supplier_name + ' ' + s.share_ratio + '%').join('、') + '），加权成本可能失真',
+        suggestion: '调整份额至合计 100%，或明确停用部分供应商，保证加权成本口径可信',
         objects: JSON.stringify([`part:${partId}`]), status: 'unread',
       });
     }
@@ -58,7 +60,8 @@ export function ruleFindings(ctx: RuleCtx): Omit<AuditFinding, 'id' | 'created_a
         out.push({
           type: 'rule_module_dominance', level: 'warn', source: 'rule',
           title: `${p.code} 模块「${mod}」占比 ${(ratio * 100).toFixed(0)}%`,
-          detail: '单模块占比过高=关键物料依赖集中，议价空间与供应风险并存，建议关注该模块供应商',
+          detail: '单模块占比过高=关键物料依赖集中，议价空间与供应风险并存',
+        suggestion: '这是最大成本项，议价杠杆最大：①关注该模块主要物料行情 ②评估引入二供比价 ③对照目标成本看差距',
           objects: JSON.stringify([p.code, mod]), status: 'unread',
         });
       }
@@ -75,9 +78,47 @@ export function ruleFindings(ctx: RuleCtx): Omit<AuditFinding, 'id' | 'created_a
         type: 'rule_sku_deviation', level: 'warn', source: 'rule',
         title: `SKU ${sku?.sku_code || skuId} 较基座 ${pct > 0 ? '+' : ''}${pct.toFixed(0)}%`,
         detail: 'SKU 成本偏离基座超过 40%，请确认差异规则是否合理（新增/替换器件单价）',
+        suggestion: '打开 SKU 详情检查差异规则的单价/数量，确认是否为真实配置差异',
         objects: JSON.stringify([sku?.sku_code || String(skuId)]), status: 'unread',
       });
     }
+  });
+
+
+  // 5) 跨项目同模块成本对比：某项目模块总成本显著高于其他项目同模块 → 议价机会
+  const modCostsByProj: Record<string, { cost: number; projects: number }> = {};
+  ctx.projects.forEach(p => {
+    (ctx.bomsByProject[p.id] || []).forEach(b => {
+      const m = b.module_name || '未归类';
+      const k = p.id + '|' + m;
+      if (!modCostsByProj[k]) modCostsByProj[k] = { cost: 0, projects: 0 };
+      modCostsByProj[k].cost += (b.part_cost || 0) * (b.quantity || 1);
+    });
+  });
+  const modAgg: Record<string, { cost: number; count: number; projCosts: Record<number, number> }> = {};
+  Object.entries(modCostsByProj).forEach(([k, v]) => {
+    const [pid, mod] = k.split('|');
+    if (!modAgg[mod]) modAgg[mod] = { cost: 0, count: 0, projCosts: {} };
+    modAgg[mod].cost += v.cost; modAgg[mod].count += 1;
+    modAgg[mod].projCosts[Number(pid)] = v.cost;
+  });
+  Object.entries(modAgg).forEach(([mod, agg]) => {
+    if (agg.count < 2) return;
+    const avg = agg.cost / agg.count;
+    Object.entries(agg.projCosts).forEach(([pid, cost]) => {
+      if (avg <= 0) return;
+      const pct = (cost - avg) / avg * 100;
+      if (pct >= 20 && (cost - avg) >= 50) {
+        const p = ctx.projects.find(x => x.id === Number(pid));
+        out.push({
+          type: 'rule_module_cost_gap', level: 'warn', source: 'rule',
+          title: `${p?.code || pid}「${mod}」成本高于同类项目均值 ${pct.toFixed(0)}%`,
+          detail: `该模块 ¥${cost.toFixed(0)} vs 其他项目均值 ¥${avg.toFixed(0)}（+¥${(cost - avg).toFixed(0)}），值得重点议价`,
+          suggestion: '对比同模块其他项目的器件单价明细，找价差最大的器件逐一谈价；也可参照低报价项目的 BOM 结构',
+          objects: JSON.stringify([p?.code || String(pid), mod]), status: 'unread',
+        });
+      }
+    });
   });
 
   return out;
@@ -189,7 +230,7 @@ export async function runAutoAudit(): Promise<AutoAuditResult | null> {
 // AI 深度洞察：把全库摘要交给本地模型，找规则覆盖不到的"细枝末节"
 async function aiAuditFindings(url: string, model: string, ctxText: string, rules: Omit<AuditFinding, 'id' | 'created_at'>[]): Promise<Omit<AuditFinding, 'id' | 'created_at'>[]> {
   const ruleSummary = rules.map(r => `- ${r.title}：${r.detail}`).join('\n') || '（规则层未发现）';
-  const sysPrompt = '你是嵌入 CostHub 成本管理工具的资深成本分析师。系统已用规则检查了一些常见问题（见规则发现）。现在请你基于全库数据，找出规则没覆盖的细枝末节：数据矛盾、异常模式、可疑关系、趋势信号。只输出 JSON（不要任何其他文字）：{"findings":[{"title":"简短标题","detail":"具体说明（引用真实数据）","level":"warn或info","objects":["涉及项目/器件"]}]}。规则：1) 必须基于提供的数据，不能编造数字 2) 最多 5 条 3) 只报真正异常/值得注意的，宁缺毋滥 4) 不要重复规则已报的。';
+  const sysPrompt = '你是嵌入 CostHub 成本管理工具的资深成本分析师。系统已用规则检查了常见问题（见规则发现）。你的任务不是复述事实（物料涨跌是用户自己输入的，他都知道），而是输出有决策价值的洞察与建议：1) 成本机会点：哪里有降本空间（模块占比过高的议价杠杆、同类物料跨项目价差可统一采购、供应商集中可引入二供等），给出具体思路 2) 成本结构意见：成本占比明显偏高的模块/领域，对照目标/历史/同类给出判断和行动建议 3) 数据矛盾或可疑模式（用户可能注意不到的细枝末节）。只输出 JSON（不要任何其他文字）：{"findings":[{"title":"简短标题","detail":"具体说明（引用真实数据）","suggestion":"给用户的建议/思路（一句话，可执行）","level":"warn或info","objects":["涉及项目/器件"]}]}。规则：1) 必须基于提供的数据，不能编造数字 2) 最多 5 条 3) 宁缺毋滥，只报真正值得行动的 4) 不要重复规则已报的。';
   const userPrompt = `全库数据摘要：\n${ctxText}\n\n规则层发现：\n${ruleSummary}`;
   let full = '';
   await new Promise<void>((resolve, reject) => {
@@ -202,7 +243,7 @@ async function aiAuditFindings(url: string, model: string, ctxText: string, rule
   const data = parseFindingsJson(full);
   return (data || []).map((f: any) => ({
     type: 'ai_insight', level: f.level === 'warn' ? 'warn' : 'info', source: 'ai' as const,
-    title: String(f.title || 'AI 发现'), detail: String(f.detail || ''), objects: JSON.stringify(Array.isArray(f.objects) ? f.objects : []), status: 'unread' as const,
+    title: String(f.title || 'AI 发现'), detail: String(f.detail || ''), suggestion: String(f.suggestion || ''), objects: JSON.stringify(Array.isArray(f.objects) ? f.objects : []), status: 'unread' as const,
   }));
 }
 

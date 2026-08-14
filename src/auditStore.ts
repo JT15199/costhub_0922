@@ -9,6 +9,7 @@ export interface AuditFinding {
   title: string;
   detail: string;
   objects: string;     // 涉及对象（JSON 数组字符串：项目代号/器件名等）
+  suggestion?: string; // 建议/思路（AI 或规则给出，机会点导向）
   status: 'unread' | 'read' | 'dismissed';
   source: 'rule' | 'ai';
   created_at?: string;
@@ -26,9 +27,12 @@ async function ensureAuditTable() {
       objects TEXT DEFAULT '',
       status TEXT DEFAULT 'unread',
       source TEXT DEFAULT 'rule',
+      suggestion TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now','localtime'))
     )`);
   } catch { /* 已存在则忽略 */ }
+    // 旧表补列（幂等）
+    try { await d.execute("ALTER TABLE audit_findings ADD COLUMN suggestion TEXT DEFAULT ''"); } catch { /* 已有 */ }
 }
 
 export async function getAuditFindings(): Promise<AuditFinding[]> {
@@ -63,8 +67,8 @@ export async function replaceAuditFindings(findings: Omit<AuditFinding, 'id' | '
   let added = 0;
   for (const f of findings) {
     if (old.some(o => key(o) === key(f))) continue;
-    await d.execute("INSERT INTO audit_findings (type, level, title, detail, objects, status, source, created_at) VALUES (?,?,?,?,?,?,?,datetime('now','localtime'))",
-      [f.type, f.level, f.title, f.detail, f.objects || '[]', f.status || 'unread', f.source || 'rule']);
+    await d.execute("INSERT INTO audit_findings (type, level, title, detail, objects, status, source, suggestion, created_at) VALUES (?,?,?,?,?,?,?,?,datetime('now','localtime'))",
+      [f.type, f.level, f.title, f.detail, f.objects || '[]', f.status || 'unread', f.source || 'rule', f.suggestion || '']);
     added++;
   }
   return added;
@@ -78,4 +82,16 @@ export async function markAuditRead(id: number) {
 export async function dismissAuditFinding(id: number) {
   await ensureAuditTable();
   await (await getDb()).execute('UPDATE audit_findings SET status = ? WHERE id = ?', ['dismissed', id]);
+}
+
+// 最近器件价格变动（驾驶舱"最近成本变动"汇总：用户自己输入的事实，不叫 AI）
+export async function getRecentPartPriceChanges(limit = 8) {
+  await ensureAuditTable();
+  try {
+    const rows = await (await getDb()).select<any[]>(
+      `SELECT ph.id, ph.part_id, p.name, p.model, ph.old_cost, ph.new_cost, ph.changed_at
+       FROM part_price_history ph JOIN parts p ON ph.part_id = p.id
+       ORDER BY ph.changed_at DESC, ph.id DESC LIMIT ?`, [limit]);
+    return rows;
+  } catch { return []; }
 }
