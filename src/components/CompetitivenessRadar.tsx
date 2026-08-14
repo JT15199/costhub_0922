@@ -12,6 +12,9 @@ import { chartTooltip, chartTextMuted, chartSplitLine } from '../chartTheme';
 
 // 我方固定第一色，竞品依次取项目色板其余色（系列/data 级设置，图例自动跟随）
 const RADAR_COLORS = ['#0A84FF', '#5E5CE6', '#BF5AF2', '#FF9F0A', '#34C759', '#FF375F', '#64D2FF', '#98989D'];
+// 成本长城图专用色板（语义配色：柱=规格差用冷色蓝紫系，线=成本差用暖色琥珀系；同下标成对）
+const WALL_BAR_COLORS = ['#4F46E5', '#6366F1', '#818CF8', '#A5B4FC', '#7C3AED', '#8B5CF6', '#C7D2FE'];
+const WALL_LINE_COLORS = ['#F59E0B', '#F97316', '#FB923C', '#FDBA74', '#EF4444', '#F87171', '#FCD34D'];
 
 type RadarProduct = {
   key: string;
@@ -300,11 +303,13 @@ export default function CompetitivenessRadar() {
         { type: 'value', name: '成本差(¥)', min: cAxis.min, max: cAxis.max, axisLabel: { color: chartTextMuted(), fontSize: 10.5 }, splitLine: { show: false } },
       ],
       series: rivals.flatMap((r, i) => {
-        const c = RADAR_COLORS[(i + 1) % RADAR_COLORS.length]; // 竞品色：我方固定第一色，竞品从第二色起（与雷达一致）
+        // 语义配色：柱（规格差）冷色蓝紫系、线（成本差）暖色琥珀系，同下标成对
+        const barColor = WALL_BAR_COLORS[i % WALL_BAR_COLORS.length];
+        const lineColor = WALL_LINE_COLORS[i % WALL_LINE_COLORS.length];
         return [
           {
             name: `${r.name} 规格差`, type: 'bar' as const, yAxisIndex: 0, barGap: '10%',
-            itemStyle: { color: c, borderRadius: [3, 3, 0, 0] },
+            itemStyle: { color: barColor, borderRadius: [3, 3, 0, 0] },
             label: { show: true, position: 'top', formatter: (p: any) => (p.value === null || p.value === undefined ? '' : (p.value > 0 ? '+' : '') + p.value), fontSize: 9.5, color: chartTextMuted() },
             markLine: {
               silent: true, symbol: 'none',
@@ -316,7 +321,7 @@ export default function CompetitivenessRadar() {
           },
           {
             name: `${r.name} 成本差`, type: 'line' as const, yAxisIndex: 1, symbol: 'circle', symbolSize: 7,
-            lineStyle: { width: 2.5 }, itemStyle: { color: c }, connectNulls: false,
+            lineStyle: { width: 2.5 }, itemStyle: { color: lineColor, borderColor: '#fff', borderWidth: 1 }, connectNulls: false,
             data: features.map(f => costDiff(r, f.id)),
           },
         ];
@@ -487,7 +492,7 @@ export default function CompetitivenessRadar() {
           <div style={{ border: '1px solid #E8ECF1', borderRadius: 10, padding: '12px 14px', background: '#FAFBFC' }}>
             <div style={{ marginBottom: 6 }}>
               <b style={{ fontSize: 13, color: '#1E3A6E' }}>成本长城图：规格差 vs 成本差</b>
-              <span style={{ fontSize: 11, color: '#94A3B8', marginLeft: 8 }}>柱 = 我方规格评分 − 竞品（正=规格更强）；曲线 = 我方特性成本 − 竞品（负=成本更低）</span>
+              <span style={{ fontSize: 11, color: '#94A3B8', marginLeft: 8 }}>柱（蓝紫系）= 我方规格评分 − 竞品（正=规格更强）；曲线（琥珀系）= 我方特性成本 − 竞品（负=成本更低）</span>
             </div>
             {wallOption ? (
               <ReactECharts echarts={echarts} option={wallOption} style={{ height: 400 }} />
