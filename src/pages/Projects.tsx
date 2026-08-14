@@ -291,9 +291,16 @@ export default function Projects() {
     // 侧边栏「报价情报」入口点击 → 打开弹窗
     const onOpen = () => { loadInsights(); setInsightModal(true); };
     window.addEventListener('costhub-open-insights', onOpen);
+    // 仪表盘驾驶舱「直达」→ 自动选中项目（costhub-open-project，detail: { pid }）
+    const onOpenProject = (e: Event) => {
+      const pid = (e as CustomEvent).detail?.pid;
+      if (pid) { selectProject(pid); setSelectedPid(pid); }
+    };
+    window.addEventListener('costhub-open-project', onOpenProject);
     return () => {
       window.removeEventListener('costhub-compare-done', onDone);
       window.removeEventListener('costhub-open-insights', onOpen);
+      window.removeEventListener('costhub-open-project', onOpenProject);
     };
   }, []);
   // 情报操作后重算该模块情报（已确认/否定的组被规则层吸收，不再算疑似；内容变化即刷新）
