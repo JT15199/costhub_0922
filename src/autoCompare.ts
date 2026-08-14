@@ -2,7 +2,7 @@
 // 空闲自动 / 导入改价后自动 / 打开项目页自动：全品类扫描，指纹命中跳过，发现差异情报落 part_insights
 // 数据安全：全程本地（Ollama 流式经 Rust 代理），无任何云端调用；未配置模型或 Ollama 未运行 → 静默跳过
 import { getProjects, getProjectBOMs, getPartAliases, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getSetting } from './db';
-import { startOllamaStream } from './ollama';
+import { startOllamaStream, logLocalAICall } from './ollama';
 import { invoke } from '@tauri-apps/api/core';
 
 export const partKey = (r: any) => `${normalizePartName(r.name)}|${normalizePartName(r.model)}`;
@@ -99,6 +99,15 @@ export async function runAiIdentifyOnce(rows: any[], aliases: any[]): Promise<an
   });
   const groups = parseAiGroups(full, ungrouped)
     .filter((g: any) => { const gk = g.rows.map((r: any) => partKey(r)).sort().join(';'); return !negSet.has(gk); });
+  logLocalAICall({
+    request_type: 'quote_compare',
+    material_name: rows[0]?.name || '',
+    system_prompt: sysPrompt,
+    user_prompt: userPrompt,
+    response_summary: `疑似组 ${groups.length} 个`,
+    success: true,
+    model_name: model,
+  });
   return groups;
 }
 

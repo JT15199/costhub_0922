@@ -84,3 +84,32 @@ export async function startOllamaStream(
 
   return cleanup;
 }
+
+// ===== 本地模型调用审计（v2.3.19）：本地 AI 的每一次访问也记录到 ai_request_logs，与云端同表可查 =====
+// 数据安全：日志记录"发给了本地模型什么"，可供用户审查本地模型读取了哪些数据
+export async function logLocalAICall(data: {
+  request_type: string;         // quote_compare / project_health / snapshot_explain / global_ask / auto_audit / local_chat
+  material_name?: string;
+  system_prompt: string;
+  user_prompt: string;
+  response_summary: string;
+  success: boolean;
+  error_message?: string;
+  model_name?: string;
+}): Promise<void> {
+  try {
+    const { saveAIRequestLog } = await import('./db');
+    await saveAIRequestLog({
+      request_type: data.request_type,
+      material_name: data.material_name || '',
+      system_prompt: data.system_prompt,
+      user_prompt: data.user_prompt,
+      response_summary: data.response_summary,
+      success: data.success ? 1 : 0,
+      error_message: data.error_message || '',
+      provider_name: 'Ollama 本地',
+      model_name: data.model_name || '',
+      prompt_tokens: 0, completion_tokens: 0, total_tokens: 0,
+    } as any);
+  } catch (e) { console.warn('本地模型日志记录失败:', e); }
+}

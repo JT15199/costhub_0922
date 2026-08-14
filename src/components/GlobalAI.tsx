@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Modal, Input, Button, message } from 'antd';
 import { RobotOutlined, SaveOutlined } from '@ant-design/icons';
 import { getProjectBOMs, getTargets, getSetting, saveWorkLog, localNow } from '../db';
-import { startOllamaStream } from '../ollama';
+import { startOllamaStream, logLocalAICall } from '../ollama';
 
 // 全局 AI 问询（v2.3.19）：
 // - 数据安全硬边界：只有本地模型（Ollama）可读取项目上下文，云端模型不接本地数据
@@ -65,6 +65,15 @@ export default function GlobalAI({ open, onClose }: Props) {
           () => {}, () => resolve(), e => reject(new Error(e)),
           { endpoint: 'native', json: false, think: false, num_predict: 700, temperature: 0.4 },
         );
+      });
+      logLocalAICall({
+        request_type: 'global_ask',
+        material_name: question.slice(0, 30),
+        system_prompt: '你是嵌入 CostHub 成本管理工具的 AI 助手。回答用户问题时，成本数据只能用提供的上下文，不能编造；数据不足就说明不足。用简洁中文回答。',
+        user_prompt: '当前上下文：' + ctx + '\n\n问题：' + question,
+        response_summary: full.slice(0, 200),
+        success: true,
+        model_name: model,
       });
     } catch (e: any) {
       setAnswer(`（本地模型不可用：${e?.message || e}。全局问询需在「本地 AI 助手」页配置 Ollama——只有本地模型可以读取项目数据；云端模型按数据安全原则不接入本地数据。）`);

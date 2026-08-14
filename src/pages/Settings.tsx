@@ -2046,6 +2046,9 @@ export default function Settings({ embedded }: { embedded?: boolean }) {
             <p style={{ margin: '4px 0 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
               查看所有AI请求的详细记录，确保数据安全
             </p>
+            <div style={{ marginTop: 8, padding: '8px 12px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 8, fontSize: 12, color: '#166534', lineHeight: 1.7 }}>
+              🔒 <b>数据安全边界：</b>云端模型只有 HTTP 转发通道，<b>无法访问本地数据库</b>——发送内容仅限物料名称/分类等业务字段（前端主动拼进请求，全程记录如上）。本地模型（Ollama）可读取项目数据辅助分析，每一次本地访问也记录在此（标记「本地」），可供审查。
+            </div>
           </div>
           <Space>
             <Button size="small" onClick={loadAILogs}>刷新</Button>
@@ -2063,47 +2066,39 @@ export default function Settings({ embedded }: { embedded?: boolean }) {
             rowKey="id"
             size="small"
             pagination={{ pageSize: 10, showSizeChanger: false }}
-            scroll={{ x: 'max-content' }}
+            scroll={{ x: 980 }}
             columns={[
-              { title: '时间', dataIndex: 'created_at', width: 150, render: (v: string) => v || '-' },
-              { title: '类型', dataIndex: 'request_type', width: 100, render: (v: string) => {
+              { title: '时间', dataIndex: 'created_at', width: 110, render: (v: string) => v || '-' },
+              { title: '通道 / 类型', key: 'type', width: 130, render: (_: any, r: any) => {
+                const local = r.provider_name === 'Ollama 本地';
                 const typeMap: Record<string, string> = {
-                  'general': '通用',
-                  'trend_insight': '趋势洞察',
-                  'decompose': 'AI拆解',
-                  'local_ai_chat': '本地AI对话',
+                  'general': '通用', 'trend_insight': '趋势洞察', 'decompose': 'AI拆解',
+                  'local_ai_chat': '本地AI对话', 'quote_compare': '报价比对', 'project_health': '项目体检',
+                  'snapshot_explain': '快照解释', 'global_ask': '全局问询', 'auto_audit': '自主巡检',
                 };
-                return typeMap[v] || v;
+                return (
+                  <span style={{ fontSize: 12 }}>
+                    <Tag color={local ? 'orange' : 'blue'} style={{ margin: 0, marginRight: 4, fontSize: 11 }}>{local ? '本地' : '云端'}</Tag>
+                    {typeMap[r.request_type] || r.request_type}
+                  </span>
+                );
               }},
-              { title: '物料名称', dataIndex: 'material_name', width: 130, ellipsis: true },
-              { title: 'System Prompt', dataIndex: 'system_prompt', width: 180, ellipsis: true, render: (v: string) => (
-                <Tooltip title={v}>
-                  <span>{v ? `${v.slice(0, 40)}...` : '-'}</span>
-                </Tooltip>
+              { title: '物料', dataIndex: 'material_name', width: 90, ellipsis: true },
+              { title: '请求内容', key: 'prompt', width: 280, render: (_: any, r: any) => {
+                const t = (r.user_prompt || r.system_prompt || '').replace(/\s+/g, ' ');
+                return t ? <Tooltip title={t}><span style={{ fontSize: 11.5 }}>{t.slice(0, 55)}{t.length > 55 ? '…' : ''}</span></Tooltip> : '-';
+              }},
+              { title: '响应', dataIndex: 'response_summary', width: 120, ellipsis: true, render: (v: string) => (
+                <Tooltip title={v}><span style={{ fontSize: 11.5 }}>{v ? v.slice(0, 30) + (v.length > 30 ? '…' : '') : '-'}</span></Tooltip>
               )},
-              { title: 'User Prompt', dataIndex: 'user_prompt', width: 180, ellipsis: true, render: (v: string) => (
-                <Tooltip title={v}>
-                  <span>{v ? `${v.slice(0, 40)}...` : '-'}</span>
-                </Tooltip>
+              { title: '模型', key: 'model', width: 100, render: (_: any, r: any) => (
+                <span style={{ fontSize: 11.5, color: '#64748B' }}>{r.model_name || (r.provider_name === 'Ollama 本地' ? 'Ollama' : '-')}</span>
               )},
-              { title: '响应摘要', dataIndex: 'response_summary', width: 200, ellipsis: true, render: (v: string) => (
-                <Tooltip title={v}>
-                  <span>{v ? `${v.slice(0, 50)}...` : '-'}</span>
-                </Tooltip>
+              { title: 'Token', key: 'tokens', width: 80, align: 'right' as const, render: (_: any, r: any) => (
+                <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 11.5 }}>{r.total_tokens ? r.total_tokens : '-'}</span>
               )},
-              { title: '供应商 / 模型', key: 'provider', width: 160, render: (_: any, r: any) => (
-                <span style={{ fontSize: 12 }}>
-                  {r.provider_name ? <Tag color="blue" style={{ margin: 0 }}>{r.provider_name}</Tag> : <span style={{ color: '#999' }}>本地</span>}
-                  {r.model_name && <span style={{ marginLeft: 4, color: '#64748B' }}>{r.model_name}</span>}
-                </span>
-              )},
-              { title: 'Token 用量', key: 'tokens', width: 110, align: 'right' as const, render: (_: any, r: any) => (
-                <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>
-                  {r.total_tokens ? `${r.total_tokens} (↑${r.prompt_tokens || 0} / ↓${r.completion_tokens || 0})` : '-'}
-                </span>
-              )},
-              { title: '状态', dataIndex: 'success', width: 80, render: (v: number) => (
-                <Tag color={v ? 'green' : 'red'}>{v ? <><CheckCircleOutlined /> 成功</> : <><CloseCircleOutlined /> 失败</>}</Tag>
+              { title: '状态', dataIndex: 'success', width: 65, render: (v: number) => (
+                <Tag color={v ? 'green' : 'red'} style={{ fontSize: 11 }}>{v ? '成功' : '失败'}</Tag>
               )},
               { title: '操作', key: 'action', width: 80, render: (_: any, record: any) => (
                 <Button size="small" type="link" onClick={() => {

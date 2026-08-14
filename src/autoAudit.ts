@@ -1,7 +1,7 @@
 // AI 自主巡检（v2.3.19）：本地 AI 直接访问数据库，主动发现用户注意不到的细枝末节
 // 两层：①规则层（免费实时可测：数据质量/成本模式/占比异常）②AI 层（本地模型深度洞察全库模式）
 // 数据安全：仅本地模型（Ollama）读取全库摘要；云端模型不接入（与全局问询同边界）
-import { startOllamaStream } from './ollama';
+import { startOllamaStream, logLocalAICall } from './ollama';
 import { getSetting } from './db';
 import { replaceAuditFindings, type AuditFinding } from './auditStore';
 
@@ -239,6 +239,15 @@ async function aiAuditFindings(url: string, model: string, ctxText: string, rule
       t => { full += t; }, () => {}, () => resolve(), e => reject(new Error(e)),
       { endpoint: 'native', json: true, think: false, num_predict: 900, temperature: 0.3 },
     );
+  });
+  logLocalAICall({
+    request_type: 'auto_audit',
+    material_name: '',
+    system_prompt: sysPrompt,
+    user_prompt: ctxText.slice(0, 1500),
+    response_summary: full.slice(0, 200),
+    success: true,
+    model_name: model,
   });
   const data = parseFindingsJson(full);
   return (data || []).map((f: any) => ({

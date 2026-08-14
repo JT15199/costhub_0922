@@ -7,7 +7,7 @@ import echarts from '../echartsSetup';
 import { getProjects, saveProject, deleteProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, syncProjectModulesToLibrary, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, deleteSku, saveSkuDiff, deleteSkuDiff, getAllSkuDiffs, getAllSkus, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead } from '../db';
 import { TIERS, PROJECT_STATUSES, PROJECT_TYPES, SCREEN_SIZES, RESOLUTIONS, REFRESH_RATES, PANEL_TYPES, MAIN_CATEGORIES, SUB_CATEGORIES, MEASURE_STATUSES, getCategoryColor } from '../constants';
 import { getMainCategories, getSetting } from '../db';
-import { startOllamaStream } from '../ollama';
+import { startOllamaStream, logLocalAICall } from '../ollama';
 import { calcSkuCost as calcSkuCostFn, buildSkuBom as buildSkuBomFn } from '../skuCalc';
 import { estimateProjectCost } from '../specEstimate';
 import { computeProjectHealth, type HealthIssue } from '../projectHealth';
@@ -545,6 +545,15 @@ export default function Projects() {
           () => {}, () => resolve(), e => reject(new Error(e)),
           { endpoint: 'native', json: false, think: false, num_predict: 200, temperature: 0.3 },
         );
+      });
+      logLocalAICall({
+        request_type: 'project_health',
+        material_name: selectedProject?.code || '',
+        system_prompt: '你是成本管理助手。根据项目体检结果，用一句话（不超过60字）概括最需要关注的问题和优先级，直接给结论，不要列举条目。',
+        user_prompt: '项目 ' + (selectedProject?.code || '') + ' 体检结果',
+        response_summary: full.slice(0, 200),
+        success: true,
+        model_name: model,
       });
     } catch (e: any) {
       setHealthAiSummary(''); // 本地模型不可用时静默（规则条已足够）
@@ -1557,6 +1566,15 @@ export default function Projects() {
                                             () => {}, () => resolve(), e => reject(new Error(e)),
                                             { endpoint: 'native', json: false, think: false, num_predict: 300, temperature: 0.3 },
                                           );
+                                        });
+                                        logLocalAICall({
+                                          request_type: 'snapshot_explain',
+                                          material_name: selectedProject?.code || '',
+                                          system_prompt: '你是成本管理助手。根据 BOM 快照对比的变化清单，用 2-3 句话说明这次成本变化的主要原因（哪些器件/模块驱动了变化、金额多少），语气客观，不要列举。',
+                                          user_prompt: '项目 ' + (selectedProject?.code || '') + ' 成本快照对比',
+                                          response_summary: full.slice(0, 200),
+                                          success: true,
+                                          model_name: model,
                                         });
                                       } catch (e: any) {
                                         aiText = '本地模型不可用，无法生成解释（规则对比已完整展示上方）。';
