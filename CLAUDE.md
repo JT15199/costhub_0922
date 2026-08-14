@@ -1,3 +1,7 @@
+### ⚠️ reqwest 本地直连铁律（2026-08-14 公司电脑 504 教训）
+- **任何本地/内网地址（localhost/127.0.0.1/私有网段）的 reqwest client 必须显式 `.no_proxy()`**——reqwest 默认 features 含 system-proxy，Windows 走 WinHTTP 读系统代理（公司组策略设置，设置界面看不到），会把 127.0.0.1 转发到公司代理 → 504
+- 排查：`netsh winhttp show proxy`（WinHTTP）≠ 设置界面（WinINET）；GUI 启动 eprintln 不可见，诊断写 exe 同目录日志或塞回响应 body
+
 ### v2.3.19 AI 能力嵌入工作流（2026-08-14）
 - **仪表盘 → 驾驶舱**：目标成本达成预警置顶（project_targets 按领域=main_category 对比 BOM 实际成本，达成率=(2-实际/目标)×100，未达标红色卡片+跨页直达 costhub-open-project 事件）+ AI 今日洞察区（part_insights 报价情报 + 最近两条快照 bom_cost 异动≥1%）；纯计算在 src/targetInsight.ts（vitest 覆盖）
 - **项目页 AI 体检条**：规则驱动 4 类检查（BOM 缺单价/数量0、目标超支→analysis tab、快照异动→snapshots tab、同品类模块报价价差≥¥10且≥10%），点击直达 tab；「AI 小结」本地模型一句话概括（未配置静默）；纯逻辑 src/projectHealth.ts（vitest 覆盖）
