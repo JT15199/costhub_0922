@@ -4,6 +4,7 @@
 - **快照对比 AI 解释**：BOM 详细对比弹窗「生成解释」——差异清单 top8 交 Ollama 流式生成 2-3 句原因说明（Modal.update 流式刷新）
 - **全局 AI 问询**（src/components/GlobalAI.tsx）：侧边栏入口，上下文=localStorage costhub-ctx（Projects 选中项目写 BOM 摘要/目标），回答一键 saveWorkLog 记入工作手账（work_project=项目代号）；⚠️ 数据安全：只有本地模型可读项目数据（云端不接）
 - **首次 AI 引导**（src/components/AIGuide.tsx）：解锁后 localStorage costhub-ai-guide-seen 控制一次，展示 5 项能力+配置就绪度
+- **器件供应商价格趋势小结**（同日追加）：器件库供应商抽屉自动加载各供应商价格历史，规则生成一句话趋势（持续上涨/下降/波动/基本平稳/仅一次变动 + 复合累计幅度 + 最近原因），表格「价格趋势」列 Tag + footer 小结条；纯函数 src/supplierTrend.ts（vitest 覆盖，复合口径 100-110-121 = +21%）
 - ⚠️ 铁律：项目目标成本数据依赖用户设定（生产库仅 2 条），驾驶舱预警以目标设定为前提
 
 # CostHub - 成本管理平台 v2.3.19
