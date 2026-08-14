@@ -7,7 +7,7 @@ import { getSetting, setSetting } from './db/settings';
 import { getProjects, getProjectBOMs, getProjectCostSnapshots, getTargets } from './db/projects';
 import { getParts, getAllPartSuppliers } from './db/parts';
 import { computeTargetStatuses } from './targetInsight';
-import { findAdvisorByFingerprint, saveAdvisorInsight, updateAdvisorStatus } from './db/advisor';
+import { findAdvisorByFingerprint, findDismissedByFingerprint, saveAdvisorInsight, updateAdvisorStatus } from './db/advisor';
 import { logLocalAICall } from './ollama';
 
 // ==================== 纯规则层（可 vitest） ====================
@@ -73,6 +73,18 @@ export function buildRuleCandidates(input: RuleInput): AdvisorCandidate[] {
   }
 
   // ---- 2) 大额物料价格长期未调 ----
+  // 物料使用上下文：从各项目 BOM 反查（工具不存总用量，只有单项目用量——如实呈现）
+  const usageOf = (partId: number) => {
+    const out: string[] = [];
+    for (const [pid, boms] of Object.entries(input.bomsByProject)) {
+      const qty = boms.filter(b => b.part_id === partId).reduce((s, b) => s + (b.quantity || 0), 0);
+      if (qty > 0) {
+        const proj = input.projects.find(pr => pr.id === Number(pid));
+        out.push(`${proj?.code || pid}(${qty}件)`);
+      }
+    }
+    return out.length > 0 ? out.join('、') : '';
+  };
   const bigParts = input.parts.filter(p => (p.cost || 0) >= BIG_PART_MIN);
   for (const p of bigParts) {
     const days = daysBetween(now, p.updated_at);
@@ -81,13 +93,14 @@ export function buildRuleCandidates(input: RuleInput): AdvisorCandidate[] {
     const sups = input.suppliersByPart[p.id] || [];
     const activeSup = sups.filter(s => s.is_active !== 0);
     const supplierDesc = activeSup.length > 0 ? `供应商：${activeSup.map(s => s.supplier_name).join('、')}` : '暂无启用供应商';
+    const usageDesc = usageOf(p.id);
     out.push({
       insight_type: 'stale_part_price',
       title: `物料「${p.name}」¥${(p.cost || 0).toFixed(2)} 已 ${days} 天未调价`,
-      detail: `型号 ${p.model || '—'}（${p.main_category || '未分类'}），现成本 ¥${(p.cost || 0).toFixed(2)}，自 ${(p.updated_at || '').slice(0, 16)} 起未变动。${supplierDesc}。超过 ${STALE_PART_DAYS} 天未动价，值得作为议价抓手重新谈价。`,
+      detail: `型号 ${p.model || '—'}（${p.main_category || '未分类'}），现成本 ¥${(p.cost || 0).toFixed(2)}，自 ${(p.updated_at || '').slice(0, 16)} 起未变动。${supplierDesc}。${usageDesc ? `使用：${usageDesc}。` : ''}超过 ${STALE_PART_DAYS} 天未动价，值得作为议价抓手重新谈价。`,
       ref_type: 'part', ref_id: p.id, ref_name: p.name,
       prompt: `你是资深成本经理。物料「${p.name}」（型号 ${p.model || '—'}，品类 ${p.main_category || '未分类'}，现成本 ¥${(p.cost || 0).toFixed(2)}）已 ${days} 天未调价，${supplierDesc}。请：1) 结合品类给出合理采购价区间；2) 建议目标谈判价与砍价幅度；3) 给 3 条谈判话术要点；4) 判断是否值得做行业行情洞察，值得则给出洞察关键词。`,
-      fingerprint: `spp|${p.id}`,
+      fingerprint: `spp|${p.id}|${p.updated_at || ''}`,
     });
   }
 
@@ -101,14 +114,13 @@ export function buildRuleCandidates(input: RuleInput): AdvisorCandidate[] {
     if (!(s.diff > 0)) continue;
     const rate = s.rate ?? 100;
     if (rate >= 100 - TARGET_GAP_MIN) continue; // 超支不足 5% 不打扰
-    const fp = `tg|${s.projectId}|${s.domain}`;
     out.push({
       insight_type: 'target_gap',
       title: `项目「${s.code}」${s.domain} 超目标 ¥${s.diff.toFixed(2)}`,
       detail: `目标 ¥${(s.target || 0).toFixed(2)}，实际 ¥${s.actual.toFixed(2)}，超支 ${s.diff.toFixed(2)}（达成率 ${rate}%）。需要降本措施把成本压回目标线。`,
       ref_type: 'project', ref_id: s.projectId, ref_name: s.code,
       prompt: `你是资深成本经理。项目「${s.code}」的「${s.domain}」实际成本 ¥${s.actual.toFixed(2)} 超目标 ¥${(s.target || 0).toFixed(2)}（超支 ¥${s.diff.toFixed(2)}）。请给出：1) 该领域最可能压缩成本的子项；2) 建议压回金额与节奏；3) 优先级排序。`,
-      fingerprint: fp,
+      fingerprint: `tg|${s.projectId}|${s.domain}|${s.actual.toFixed(2)}`,
     });
   }
 
@@ -120,10 +132,10 @@ export function buildRuleCandidates(input: RuleInput): AdvisorCandidate[] {
     out.push({
       insight_type: 'single_supplier',
       title: `物料「${p.name}」仅单一供应商${s.supplier_name}`,
-      detail: `型号 ${p.model || '—'} 成本 ¥${(p.cost || 0).toFixed(2)}（≥¥${BIG_PART_MIN} 大额），仅 ${s.supplier_name} 一家供货。供应中断风险集中，且议价筹码有限，建议评估引入二供。`,
+      detail: `型号 ${p.model || '—'} 成本 ¥${(p.cost || 0).toFixed(2)}（≥¥${BIG_PART_MIN} 大额），仅 ${s.supplier_name} 一家供货。${(() => { const u = usageOf(p.id); return u ? `使用：${u}。` : ''; })()}供应中断风险集中，且议价筹码有限，建议评估引入二供。`,
       ref_type: 'part', ref_id: p.id, ref_name: p.name,
       prompt: `你是资深成本经理。物料「${p.name}」（型号 ${p.model || '—'}，成本 ¥${(p.cost || 0).toFixed(2)}）仅由 ${s.supplier_name} 单一供货。请评估：1) 供应风险等级与影响；2) 当前议价空间；3) 引入二供的候选方向与验证要点；4) 若暂不引入二供，如何管理该风险。`,
-      fingerprint: `ss|${p.id}`,
+      fingerprint: `ss|${p.id}|${s.supplier_name}`,
     });
   }
 
@@ -256,6 +268,9 @@ export async function runAutoAdvisor(onProgress?: (msg: string) => void): Promis
   for (const c of cands) {
     const exist = await findAdvisorByFingerprint(c.fingerprint);
     if (exist) { skipped++; continue; }
+    // 降噪：被忽略过的同类建议不重提（指纹含数据版本——物料调价/项目留痕后指纹变化，才重新提醒）
+    const dismissed = await findDismissedByFingerprint(c.fingerprint);
+    if (dismissed) { skipped++; continue; }
     await saveAdvisorInsight({ ...c, source: 'rule' });
     found++;
   }

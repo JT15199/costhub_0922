@@ -26,6 +26,13 @@ export async function findAdvisorByFingerprint(fingerprint: string) {
   return rows?.[0] || null;
 }
 
+// 降噪：被忽略过的建议（数据未变时指纹相同）→ 不重提；指纹含数据版本，数据变化自然生成新指纹重新提醒
+export async function findDismissedByFingerprint(fingerprint: string) {
+  const d = await getDb();
+  const rows = await d.select<any[]>('SELECT id FROM ai_advisor_insights WHERE fingerprint = ? AND status = \'dismissed\' LIMIT 1', [fingerprint]);
+  return rows?.[0] || null;
+}
+
 export async function saveAdvisorInsight(ins: {
   insight_type: string;
   title: string;
