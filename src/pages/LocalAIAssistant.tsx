@@ -1083,8 +1083,11 @@ export default function LocalAIAssistant() {
     return () => clearInterval(iv);
   }, [ruleLearning]);
 
+  // 连接失败的具体原因（诊断用）
+  const [connError, setConnError] = useState('');
   const testConnection = useCallback(async () => {
     setConnStatus('idle');
+    setConnError('');
     try {
       const result = await invoke<{ status: number; body: string; success: boolean }>('http_get', {
         request: { url: `${ollamaUrl.replace(/\/$/, '')}/api/tags`, headers: {}, body: null }
@@ -1093,10 +1096,20 @@ export default function LocalAIAssistant() {
       const data = JSON.parse(result.body);
       const list: string[] = (data.models || []).map((m: any) => m.name);
       setModels(list);
-      if (list.length && !model) { setModel(list[0]); await setSetting('local_ai_model', list[0]); }
+      // 配置的模型不存在时，自动切换为 Ollama 里第一个可用模型（避免"配置了不存在的模型"导致后续失败）
+      if (list.length > 0) {
+        const current = model || '';
+        if (!list.includes(current)) {
+          setModel(list[0]);
+          await setSetting('local_ai_model', list[0]);
+        }
+      }
       setConnStatus('ok');
       await setSetting('local_ai_base_url', ollamaUrl);
-    } catch { setConnStatus('fail'); }
+    } catch (e: any) {
+      setConnStatus('fail');
+      setConnError(String(e?.message || e).slice(0, 200));
+    }
   }, [ollamaUrl, model]);
 
   const startSession = useCallback(async (title = '新对话') => {
@@ -1580,7 +1593,12 @@ export default function LocalAIAssistant() {
           <div><div style={{ fontSize: 12, marginBottom: 4, color: 'var(--color-text-secondary)' }}>Ollama 地址</div>
             <Input value={ollamaUrl} onChange={e => setOllamaUrl(e.target.value)} placeholder="http://localhost:11434" /></div>
           <Button onClick={testConnection} icon={connStatus === 'ok' ? <CheckCircleOutlined style={{ color: '#16A34A' }} /> : <SyncOutlined />}>测试连接 &amp; 获取模型列表</Button>
-          {connStatus === 'fail' && <div style={{ color: '#DC2626', fontSize: 12 }}>连接失败，请确认 Ollama 正在运行（<code>ollama serve</code>）</div>}
+          {connStatus === 'fail' && (
+            <div>
+              <div style={{ color: '#DC2626', fontSize: 12 }}>连接失败，请确认 Ollama 正在运行（<code>ollama serve</code>）</div>
+              {connError && <div style={{ color: '#B45309', fontSize: 11.5, marginTop: 4, wordBreak: 'break-all' }}>详细原因：{connError}</div>}
+            </div>
+          )}
           {models.length > 0 && <div><div style={{ fontSize: 12, marginBottom: 4, color: 'var(--color-text-secondary)' }}>选择模型</div>
             <Select value={model} onChange={async v => { setModel(v); await setSetting('local_ai_model', v); }} style={{ width: '100%' }} options={models.map(m => ({ value: m, label: m }))} /></div>}
           {connStatus === 'ok' && !models.length && <div style={{ color: '#D97706', fontSize: 12 }}>已连接但无模型，请先运行：<code>ollama pull qwen2.5:7b</code></div>}
