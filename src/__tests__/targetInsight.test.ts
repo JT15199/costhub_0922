@@ -88,4 +88,19 @@ describe('detectSnapshotChanges — 快照异动检测', () => {
     const r = detectSnapshotChanges({ 1: [{ id: 1, project_id: 1, bom_cost: 100, total_cost: 100 }] });
     expect(r).toHaveLength(0);
   });
+
+  it('按时间（created_at）取最新两条，而非按 id', () => {
+    // 场景：id 大的快照时间更早（如 seed 补历史），最新快照应按 created_at 判定
+    const r = detectSnapshotChanges({
+      5: [
+        { id: 1, project_id: 5, bom_cost: 680, total_cost: 680, created_at: '2026-06-01 09:00:00' },
+        { id: 3, project_id: 5, bom_cost: 740, total_cost: 740, created_at: '2026-08-13 20:11:50' },
+        { id: 2, project_id: 5, bom_cost: 689, total_cost: 689, created_at: '2026-07-05 09:00:00' },
+      ],
+    });
+    expect(r).toHaveLength(1);
+    expect(r[0].oldCost).toBe(689);
+    expect(r[0].newCost).toBe(740);
+    expect(r[0].pct).toBeCloseTo(7.4, 1);
+  });
 });

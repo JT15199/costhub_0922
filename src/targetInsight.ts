@@ -73,7 +73,8 @@ export function detectSnapshotChanges(
 ): { projectId: number; oldCost: number; newCost: number; pct: number; reason: string; at: string }[] {
   const out: { projectId: number; oldCost: number; newCost: number; pct: number; reason: string; at: string }[] = [];
   for (const [pid, snaps] of Object.entries(snapshotsByProject)) {
-    const sorted = [...snaps].sort((a, b) => b.id - a.id);
+    // 按时间取最新两条（created_at 统一 'YYYY-MM-DD HH:MM:SS' 格式，字符串比较安全；id 兜底）
+    const sorted = [...snaps].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')) || (b.id - a.id));
     if (sorted.length < 2) continue;
     const [newest, prev] = sorted;
     const oldCost = prev.bom_cost || 0;
