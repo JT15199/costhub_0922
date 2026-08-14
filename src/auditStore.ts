@@ -50,23 +50,32 @@ export async function getUnreadAuditCount(): Promise<number> {
 export async function replaceAuditFindings(findings: Omit<AuditFinding, 'id' | 'created_at'>[]): Promise<number> {
   await ensureAuditTable();
   const d = await getDb();
-  const old = await d.select<{ id: number; title: string; detail: string; status: string }[]>('SELECT id, title, detail, status FROM audit_findings');
-  const key = (f: any) => f.type + '|' + f.title + '|' + f.detail;
-  const newKeys = new Set(findings.map(key));
-  // 已存在且内容相同 → 保持状态；内容变化 → 重置 unread
+  const old = await d.select<{ id: number; type: string; title: string; detail: string; objects: string; status: string }[]>('SELECT id, type, title, detail, objects, status FROM audit_findings');
+  // 稳定键 = 类型 + 涉及对象（不含 title/detail 的动态数字）：
+  // 已读/忽略的同源发现即使数字微变（如占比 89%→90%）也保持原状态，不重新弹出；
+  // 只有"新类型/新对象"才作为新发现标 unread
+  const stableKey = (f: any) => String(f.type || '') + '|' + String(f.objects || '[]');
+  const newKeys = new Set(findings.map(stableKey));
   const statusMap: Record<number, string> = {};
   old.forEach(o => {
-    if (!newKeys.has(key(o))) statusMap[o.id] = 'dismissed';   // 不再发现 → 隐藏
-    else if (o.status === 'unread') statusMap[o.id] = 'unread'; // 未读保持
-    else statusMap[o.id] = o.status;                            // 已读保持
+    if (!newKeys.has(stableKey(o))) statusMap[o.id] = 'dismissed'; // 不再发现 → 隐藏
+    else statusMap[o.id] = o.status;                                // 同源发现 → 保持原状态（read/dismissed/unread 都不重置）
   });
   for (const o of old) {
     await d.execute('UPDATE audit_findings SET status = ? WHERE id = ?', [statusMap[o.id] ?? 'dismissed', o.id]);
   }
-  // 新增
+  // 同源但内容变化 → 更新 title/detail（状态保持，不打扰）
+  for (const f of findings) {
+    const match = old.find(o => stableKey(o) === stableKey(f));
+    if (match && (match.title !== f.title || match.detail !== f.detail)) {
+      await d.execute('UPDATE audit_findings SET title = ?, detail = ?, suggestion = ? WHERE id = ?',
+        [f.title, f.detail, f.suggestion || '', match.id]);
+    }
+  }
+  // 新增（稳定键不存在的）
   let added = 0;
   for (const f of findings) {
-    if (old.some(o => key(o) === key(f))) continue;
+    if (old.some(o => stableKey(o) === stableKey(f))) continue;
     await d.execute("INSERT INTO audit_findings (type, level, title, detail, objects, status, source, suggestion, created_at) VALUES (?,?,?,?,?,?,?,?,datetime('now','localtime'))",
       [f.type, f.level, f.title, f.detail, f.objects || '[]', f.status || 'unread', f.source || 'rule', f.suggestion || '']);
     added++;
