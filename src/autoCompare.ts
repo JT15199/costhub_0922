@@ -146,10 +146,16 @@ export async function runAutoCompare(onProgress?: (p: { done: number; total: num
   if (!model) return null;
   // Ollama 运行探测：走 Rust http_get 代理（浏览器 fetch 会被 CORS 拦截——localhost:11434 无 Access-Control-Allow-Origin 头）；不可用则静默跳过
   const base = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
-  try {
-    const r = await invoke<{ status: number; success: boolean }>('http_get', { request: { url: base + '/api/tags', headers: {}, body: null } });
-    if (!r?.success) return null;
-  } catch { return null; }
+  // 探测：localhost 失败自动试 127.0.0.1（reqwest 对 localhost 的 IPv6 解析在部分 Windows 环境失败）
+  const candidates = [base, 'http://127.0.0.1:11434'];
+  let reachable = false;
+  for (const u of candidates) {
+    try {
+      const r = await invoke<{ status: number; success: boolean }>('http_get', { request: { url: u + '/api/tags', headers: {}, body: null } });
+      if (r?.success) { reachable = true; break; }
+    } catch { /* 试下一个 */ }
+  }
+  if (!reachable) return null;
   const projs = await getProjects('', '', '');
   const cats = [...new Set(projs.filter((p: any) => !p.is_deleted).map((p: any) => p.category || '未分类'))];
   const jobs: { cat: string; mod: string; projs: any[] }[] = [];

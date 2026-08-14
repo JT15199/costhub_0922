@@ -1109,28 +1109,36 @@ export default function LocalAIAssistant() {
   const testConnection = useCallback(async () => {
     setConnStatus('idle');
     setConnError('');
-    try {
-      const result = await invoke<{ status: number; body: string; success: boolean }>('http_get', {
-        request: { url: `${ollamaUrl.replace(/\/$/, '')}/api/tags`, headers: {}, body: null }
-      });
-      if (!result.success) throw new Error(`HTTP ${result.status}`);
-      const data = JSON.parse(result.body);
-      const list: string[] = (data.models || []).map((m: any) => m.name);
-      setModels(list);
-      // 配置的模型不存在时，自动切换为 Ollama 里第一个可用模型（避免"配置了不存在的模型"导致后续失败）
-      if (list.length > 0) {
-        const current = model || '';
-        if (!list.includes(current)) {
-          setModel(list[0]);
-          await setSetting('local_ai_model', list[0]);
+    // 多地址兜底：reqwest 对 localhost 的 IPv6 解析在部分 Windows 环境失败，先试配置地址、失败自动试 127.0.0.1
+    const candidates = [ollamaUrl.replace(/\/$/, ''), 'http://127.0.0.1:11434'];
+    let lastErr = '';
+    for (const base of candidates) {
+      try {
+        const result = await invoke<{ status: number; body: string; success: boolean }>('http_get', {
+          request: { url: `${base}/api/tags`, headers: {}, body: null }
+        });
+        if (!result.success) { lastErr = `HTTP ${result.status}`; continue; }
+        const data = JSON.parse(result.body);
+        const list: string[] = (data.models || []).map((m: any) => m.name);
+        setModels(list);
+        // 配置的模型不存在时自动切换为第一个可用模型
+        if (list.length > 0) {
+          const current = model || '';
+          if (!list.includes(current)) { setModel(list[0]); await setSetting('local_ai_model', list[0]); }
         }
+        setConnStatus('ok');
+        await setSetting('local_ai_base_url', base);
+        if (base !== ollamaUrl.replace(/\/$/, '')) {
+          message.success('已通过 127.0.0.1 连接（localhost 解析异常已自动切换）');
+        }
+        return;
+      } catch (e: any) {
+        lastErr = String(e?.message || e);
       }
-      setConnStatus('ok');
-      await setSetting('local_ai_base_url', ollamaUrl);
-    } catch (e: any) {
-      setConnStatus('fail');
-      setConnError(String(e?.message || e).slice(0, 200));
     }
+    setConnStatus('fail');
+    setConnError(lastErr.slice(0, 200));
+    message.error('Ollama 连接失败：' + lastErr.slice(0, 150));
   }, [ollamaUrl, model]);
 
   const startSession = useCallback(async (title = '新对话') => {
