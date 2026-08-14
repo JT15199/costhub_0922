@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Spin, Tag, Badge } from 'antd';
+import { Spin, Tag, Badge, Button } from 'antd';
 import { BarChartOutlined, ShopOutlined, AimOutlined, BulbOutlined, AlertOutlined, RobotOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
@@ -9,6 +9,8 @@ import DataTable from '../components/DataTable';
 import type { DashboardStats } from '../types';
 import { CHART_COLORS, chartTooltip, chartAxisStyle, chartGrid, chartTextMuted, barGradient } from '../chartTheme';
 import { computeTargetStatuses, summarizeTargets, detectSnapshotChanges, type TargetStatus } from '../targetInsight';
+import { getAuditFindings, markAuditRead, dismissAuditFinding } from '../auditStore';
+import { runAutoAudit } from '../autoAudit';
 
 interface DashboardProps {
   onNavigate?: (key: string) => void;
@@ -31,6 +33,10 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [snapshotChanges, setSnapshotChanges] = useState<{ projectId: number; oldCost: number; newCost: number; pct: number; reason: string; at: string }[]>([]);
   const [insights, setInsights] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
+  // AI 自主巡检
+  const [auditFindings, setAuditFindings] = useState<any[]>([]);
+  const [auditRunning, setAuditRunning] = useState(false);
+  const [auditLastAt, setAuditLastAt] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -66,6 +72,12 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           cost: Math.round(allCompBoms[i].reduce((sum: number, b: any) => sum + (b.estimated_cost || 0) * (b.quantity || 1), 0) * 100) / 100,
         }));
         setCompCosts(cc);
+        // AI 自主巡检：加载发现列表；无历史发现时自动触发一次（后台，不阻塞）
+        try {
+          const fs2 = await getAuditFindings();
+          setAuditFindings(fs2);
+          if (fs2.length === 0) refreshAudit();
+        } catch { /* 忽略 */ }
       } catch (e: any) {
         const msg = e?.message || String(e);
         console.error('Dashboard load error:', e);
@@ -74,6 +86,20 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       setLoading(false);
     })();
   }, []);
+
+  // 立即巡检（规则 + 本地 AI 深度洞察；后台执行，完成后刷新列表）
+  const refreshAudit = async () => {
+    if (auditRunning) return;
+    setAuditRunning(true);
+    try {
+      const r = await runAutoAudit();
+      if (r) {
+        setAuditFindings(await getAuditFindings());
+        setAuditLastAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
+      }
+    } catch (e) { console.warn('巡检失败:', e); }
+    setAuditRunning(false);
+  };
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 100 }}><Spin size="large" /></div>;
   if (!stats) return (
@@ -187,10 +213,45 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         <div className="card-header">
           <h3><RobotOutlined style={{ color: '#0A84FF' }} /> AI 今日洞察</h3>
           <span style={{ fontSize: 12, color: '#94A3B8' }}>
+            <Button size="small" icon={<RobotOutlined />} loading={auditRunning} onClick={refreshAudit} style={{ fontSize: 11.5 }}>
+              {auditRunning ? 'AI 巡检中…' : 'AI 自主巡检'}
+            </Button>
+            {auditLastAt && <span style={{ marginLeft: 8 }}>上次 {auditLastAt}</span>}
+          </span>
+          <span style={{ fontSize: 12, color: '#94A3B8' }}>
             {unreadInsights.length > 0 && <Badge count={unreadInsights.length} size="small" style={{ marginRight: 6 }} />}
             {snapshotChanges.length > 0 && <Tag color="orange">{snapshotChanges.length} 条成本异动</Tag>}
           </span>
         </div>
+
+        {/* AI 自主巡检发现（本地模型+规则：细枝末节的异常与模式） */}
+        {auditFindings.length > 0 && (
+          <div style={{ marginBottom: 12, border: '1px solid #E8ECF1', borderRadius: 10, padding: '10px 14px', background: '#FAFBFD' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <RobotOutlined style={{ color: '#6366F1' }} />
+              <b style={{ fontSize: 12.5 }}>AI 自主巡检发现（{auditFindings.length}）</b>
+              <span style={{ fontSize: 11, color: '#94A3B8' }}>本地模型 + 规则扫描全库，找您注意不到的细枝末节</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {auditFindings.slice(0, 8).map((f: any) => (
+                <div key={f.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '6px 10px', background: f.level === 'warn' ? '#FFFBEB' : '#F0F7FF', border: f.level === 'warn' ? '1px solid #FDE68A' : '1px solid #BFDBFE', borderRadius: 8 }}>
+                  <Tag color={f.level === 'warn' ? 'orange' : 'blue'} style={{ margin: 0, flexShrink: 0, fontSize: 11 }}>
+                    {f.source === 'ai' ? 'AI' : '规则'}
+                  </Tag>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: '#1F2937' }}>{f.title}</div>
+                    <div style={{ fontSize: 11.5, color: '#6B7280', lineHeight: 1.6, marginTop: 2 }}>{f.detail}</div>
+                  </div>
+                  {f.status === 'unread' ? (
+                    <a style={{ fontSize: 11.5, flexShrink: 0 }} onClick={() => { markAuditRead(f.id); setAuditFindings((prev: any[]) => prev.map((x: any) => x.id === f.id ? { ...x, status: 'read' } : x)); }}>标记已读</a>
+                  ) : (
+                    <a style={{ fontSize: 11.5, flexShrink: 0, color: '#94A3B8' }} onClick={() => { dismissAuditFinding(f.id); setAuditFindings((prev: any[]) => prev.filter((x: any) => x.id !== f.id)); }}>忽略</a>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {(unreadInsights.length > 0 || snapshotChanges.length > 0) ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 10 }}>
