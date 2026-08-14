@@ -595,7 +595,7 @@ export default function ModuleLibrary() {
                     <ReactECharts echarts={echarts} option={cmpBarOption} style={{ height: Math.max(180, subNames.length * 40 + 40) }} />
                   </div>
                 )}
-                <DataTable tableId="mod_item_cmp" dataSource={rows} rowKey="key" size="small" pagination={false} scroll={{ x: 1200 }}
+                <DataTable tableId="mod_item_cmp" dataSource={rows} rowKey="key" size="small" pagination={false} virtual scroll={{ x: 1200, y: 520 }}
                   columns={itemCmpCols}
                 />
               </div>

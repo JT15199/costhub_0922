@@ -149,6 +149,11 @@ export function ColumnSettingsButton(props: { tableId: string; columns: any[]; l
 
 export default function DataTable(props: DataTableProps) {
   const { tableId, lockKeys = [], defaultHidden = [], columns = [], hideToolbar = false, ...rest } = props;
+  // 虚拟滚动安全守卫：rowSelection/summary 与 virtual 不兼容（rc-table 限制），
+  // 显式传 virtual 但带这些能力时自动降级为普通渲染，避免白屏/错位
+  const safeRest = (rest as any).virtual && ((rest as any).rowSelection || (rest as any).summary)
+    ? { ...rest, virtual: false }
+    : rest;
   const [setting, setSetting] = useState<{ widths: Record<string, number>; hidden: Record<string, boolean> }>(() =>
     tableId ? loadSetting(tableId) : { widths: {}, hidden: {} }
   );
@@ -252,7 +257,7 @@ export default function DataTable(props: DataTableProps) {
         </div>
       )}
       <Table
-        {...rest}
+        {...safeRest}
         columns={enhancedColumns}
         components={tableComponents}
       />
