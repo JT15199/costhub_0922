@@ -245,7 +245,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         <div className="stat-card card-a" onClick={() => onNavigate?.('parts')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">器件总数</div><div className="stat-value">{stats.total_parts}</div></div>
         <div className="stat-card card-b" onClick={() => onNavigate?.('projects')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">项目总数</div><div className="stat-value">{stats.total_projects}</div></div>
         <div className="stat-card card-c" onClick={() => onNavigate?.('projects')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">进行中项目</div><div className="stat-value">{stats.active_projects}</div></div>
-        <div className="stat-card card-d"><div className="stat-label">平均BOM成本</div><div className="stat-value">¥{stats.avg_bom_cost.toLocaleString()}</div></div>
+        <div className="stat-card card-d"><div className="stat-label">平均BOM成本</div><div className="stat-value">¥{(stats.avg_bom_cost ?? 0).toLocaleString()}</div></div>
         <div className="stat-card card-e" onClick={() => onNavigate?.('competitors')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">竞品数量</div><div className="stat-value">{stats.total_competitors}</div></div>
       </div>
 

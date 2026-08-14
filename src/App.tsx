@@ -21,6 +21,7 @@ import { ThemeProvider } from './theme/ThemeContext';
 import { ThemeSwitcher } from './theme/ThemeSwitcher';
 import GlobalAI from './components/GlobalAI';
 import AIGuide from './components/AIGuide';
+import ErrorBoundary from './components/ErrorBoundary';
 import {
   BarChartOutlined, ToolOutlined, AppstoreOutlined, ProjectOutlined,
   ShopOutlined, LineChartOutlined, FileTextOutlined, PartitionOutlined, CalendarOutlined,
@@ -231,7 +232,9 @@ export default function App() {
           style={{ display: key === active ? 'block' : 'none', height: '100%' }}
         >
           <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>加载中…</div>}>
-            {renderPage(key)}
+            <ErrorBoundary label={key}>
+              {renderPage(key)}
+            </ErrorBoundary>
           </Suspense>
         </div>
       ))}
