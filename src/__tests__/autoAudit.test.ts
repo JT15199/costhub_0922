@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ruleFindings } from '../autoAudit';
+import { ruleFindings, computeAuditFingerprint, AUDIT_PERSPECTIVES } from '../autoAudit';
 
 const ctx = {
   projects: [
