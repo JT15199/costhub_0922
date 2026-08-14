@@ -7,6 +7,7 @@ import echarts from '../echartsSetup';
 import { getProjects, saveProject, deleteProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, syncProjectModulesToLibrary, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, deleteSku, saveSkuDiff, deleteSkuDiff, getAllSkuDiffs, getAllSkus, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead } from '../db';
 import { TIERS, PROJECT_STATUSES, PROJECT_TYPES, SCREEN_SIZES, RESOLUTIONS, REFRESH_RATES, PANEL_TYPES, MAIN_CATEGORIES, SUB_CATEGORIES, MEASURE_STATUSES, getCategoryColor } from '../constants';
 import { getMainCategories } from '../db';
+import { calcSkuCost as calcSkuCostFn, buildSkuBom as buildSkuBomFn } from '../skuCalc';
 
 /** 往 parts.projects 追加项目代号（去重，避免重复拼接） */
 function appendProjectCode(existing: string | undefined, code: string): string {
@@ -118,53 +119,12 @@ export default function Projects() {
     setSkuDiffsMap(await getAllSkuDiffs(list.map(s => s.id)));
   };
   // SKU 成本：基座 BOM 成本 + Σ差异（add 加 / remove 减基座小计 / replace 新旧差额），原始值计算
-  const calcSku = (sku: any): { cost: number; delta: number; issues: string[] } => {
-    const diffs = skuDiffsMap[sku.id] || [];
-    let delta = 0;
-    const issues: string[] = [];
-    for (const d of diffs) {
-      if (d.diff_type === 'add') {
-        delta += (d.unit_cost || 0) * (d.quantity ?? 1);
-      } else {
-        const m = boms.find(b => b.part_name === d.part_name && b.part_model === d.part_model && (!d.module_name || b.module_name === d.module_name));
-        if (!m) { issues.push(`基座中找不到「${d.part_name} ${d.part_model}」`); continue; }
-        const baseAmt = (m.part_cost || 0) * (m.quantity || 1);
-        if (d.diff_type === 'remove') delta -= baseAmt;
-        else if (d.diff_type === 'replace') delta += (d.unit_cost || 0) * (d.quantity ?? (m.quantity || 1)) - baseAmt;
-      }
-    }
-    return { cost: bomTotal + delta, delta, issues };
-  };
+  // 纯逻辑在 src/skuCalc.ts（可单测）
+  const calcSku = (sku: any): { cost: number; delta: number; issues: string[] } =>
+    calcSkuCostFn(boms, skuDiffsMap[sku.id] || [], bomTotal);
   // SKU 合并 BOM（基座 + 差异合成，含新增模块）：供详情展示——只展示不落库
-  const buildSkuBom = (sku: any) => {
-    const diffs = skuDiffsMap[sku.id] || [];
-    const rows: any[] = boms.map(b => {
-      const rm = diffs.find(d => d.diff_type === 'remove' && d.part_name === b.part_name && d.part_model === b.part_model && (!d.module_name || d.module_name === b.module_name));
-      const rp = diffs.find(d => d.diff_type === 'replace' && d.part_name === b.part_name && d.part_model === b.part_model && (!d.module_name || d.module_name === b.module_name));
-      return {
-        ...b,
-        _skuStatus: rm ? 'removed' : rp ? 'replaced' : 'base',
-        _newCost: rp ? (rp.unit_cost || 0) : null,
-        _newQty: rp ? (rp.quantity ?? (b.quantity || 1)) : null,
-      };
-    });
-    diffs.filter(d => d.diff_type === 'add').forEach(d => {
-      rows.push({
-        id: `add-${d.id}`, module_name: d.module_name || '新增模块', part_name: d.part_name, part_model: d.part_model,
-        part_cost: d.unit_cost || 0, quantity: d.quantity ?? 1, main_category: '', sub_category: '', _skuStatus: 'added',
-      });
-    });
-    // 按模块分组，模块小计（removed 不计入成本）
-    const byMod: Record<string, { items: any[]; subtotal: number }> = {};
-    rows.forEach(r => {
-      const k = r.module_name || '未分模块';
-      (byMod[k] = byMod[k] || { items: [], subtotal: 0 });
-      byMod[k].items.push(r);
-      if (r._skuStatus !== 'removed') byMod[k].subtotal += (r._skuStatus === 'replaced' ? (r._newCost || 0) : (r.part_cost || 0)) * (r._skuStatus === 'replaced' ? (r._newQty ?? (r.quantity || 1)) : (r.quantity || 1));
-    });
-    const total = Object.values(byMod).reduce((s, m) => s + m.subtotal, 0);
-    return { rows, byMod, total };
-  };
+  // 纯逻辑在 src/skuCalc.ts（可单测）
+  const buildSkuBom = (sku: any) => buildSkuBomFn(boms, skuDiffsMap[sku.id] || []);
   // SKU 差异的器件来源选项（remove/replace 从基座 BOM 选）
   const skuBasePartOptions = boms.map((b: any) => ({ label: `${b.module_name || ''} / ${b.part_name} ${b.part_model}`, value: `${b.part_name}|${b.part_model}|${b.module_name || ''}` }));
   // 差异匹配基座行信息（选器件后自动带出）

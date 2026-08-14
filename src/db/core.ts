@@ -509,6 +509,29 @@ async function ensureSchema(d: Database) {
       console.log(`project_boms 快照列回填完成: ${dirty.length} 行`);
     }
   } catch (e) { console.warn('project_boms 快照列回填失败:', e); }
+
+  // ===== 查询索引（v2.3.19 性能优化：高频查询列建索引，幂等）=====
+  const indexSql = [
+    'CREATE INDEX IF NOT EXISTS idx_parts_main_cat ON parts(main_category, sub_category)',
+    'CREATE INDEX IF NOT EXISTS idx_parts_name ON parts(name)',
+    'CREATE INDEX IF NOT EXISTS idx_parts_model ON parts(model)',
+    'CREATE INDEX IF NOT EXISTS idx_project_boms_project ON project_boms(project_id)',
+    'CREATE INDEX IF NOT EXISTS idx_project_boms_module ON project_boms(project_id, module_name)',
+    'CREATE INDEX IF NOT EXISTS idx_part_suppliers_part ON part_suppliers(part_id)',
+    'CREATE INDEX IF NOT EXISTS idx_part_price_history_part ON part_price_history(part_id)',
+    'CREATE INDEX IF NOT EXISTS idx_project_suppliers_project ON project_suppliers(project_id)',
+    'CREATE INDEX IF NOT EXISTS idx_trend_snapshots_item ON trend_snapshots(trend_item_id)',
+    'CREATE INDEX IF NOT EXISTS idx_trend_sources_item ON trend_sources(trend_item_id)',
+    'CREATE INDEX IF NOT EXISTS idx_decomposition_tree_parent ON decomposition_tree(parent_id)',
+    'CREATE INDEX IF NOT EXISTS idx_work_logs_date ON work_logs(log_date)',
+    'CREATE INDEX IF NOT EXISTS idx_competitor_boms_comp ON competitor_boms(competitor_id)',
+    'CREATE INDEX IF NOT EXISTS idx_sku_diffs_sku ON sku_diffs(sku_id)',
+    'CREATE INDEX IF NOT EXISTS idx_cost_change_log_type ON cost_change_log(change_type)',
+    'CREATE INDEX IF NOT EXISTS idx_ai_request_logs_type ON ai_request_logs(request_type)',
+  ];
+  for (const sql of indexSql) {
+    await ignoreSchemaError(d.execute(sql));
+  }
 }
 
 
