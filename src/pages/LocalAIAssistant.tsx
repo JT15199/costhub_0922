@@ -1134,7 +1134,7 @@ export default function LocalAIAssistant() {
         const result = await invoke<{ status: number; body: string; success: boolean }>('http_get', {
           request: { url: `${base}/api/tags`, headers: {}, body: null }
         });
-        if (!result.success) { lastErr = 'HTTP ' + result.status + (result.body ? '：' + result.body.slice(0, 120) : ''); continue; }
+        if (!result.success) { lastErr = 'HTTP ' + result.status + (result.body ? '：' + result.body.slice(0, 400) : ''); continue; }
         const data = JSON.parse(result.body);
         const list: string[] = (data.models || []).map((m: any) => m.name);
         setModels(list);

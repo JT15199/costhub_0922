@@ -424,7 +424,7 @@ async fn send_http(method: &str, request: HttpRequest) -> Result<HttpResponse, S
     } else { String::new() };
 
     // 改进错误处理：提供更详细的错误信息
-    let body = match response.text().await {
+    let mut body = match response.text().await {
         Ok(text) => text,
         Err(e) => {
             let error_detail = format!(
@@ -439,10 +439,15 @@ async fn send_http(method: &str, request: HttpRequest) -> Result<HttpResponse, S
         }
     };
 
-    // 诊断：504/502/408 打印代理标识头 + 正文片段，实锤返回方（Ollama JSON vs 公司代理 HTML 错误页）
+    // 诊断：504/502/408 打印代理标识头 + 正文片段，实锤返回方（Ollama JSON vs 公司代理 HTML 错误页）。
+    // 诊断同时塞进返回 body 开头 → 前端报错弹窗直接显示，无需打开日志文件
     if code == 504 || code == 502 || code == 408 {
+        let direct = is_local_url(&request.url);
         let snippet: String = body.chars().take(160).collect();
-        http_log(&format!("{} {} -> HTTP {}（疑似代理/网关返回） headers[{}] body[:160]={}", method, request.url, code, resp_headers, snippet));
+        let diag = format!("{} {} -> HTTP {} direct_connect={} headers[{}] body[:160]={}",
+            method, request.url, code, if direct { "yes(no-proxy)" } else { "no(proxy)" }, resp_headers, snippet);
+        http_log(&diag);
+        body = format!("[costhub-diag] {}\n---\n{}", diag, body);
     }
 
     Ok(HttpResponse {
