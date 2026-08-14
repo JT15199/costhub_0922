@@ -327,6 +327,13 @@ async fn ollama_net_set_block(block: bool) -> Result<serde_json::Value, String> 
 
 // 构建 HTTP 客户端（与老版本兼容：native-tls + 系统证书；仅附加环境变量代理支持）
 // 注意：不用 rustls（不走 Windows 系统证书库，公司网络 SSL 拦截环境下会 TLS 失败）
+// 本地回环地址（Ollama localhost）：永远直连、不走任何代理。
+// 公司代理环境（HTTP_PROXY 环境变量 / 系统代理）会把 localhost 请求转发到代理服务器，
+// 代理连"它自己机器"的 localhost 失败 → 504。这里强制本地请求用无代理 client 根治。
+fn is_local_url(url: &str) -> bool {
+    url.starts_with("http://localhost") || url.starts_with("http://127.0.0.1") || url.starts_with("http://[::1]") || url.starts_with("http://0.0.0.0")
+}
+
 fn build_http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder();
     // 流式接口需要宽松的总超时（默认 30s 对慢速模型不够）；普通请求给足 20 分钟
@@ -358,7 +365,12 @@ fn build_http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
 }
 
 async fn send_http(method: &str, request: HttpRequest) -> Result<HttpResponse, String> {
-    let client = build_http_client(1200)?;
+    // 本地回环（Ollama）→ 无代理直连，根治公司代理导致 localhost 请求被转发 → 504
+    let client = if is_local_url(&request.url) {
+        reqwest::Client::builder().build().map_err(|e| format!("HTTP client initialization failed: {e}"))?
+    } else {
+        build_http_client(1200)?
+    };
     let http_method = reqwest::Method::from_bytes(method.as_bytes())
         .map_err(|e| format!("Invalid HTTP method: {e}"))?;
     let mut builder = client.request(http_method, &request.url);
@@ -423,7 +435,12 @@ async fn http_stream(
     event_id: String,
 ) -> Result<(), String> {
     // 流式读取：不设总超时（模型持续吐 token 时不会误杀），与老版本 Client::new() 行为一致
-    let client = build_http_client(0)?;
+    // 本地回环（Ollama）→ 无代理直连（公司代理会导致 localhost 被转发 → 504/假失败）
+    let client = if is_local_url(&url) {
+        reqwest::Client::builder().build().map_err(|e| format!("HTTP client initialization failed: {e}"))?
+    } else {
+        build_http_client(0)?
+    };
     let mut builder = client.post(&url);
     for (k, v) in &headers { builder = builder.header(k, v); }
     let response = builder.body(body).send().await

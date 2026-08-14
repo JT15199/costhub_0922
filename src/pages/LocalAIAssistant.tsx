@@ -1121,8 +1121,13 @@ export default function LocalAIAssistant() {
   const testConnection = useCallback(async () => {
     setConnStatus('idle');
     setConnError('');
-    // 多地址兜底：reqwest 对 localhost 的 IPv6 解析在部分 Windows 环境失败，先试配置地址、失败自动试 127.0.0.1
-    const candidates = [ollamaUrl.replace(/\/$/, ''), 'http://127.0.0.1:11434'];
+    // 多地址兜底：公司代理环境会把 localhost 请求转发到代理服务器（代理连自己机器上的 localhost 失败 → 504）；
+    // 配置的是 localhost 时先试 127.0.0.1（IP 字面量绕过代理/DNS），失败再试配置地址
+    const candidates = [...new Set([
+      ...(ollamaUrl.includes('localhost') ? ['http://127.0.0.1:11434'] : []),
+      ollamaUrl.replace(/\/$/, ''),
+      'http://127.0.0.1:11434',
+    ])];
     let lastErr = '';
     for (const base of candidates) {
       try {
