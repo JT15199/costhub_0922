@@ -330,6 +330,19 @@ async fn ollama_net_set_block(block: bool) -> Result<serde_json::Value, String> 
 // 本地/内网地址（Ollama localhost 或内网 Ollama 服务器）：永远直连、不走任何代理。
 // 公司代理环境（HTTP_PROXY 环境变量 / Squid 透明网关）会把请求转发到代理服务器，
 // 代理连"它自己机器"的 localhost/内网地址失败 → 504。这里强制本地请求用无代理 client 根治。
+// 诊断日志：eprintln 在 GUI 启动时不可见，同时写入 exe 同目录 costhub-http.log
+fn http_log(msg: &str) {
+    eprintln!("[costhub-http] {}", msg);
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("costhub-http.log")) {
+                use std::io::Write;
+                let _ = writeln!(f, "{} {}", chrono::Local::now().format("%H:%M:%S"), msg);
+            }
+        }
+    }
+}
+
 fn is_local_url(url: &str) -> bool {
     let Ok(parsed) = reqwest::Url::parse(url) else { return false };
     let Some(host) = parsed.host_str() else { return false };
@@ -378,7 +391,7 @@ fn build_http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
 async fn send_http(method: &str, request: HttpRequest) -> Result<HttpResponse, String> {
     // 本地回环（Ollama）→ 无代理直连，根治公司代理导致 localhost 请求被转发 → 504
     let client = if is_local_url(&request.url) {
-        eprintln!("[costhub-http] local direct-connect (proxy bypassed): {}", request.url);
+        http_log(&format!("local direct-connect (proxy bypassed): {}", request.url));
         reqwest::Client::builder().build().map_err(|e| format!("HTTP client initialization failed: {e}"))?
     } else {
         build_http_client(1200)?
@@ -429,10 +442,7 @@ async fn send_http(method: &str, request: HttpRequest) -> Result<HttpResponse, S
     // 诊断：504/502/408 打印代理标识头 + 正文片段，实锤返回方（Ollama JSON vs 公司代理 HTML 错误页）
     if code == 504 || code == 502 || code == 408 {
         let snippet: String = body.chars().take(160).collect();
-        eprintln!(
-            "[costhub-http] {} {} -> HTTP {}（疑似代理/网关返回） headers[{}] body[:160]={}",
-            method, request.url, code, resp_headers, snippet
-        );
+        http_log(&format!("{} {} -> HTTP {}（疑似代理/网关返回） headers[{}] body[:160]={}", method, request.url, code, resp_headers, snippet));
     }
 
     Ok(HttpResponse {
@@ -463,7 +473,7 @@ async fn http_stream(
     // 流式读取：不设总超时（模型持续吐 token 时不会误杀），与老版本 Client::new() 行为一致
     // 本地回环（Ollama）→ 无代理直连（公司代理会导致 localhost 被转发 → 504/假失败）
     let client = if is_local_url(&url) {
-        eprintln!("[costhub-http] local direct-connect (proxy bypassed): {}", url);
+        http_log(&format!("local direct-connect (proxy bypassed): {}", url));
         reqwest::Client::builder().build().map_err(|e| format!("HTTP client initialization failed: {e}"))?
     } else {
         build_http_client(0)?
