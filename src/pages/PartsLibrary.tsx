@@ -33,6 +33,15 @@ export default function PartsLibrary() {
   const [supplierLoading, setSupplierLoading] = useState(false);
 
   useEffect(() => { (async () => { try { setMainCats(await getMainCategories()); } catch(e) {} })(); }, []);
+  // 驾驶舱 AI 洞察直达：搜索指定物料（costhub-open-part，detail: { search }）
+  useEffect(() => {
+    const onOpenPart = (e: Event) => {
+      const search = (e as CustomEvent).detail?.search;
+      if (search) setSearch(String(search));
+    };
+    window.addEventListener('costhub-open-part', onOpenPart);
+    return () => window.removeEventListener('costhub-open-part', onOpenPart);
+  }, []);
   const load = useCallback(async () => {
     setLoading(true);
     try { const d = await getParts(search, typeFilter, mainCat); setParts(d); setCategories(await getCategories()); } catch (e) { console.error(e); }

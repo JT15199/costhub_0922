@@ -38,6 +38,27 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [auditRunning, setAuditRunning] = useState(false);
   const [auditLastAt, setAuditLastAt] = useState('');
   const [recentPriceChanges, setRecentPriceChanges] = useState<any[]>([]);
+  // 折叠控制
+  const [costOpen, setCostOpen] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
+  // 洞察直达：objects 里匹配项目代号 → 项目页；器件名 → 器件库搜索
+  const goToAuditObject = (f: any) => {
+    let objs: string[] = [];
+    try { objs = JSON.parse(f.objects || '[]'); } catch { /* ignore */ }
+    for (const o of objs) {
+      const p = projects.find((x: any) => x.code === o);
+      if (p) { goProject(onNavigate, p.id); return; }
+    }
+    for (const o of objs) {
+      const s = String(o || '');
+      if (s && !s.startsWith('part:') && !s.includes('模块') && s !== '未归类') {
+        onNavigate?.('parts');
+        window.dispatchEvent(new CustomEvent('costhub-open-part', { detail: { search: s } }));
+        return;
+      }
+    }
+    onNavigate?.('projects');
+  };
 
   useEffect(() => {
     (async () => {
@@ -217,29 +238,29 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           <h3><BarChartOutlined style={{ color: '#D97706' }} /> 最近成本变动</h3>
           <span style={{ fontSize: 12, color: '#94A3B8' }}>快照异动 · 最近改价物料 · 跨项目报价差异（数据来源：您维护的成本数据）</span>
         </div>
-        {(snapshotChanges.length > 0 || recentPriceChanges.length > 0 || unreadInsights.length > 0) ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 10 }}>
-            {/* 快照异动 */}
-            {snapshotChanges.map((c2, idx) => {
-              const p = projects.find((x: any) => x.id === c2.projectId);
-              return (
-                <div key={'snap-' + c2.projectId + '-' + idx} onClick={() => goProject(onNavigate, c2.projectId)}
-                  style={{ border: c2.pct > 0 ? '1px solid #FECACA' : '1px solid #A7F3D0', background: c2.pct > 0 ? '#FFFBF5' : '#F3FEF8', borderRadius: 10, padding: '10px 14px', cursor: 'pointer', transition: 'box-shadow 0.2s' }}
-                  onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(16,185,129,0.12)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                    <b style={{ fontSize: 13, color: '#1F2937' }}>{p?.code || c2.projectId}</b>
-                    <span style={{ fontSize: 12, color: c2.pct > 0 ? '#DC2626' : '#059669', fontWeight: 600 }}>
-                      {c2.pct > 0 ? '▲' : '▼'} {Math.abs(c2.pct)}%
-                    </span>
-                    <span style={{ marginLeft: 'auto', fontSize: 12, color: '#94A3B8' }}>¥{c2.oldCost.toFixed(2)} → ¥{c2.newCost.toFixed(2)}</span>
-                  </div>
-                  {c2.reason && <div style={{ fontSize: 12, color: '#6B7280' }}>原因：{c2.reason}</div>}
+        {(() => {
+          // 三类卡片合成一个展示数组（默认折叠：只显示第一条，其余展开）
+          const cards: any[] = [];
+          snapshotChanges.forEach((c2, idx) => {
+            const p = projects.find((x: any) => x.id === c2.projectId);
+            cards.push(
+              <div key={'snap-' + c2.projectId + '-' + idx} onClick={() => goProject(onNavigate, c2.projectId)}
+                style={{ border: c2.pct > 0 ? '1px solid #FECACA' : '1px solid #A7F3D0', background: c2.pct > 0 ? '#FFFBF5' : '#F3FEF8', borderRadius: 10, padding: '10px 14px', cursor: 'pointer', transition: 'box-shadow 0.2s' }}
+                onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(16,185,129,0.12)'; }}
+                onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <b style={{ fontSize: 13, color: '#1F2937' }}>{p?.code || c2.projectId}</b>
+                  <span style={{ fontSize: 12, color: c2.pct > 0 ? '#DC2626' : '#059669', fontWeight: 600 }}>
+                    {c2.pct > 0 ? '▲' : '▼'} {Math.abs(c2.pct)}%
+                  </span>
+                  <span style={{ marginLeft: 'auto', fontSize: 12, color: '#94A3B8' }}>¥{c2.oldCost.toFixed(2)} → ¥{c2.newCost.toFixed(2)}</span>
                 </div>
-              );
-            })}
-            {/* 最近改价物料（您输入的变动汇总） */}
-            {recentPriceChanges.map((ch: any, idx: number) => (
+                {c2.reason && <div style={{ fontSize: 12, color: '#6B7280' }}>原因：{c2.reason}</div>}
+              </div>
+            );
+          });
+          recentPriceChanges.forEach((ch: any, idx: number) => {
+            cards.push(
               <div key={'pc-' + ch.id + '-' + idx} onClick={() => onNavigate?.('parts')}
                 style={{ border: '1px solid #E8ECF1', background: '#FAFBFC', borderRadius: 10, padding: '10px 14px', cursor: 'pointer', transition: 'box-shadow 0.2s' }}
                 onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.06)'; }}
@@ -253,12 +274,13 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                 </div>
                 <div style={{ fontSize: 12, color: '#6B7280' }}>¥{ch.old_cost?.toFixed?.(2) ?? ch.old_cost} → ¥{ch.new_cost?.toFixed?.(2) ?? ch.new_cost} · {ch.changed_at}</div>
               </div>
-            ))}
-            {/* 报价情报（AI 自动发现的跨项目差异） */}
-            {unreadInsights.map((i: any) => {
-              const rows = parseInsightRows(i);
-              if (rows.length === 0) return null;
-              return rows.map((r: any, idx: number) => (
+            );
+          });
+          unreadInsights.forEach((i: any) => {
+            const rows = parseInsightRows(i);
+            if (rows.length === 0) return;
+            rows.forEach((r: any, idx: number) => {
+              cards.push(
                 <div key={'ins-' + i.id + '-' + idx} onClick={() => { onNavigate?.('projects'); window.dispatchEvent(new CustomEvent('costhub-open-insights')); }}
                   style={{ border: '1px solid #BFDBFE', background: '#F0F7FF', borderRadius: 10, padding: '10px 14px', cursor: 'pointer', transition: 'box-shadow 0.2s' }}
                   onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(10,132,255,0.15)'; }}
@@ -271,12 +293,26 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                   </div>
                   <div style={{ fontSize: 12, color: '#374151' }}>{r.name} · {r.rows?.length ?? 0} 个项目报价不一致</div>
                 </div>
-              ));
-            })}
-          </div>
-        ) : (
-          <div style={{ padding: '6px 2px', fontSize: 13, color: '#94A3B8' }}>近期无成本变动。改价、快照异动、报价差异会自动汇总到这里。</div>
-        )}
+              );
+            });
+          });
+          if (cards.length === 0) {
+            return <div style={{ padding: '6px 2px', fontSize: 13, color: '#94A3B8' }}>近期无成本变动。改价、快照异动、报价差异会自动汇总到这里。</div>;
+          }
+          const visible = costOpen ? cards : cards.slice(0, 1);
+          return (
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 10 }}>{visible}</div>
+              {cards.length > 1 && (
+                <div style={{ marginTop: 8, textAlign: 'center' }}>
+                  <a onClick={() => setCostOpen(o => !o)} style={{ fontSize: 12, color: '#0A84FF' }}>
+                    {costOpen ? '收起 ▲' : '展开全部（' + (cards.length - 1) + ' 条）▼'}
+                  </a>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* ===== ③ AI 洞察建议（本地模型：机会点/占比意见/思路——这才叫 AI） ===== */}
@@ -291,26 +327,39 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           </span>
         </div>
         {auditFindings.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {auditFindings.slice(0, 10).map((f: any) => (
-              <div key={f.id} style={{ padding: '10px 14px', background: f.level === 'warn' ? '#FFFBEB' : '#F0F7FF', border: f.level === 'warn' ? '1px solid #FDE68A' : '1px solid #BFDBFE', borderRadius: 10 }}>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
-                  <Tag color={f.level === 'warn' ? 'orange' : 'blue'} style={{ margin: 0, flexShrink: 0, fontSize: 11 }}>{f.source === 'ai' ? 'AI 洞察' : '规则发现'}</Tag>
-                  <b style={{ fontSize: 13, color: '#1F2937' }}>{f.title}</b>
-                  {f.status === 'unread' ? (
-                    <a style={{ fontSize: 11.5, marginLeft: 'auto', flexShrink: 0 }} onClick={() => { markAuditRead(f.id); setAuditFindings((prev: any[]) => prev.map((x: any) => x.id === f.id ? { ...x, status: 'read' } : x)); }}>标记已读</a>
-                  ) : (
-                    <a style={{ fontSize: 11.5, marginLeft: 'auto', flexShrink: 0, color: '#94A3B8' }} onClick={() => { dismissAuditFinding(f.id); setAuditFindings((prev: any[]) => prev.filter((x: any) => x.id !== f.id)); }}>忽略</a>
+          <div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {(auditOpen ? auditFindings : auditFindings.slice(0, 2)).map((f: any) => (
+                <div key={f.id} onClick={() => goToAuditObject(f)}
+                  style={{ padding: '10px 14px', background: f.level === 'warn' ? '#FFFBEB' : '#F0F7FF', border: f.level === 'warn' ? '1px solid #FDE68A' : '1px solid #BFDBFE', borderRadius: 10, cursor: 'pointer', transition: 'box-shadow 0.2s' }}
+                  onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(10,132,255,0.12)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                    <Tag color={f.level === 'warn' ? 'orange' : 'blue'} style={{ margin: 0, flexShrink: 0, fontSize: 11 }}>{f.source === 'ai' ? 'AI 洞察' : '规则发现'}</Tag>
+                    <b style={{ fontSize: 13, color: '#1F2937' }}>{f.title}</b>
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94A3B8', flexShrink: 0 }}>点击直达 →</span>
+                    {f.status === 'unread' ? (
+                      <a style={{ fontSize: 11.5, flexShrink: 0 }} onClick={(e) => { e.stopPropagation(); markAuditRead(f.id); setAuditFindings((prev: any[]) => prev.map((x: any) => x.id === f.id ? { ...x, status: 'read' } : x)); }}>标记已读</a>
+                    ) : (
+                      <a style={{ fontSize: 11.5, flexShrink: 0, color: '#94A3B8' }} onClick={(e) => { e.stopPropagation(); dismissAuditFinding(f.id); setAuditFindings((prev: any[]) => prev.filter((x: any) => x.id !== f.id)); }}>忽略</a>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#4B5563', lineHeight: 1.7 }}>{f.detail}</div>
+                  {f.suggestion && (
+                    <div style={{ marginTop: 6, padding: '6px 10px', background: '#EEF2FF', border: '1px solid #C7D2FE', borderRadius: 8, fontSize: 12, color: '#3730A3', lineHeight: 1.6 }}>
+                      <b>💡 建议：</b>{f.suggestion}
+                    </div>
                   )}
                 </div>
-                <div style={{ fontSize: 12, color: '#4B5563', lineHeight: 1.7 }}>{f.detail}</div>
-                {f.suggestion && (
-                  <div style={{ marginTop: 6, padding: '6px 10px', background: '#EEF2FF', border: '1px solid #C7D2FE', borderRadius: 8, fontSize: 12, color: '#3730A3', lineHeight: 1.6 }}>
-                    <b>💡 建议：</b>{f.suggestion}
-                  </div>
-                )}
+              ))}
+            </div>
+            {auditFindings.length > 2 && (
+              <div style={{ marginTop: 8, textAlign: 'center' }}>
+                <a onClick={() => setAuditOpen(o => !o)} style={{ fontSize: 12, color: '#0A84FF' }}>
+                  {auditOpen ? '收起 ▲' : '展开全部（' + (auditFindings.length - 2) + ' 条）▼'}
+                </a>
               </div>
-            ))}
+            )}
           </div>
         ) : (
           <div style={{ padding: '6px 2px', fontSize: 13, color: '#94A3B8' }}>
