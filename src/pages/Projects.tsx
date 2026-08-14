@@ -956,7 +956,7 @@ export default function Projects() {
     { title: '单价', dataIndex: 'part_cost', width: 85, align: 'right' as const, render: (v: number) => v?.toFixed(4) },
     { title: '数量', dataIndex: 'quantity', width: 60, align: 'center' as const, render: (v: number) => v != null ? (Number.isInteger(v) ? v : v.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')) : '-' },
     { title: '小计', key: 'sub', width: 90, align: 'right' as const, render: (_: any, r: any) => <b>{((r.part_cost || 0) * r.quantity).toFixed(4)}</b> },
-    { title: '操作', width: 120, fixed: 'right' as const, render: (_: any, r: any) => (
+    { title: '操作', width: 120, render: (_: any, r: any) => (
       <Space size="small">
         <Button type="link" size="small" onClick={() => { setBomEdit(r); bomForm.setFieldsValue({ ...r, _part_name: r.part_name, _part_model: r.part_model, _main_category: r.main_category, _sub_category: r.sub_category, _cost: r.part_cost }); setBomModal(true); }}>编辑</Button>
         <Popconfirm title="移除？" onConfirm={async () => { await deleteBOMItem(r.id); loadBOM(selectedPid!); loadCostSnapshots(selectedPid!); scheduleAutoCompare(); }}><Button type="link" size="small" danger>删除</Button></Popconfirm>

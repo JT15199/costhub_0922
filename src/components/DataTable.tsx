@@ -189,13 +189,13 @@ export default function DataTable(props: DataTableProps) {
     const k = colKey(c);
     const col: any = { ...c };
     const w = setting.widths[k];
-    if (typeof w === 'number' && w > 0) col.width = w;
+    if (typeof w === 'number' && w >= 60 && w <= 800) col.width = w; // 钳制范围，防异常记忆值
     if (isContentColumn(c) && col.ellipsis === undefined) {
       col.ellipsis = true; // 原生 title 悬停显示全文，行高固定
     }
     if (col.fixed !== 'right' && col.fixed !== 'left') {
       col.onHeaderCell = (cc: any) => ({
-        width: typeof setting.widths[k] === 'number' ? setting.widths[k] : cc.width,
+        width: (typeof setting.widths[k] === 'number' && setting.widths[k] >= 60 && setting.widths[k] <= 800) ? setting.widths[k] : cc.width,
         onResize: (w2: number) => setSetting(prev => ({ ...prev, widths: { ...prev.widths, [k]: w2 } })),
       });
     }
