@@ -6,8 +6,10 @@ import ReactECharts from 'echarts-for-react/lib/core';
 import echarts from '../echartsSetup';
 import { getProjects, saveProject, deleteProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, syncProjectModulesToLibrary, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, deleteSku, saveSkuDiff, deleteSkuDiff, getAllSkuDiffs, getAllSkus, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead } from '../db';
 import { TIERS, PROJECT_STATUSES, PROJECT_TYPES, SCREEN_SIZES, RESOLUTIONS, REFRESH_RATES, PANEL_TYPES, MAIN_CATEGORIES, SUB_CATEGORIES, MEASURE_STATUSES, getCategoryColor } from '../constants';
-import { getMainCategories } from '../db';
+import { getMainCategories, getSetting } from '../db';
+import { startOllamaStream } from '../ollama';
 import { calcSkuCost as calcSkuCostFn, buildSkuBom as buildSkuBomFn } from '../skuCalc';
+import { computeProjectHealth, type HealthIssue } from '../projectHealth';
 
 /** 往 parts.projects 追加项目代号（去重，避免重复拼接） */
 function appendProjectCode(existing: string | undefined, code: string): string {
@@ -473,6 +475,34 @@ export default function Projects() {
   const odmWeightedPrice = projectSuppliers.filter(s => s.is_active).reduce((sum, s) => sum + (s.quoted_price || 0) * (s.share_ratio || 0) / 100, 0);
   const odmActiveCount = projectSuppliers.filter(s => s.is_active).length;
 
+  // AI 小结（本地模型可选增强：一句话概括最需关注的问题；失败静默降级）
+  const [healthAiSummary, setHealthAiSummary] = useState('');
+  const [healthAiLoading, setHealthAiLoading] = useState(false);
+  const runHealthSummary = async () => {
+    if (healthAiLoading || healthIssues.length === 0) return;
+    setHealthAiLoading(true);
+    setHealthAiSummary('');
+    try {
+      const url = await getSetting('local_ai_base_url', 'http://localhost:11434');
+      const model = await getSetting('local_ai_model', '');
+      if (!model) throw new Error('未配置本地模型');
+      const list = healthIssues.map(i => `- ${i.level === 'danger' ? '严重' : i.level === 'warn' ? '注意' : '提示'}：${i.title}（${i.detail}）`).join('\n');
+      let full = '';
+      await new Promise<void>((resolve, reject) => {
+        startOllamaStream(url, model,
+          [{ role: 'system', content: '你是成本管理助手。根据项目体检结果，用一句话（不超过60字）概括最需要关注的问题和优先级，直接给结论，不要列举条目。' },
+           { role: 'user', content: `项目 ${selectedProject?.code || ''} 体检结果：\n${list}` }],
+          t => { full += t; setHealthAiSummary(full); },
+          () => {}, () => resolve(), e => reject(new Error(e)),
+          { endpoint: 'native', json: false, think: false, num_predict: 200, temperature: 0.3 },
+        );
+      });
+    } catch (e: any) {
+      setHealthAiSummary(''); // 本地模型不可用时静默（规则条已足够）
+    }
+    setHealthAiLoading(false);
+  };
+
   const selectProject = (pid: number) => {
     setSelectedPid(pid); loadBOM(pid); loadReviews(pid); loadCostSnapshots(pid); loadMeasures(pid); loadTargets(pid); loadProjectSuppliers(pid); loadSkus(pid);
     // 切换项目时自动退出参照对比模式（要对比再重新选择参照项目）
@@ -734,6 +764,39 @@ export default function Projects() {
   const bomTotal = boms.reduce((s, b) => s + (b.part_cost || 0) * b.quantity, 0);
   const selectedProject = projects.find(p => p.id === selectedPid);
   const wholeMachineCost = bomTotal * (1 + (((selectedProject?.platform_fee_rate || 0) + (selectedProject?.profit_rate || 0)) / 100));
+
+  // ====== AI 体检（规则驱动：BOM 完整性/目标/快照/同品类价差） ======
+  const [healthIssues, setHealthIssues] = useState<HealthIssue[]>([]);
+  const [peerBomsCache, setPeerBomsCache] = useState<Record<number, any[]>>({});
+  useEffect(() => {
+    if (!selectedPid) return;
+    (async () => {
+      try {
+        // 同品类其他项目 BOM（按 project.category 分组，缓存避免重复拉取）
+        const cat = selectedProject?.category || '未分类';
+        const peers = projects.filter((p: any) => p.id !== selectedPid && (p.category || '未分类') === cat);
+        const need = peers.filter((p: any) => !peerBomsCache[p.id]);
+        if (need.length > 0) {
+          const loaded = await Promise.all(need.map((p: any) => getProjectBOMs(p.id)));
+          setPeerBomsCache(prev => {
+            const n = { ...prev };
+            need.forEach((p: any, i: number) => { n[p.id] = loaded[i]; });
+            return n;
+          });
+        }
+        const peerBoms = peers.map((p: any) => ({ projectId: p.id, code: p.code, boms: peerBomsCache[p.id] || [] }));
+        setHealthIssues(computeProjectHealth({
+          projectId: selectedPid,
+          code: selectedProject?.code || '',
+          boms,
+          targets,
+          snapshots: costSnapshots,
+          peerBoms,
+        }));
+      } catch (e) { console.warn('体检计算失败:', e); }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPid, boms, targets, costSnapshots, projects, selectedProject?.category]);
   // Module grouping
   const moduleSummary: Record<string, number> = {};
   const groupedBOMs: Record<string, any[]> = {};
@@ -877,6 +940,35 @@ export default function Projects() {
 
       {selectedPid && (
         <div className="content-card" style={{ marginTop: 14 }}>
+          {/* AI 体检条（规则驱动，点击问题直达对应 tab） */}
+          {healthIssues.length > 0 && (
+            <div style={{ marginBottom: 14, border: healthIssues.some(i => i.level === 'danger') ? '1.5px solid #FECACA' : '1px solid #FDE68A', borderRadius: 10, padding: '10px 14px', background: healthIssues.some(i => i.level === 'danger') ? '#FFF9F9' : '#FFFBEB' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <RobotOutlined style={{ color: '#0A84FF' }} />
+                <b style={{ fontSize: 13 }}>AI 体检</b>
+                <Tag color={healthIssues.some(i => i.level === 'danger') ? 'red' : 'orange'}>{healthIssues.length} 项待关注</Tag>
+                <span style={{ fontSize: 11.5, color: '#94A3B8', marginLeft: 4 }}>规则自动检查：BOM 完整性 · 目标达成 · 快照异动 · 同类报价</span>
+                <Button size="small" style={{ marginLeft: 'auto' }} icon={<RobotOutlined />} loading={healthAiLoading} onClick={runHealthSummary}>AI 小结</Button>
+              </div>
+              {healthAiSummary && (
+                <div style={{ marginBottom: 8, padding: '8px 12px', background: '#F0F7FF', border: '1px solid #BFDBFE', borderRadius: 8, fontSize: 12.5, color: '#1E40AF', lineHeight: 1.6 }}>
+                  <RobotOutlined style={{ marginRight: 6 }} />{healthAiSummary}
+                </div>
+              )}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {healthIssues.map((i, idx) => (
+                  <div key={idx} onClick={() => i.actionTab && setActiveTab(i.actionTab)}
+                    title={i.actionTab ? '点击定位' : ''}
+                    style={{ border: i.level === 'danger' ? '1px solid #FECACA' : i.level === 'warn' ? '1px solid #FDE68A' : '1px solid #BFDBFE', background: i.level === 'danger' ? '#FFF5F5' : i.level === 'warn' ? '#FFFBEB' : '#F0F7FF', borderRadius: 8, padding: '6px 10px', cursor: i.actionTab ? 'pointer' : 'default', fontSize: 12.5, maxWidth: 380, transition: 'box-shadow 0.15s' }}
+                    onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; }}>
+                    <b style={{ color: i.level === 'danger' ? '#DC2626' : i.level === 'warn' ? '#B45309' : '#1E40AF', fontSize: 12.5 }}>{i.title}</b>
+                    <div style={{ color: '#6B7280', fontSize: 11.5, marginTop: 2, lineHeight: 1.5 }}>{i.detail}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <Row gutter={14} style={{ marginBottom: 14 }}>
             <Col span={5}><Card size="small"><Statistic title="BOM总成本" value={bomTotal} precision={2} prefix="¥" valueStyle={{ color: '#CF0A2C' }} /></Card></Col>
             <Col span={5}><Card size="small"><Statistic title="整机成本" value={wholeMachineCost} precision={2} prefix="¥" valueStyle={{ color: '#2563EB' }} /></Card></Col>
