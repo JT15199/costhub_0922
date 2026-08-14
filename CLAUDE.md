@@ -2,6 +2,12 @@
 - **任何本地/内网地址（localhost/127.0.0.1/私有网段）的 reqwest client 必须显式 `.no_proxy()`**——reqwest 默认 features 含 system-proxy，Windows 走 WinHTTP 读系统代理（公司组策略设置，设置界面看不到），会把 127.0.0.1 转发到公司代理 → 504
 - 排查：`netsh winhttp show proxy`（WinHTTP）≠ 设置界面（WinINET）；GUI 启动 eprintln 不可见，诊断写 exe 同目录日志或塞回响应 body
 
+### v2.3.19 自主分析引擎 autoAdvisor（2026-08-14）
+- **机制**：App 级 60 秒轮询（scheduleAppAdvisor）→ 规则发现机会/风险点 → 本地 Ollama 润色（30 分钟节流，失败降级规则文案，logLocalAICall 留痕）→ ai_advisor_insights 表 → LocalAIAssistant「自主建议」区展示
+- **规则**（纯函数 buildRuleCandidates，vitest 覆盖）：①项目成本 ≥60 天未变动（快照）②大额物料 ≥¥10 且 ≥90 天未调价 ③领域超目标 ≥5%（computeTargetStatuses）④大额物料单一供应商
+- **指纹去重**：spc|pid / spp|partId / tg|pid|domain / ss|partId；dismissed 后可重新提醒；「生成行业洞察」= agentSearchLoop(物料, '', 'price-trend') 回填结论
+- ⚠️ AI 润色走 http_post /api/chat 非流式（非 startOllamaStream 事件流）；失败必须静默（规则文案已可用）
+
 ### v2.3.19 AI 能力嵌入工作流（2026-08-14）
 - **仪表盘 → 驾驶舱**：目标成本达成预警置顶（project_targets 按领域=main_category 对比 BOM 实际成本，达成率=(2-实际/目标)×100，未达标红色卡片+跨页直达 costhub-open-project 事件）+ AI 今日洞察区（part_insights 报价情报 + 最近两条快照 bom_cost 异动≥1%）；纯计算在 src/targetInsight.ts（vitest 覆盖）
 - **项目页 AI 体检条**：规则驱动 4 类检查（BOM 缺单价/数量0、目标超支→analysis tab、快照异动→snapshots tab、同品类模块报价价差≥¥10且≥10%），点击直达 tab；「AI 小结」本地模型一句话概括（未配置静默）；纯逻辑 src/projectHealth.ts（vitest 覆盖）
