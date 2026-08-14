@@ -327,11 +327,22 @@ async fn ollama_net_set_block(block: bool) -> Result<serde_json::Value, String> 
 
 // 构建 HTTP 客户端（与老版本兼容：native-tls + 系统证书；仅附加环境变量代理支持）
 // 注意：不用 rustls（不走 Windows 系统证书库，公司网络 SSL 拦截环境下会 TLS 失败）
-// 本地回环地址（Ollama localhost）：永远直连、不走任何代理。
-// 公司代理环境（HTTP_PROXY 环境变量 / 系统代理）会把 localhost 请求转发到代理服务器，
-// 代理连"它自己机器"的 localhost 失败 → 504。这里强制本地请求用无代理 client 根治。
+// 本地/内网地址（Ollama localhost 或内网 Ollama 服务器）：永远直连、不走任何代理。
+// 公司代理环境（HTTP_PROXY 环境变量 / Squid 透明网关）会把请求转发到代理服务器，
+// 代理连"它自己机器"的 localhost/内网地址失败 → 504。这里强制本地请求用无代理 client 根治。
 fn is_local_url(url: &str) -> bool {
-    url.starts_with("http://localhost") || url.starts_with("http://127.0.0.1") || url.starts_with("http://[::1]") || url.starts_with("http://0.0.0.0")
+    let Ok(parsed) = reqwest::Url::parse(url) else { return false };
+    let Some(host) = parsed.host_str() else { return false };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0" { return true; }
+    // 私有网段：内网 Ollama 服务器直连，不过公司代理（代理转发内网会 504）
+    if host.starts_with("10.") || host.starts_with("192.168.") { return true; }
+    if host.starts_with("172.") {
+        if let Some(second) = host.split('.').nth(1).and_then(|s| s.parse::<u16>().ok()) {
+            if (16..=31).contains(&second) { return true; }
+        }
+    }
+    false
 }
 
 fn build_http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
