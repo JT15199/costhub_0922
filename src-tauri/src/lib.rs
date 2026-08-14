@@ -367,6 +367,7 @@ fn build_http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
 async fn send_http(method: &str, request: HttpRequest) -> Result<HttpResponse, String> {
     // 本地回环（Ollama）→ 无代理直连，根治公司代理导致 localhost 请求被转发 → 504
     let client = if is_local_url(&request.url) {
+        eprintln!("[costhub-http] local direct-connect (proxy bypassed): {}", request.url);
         reqwest::Client::builder().build().map_err(|e| format!("HTTP client initialization failed: {e}"))?
     } else {
         build_http_client(1200)?
@@ -451,6 +452,7 @@ async fn http_stream(
     // 流式读取：不设总超时（模型持续吐 token 时不会误杀），与老版本 Client::new() 行为一致
     // 本地回环（Ollama）→ 无代理直连（公司代理会导致 localhost 被转发 → 504/假失败）
     let client = if is_local_url(&url) {
+        eprintln!("[costhub-http] local direct-connect (proxy bypassed): {}", url);
         reqwest::Client::builder().build().map_err(|e| format!("HTTP client initialization failed: {e}"))?
     } else {
         build_http_client(0)?
