@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import DataTable from '../components/DataTable';
 import { Table, Select, Space, Button, Row, Col, Modal, Form, Input, InputNumber, Tag, Slider, message, Popconfirm, Tabs } from 'antd';
 import { EditOutlined, DeleteOutlined, SettingOutlined, LineChartOutlined, SearchOutlined, AimOutlined, DollarOutlined } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react/lib/core';
+import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
 import { getProjects, getProjectBOMs, getCompetitors, getCompetitorBOMs, getFeatures, saveFeature, deleteFeature, getScores, saveScore } from '../db';
 import { chartTooltip, chartAxisStyle, chartGrid, chartTextMuted, chartSplitLine, barGradient } from '../chartTheme';

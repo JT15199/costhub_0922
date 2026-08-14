@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import { Select, Button, Space, Modal, Slider, Tag, Input, Checkbox, message, Empty, Radio, Table, Row, Col } from 'antd';
 import { RadarChartOutlined, LinkOutlined, EditOutlined, SearchOutlined, AimOutlined } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react/lib/core';
+import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
 import { getProjects, getCompetitors, getFeatures, getAllScoresForRefs, saveScore, getProjectBOMs, getCompetitorBOMs, getModuleNames, getModuleFeatureLinks, setModuleFeatureLinks } from '../db';
 import { chartTooltip, chartTextMuted, chartSplitLine } from '../chartTheme';

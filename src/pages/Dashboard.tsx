@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Spin, Tag, Badge } from 'antd';
 import { BarChartOutlined, ShopOutlined, AimOutlined, BulbOutlined, AlertOutlined, RobotOutlined } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react/lib/core';
+import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
 import { getDashboardStats, getProjects, getProjectBOMs, getCompetitors, getCompetitorBOMs, getTargets, getProjectCostSnapshots, getInsights } from '../db';
 import { getCategoryColor } from '../constants';

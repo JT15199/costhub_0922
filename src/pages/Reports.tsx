@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Select, Button, Space, Row, Col, message, Card, Statistic, Tag } from 'antd';
 import { DownloadOutlined, FileOutlined, SearchOutlined } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react/lib/core';
+import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
 import * as XLSX from 'xlsx';
 import { getProjects, getProject, getProjectBOMs } from '../db';

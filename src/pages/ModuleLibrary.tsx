@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Table, Button, Select, Space, Modal, Form, Input, InputNumber, Tag, message, Popconfirm, Tooltip, AutoComplete, Checkbox } from 'antd';
 import { PlusOutlined, CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, AppstoreOutlined, TagOutlined, InboxOutlined, BarChartOutlined, CheckSquareOutlined, SortAscendingOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react/lib/core';
+import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
 import { getProjects, getLibraryModules, getLibraryModuleItems, updateLibraryModuleItem, deleteLibraryModule, renameLibraryModule, saveModule, deleteBOMItem, addBOMItem, getParts, getMainCategories, getModuleCategories, recordProjectCostSnapshot } from '../db';
 import { MAIN_CATEGORIES, SUB_CATEGORIES, getCategoryColor } from '../constants';
