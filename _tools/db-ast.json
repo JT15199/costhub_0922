@@ -1,0 +1,1340 @@
+[
+ {
+  "kind": "import",
+  "name": "'@tauri-apps/plugin-sql'",
+  "start": 0,
+  "end": 46
+ },
+ {
+  "kind": "import",
+  "name": "'@tauri-apps/api/core'",
+  "start": 46,
+  "end": 94
+ },
+ {
+  "kind": "import",
+  "name": "'./constants'",
+  "start": 94,
+  "end": 172
+ },
+ {
+  "kind": "variable",
+  "name": "db",
+  "start": 172,
+  "end": 207
+ },
+ {
+  "kind": "variable",
+  "name": "dbUrl",
+  "start": 207,
+  "end": 241
+ },
+ {
+  "kind": "variable",
+  "name": "schemaReady",
+  "start": 241,
+  "end": 267
+ },
+ {
+  "kind": "variable",
+  "name": "dataLocked",
+  "start": 267,
+  "end": 369
+ },
+ {
+  "kind": "variable",
+  "name": "rawDb",
+  "start": 369,
+  "end": 405
+ },
+ {
+  "kind": "variable",
+  "name": "AUTH_KEY",
+  "start": 405,
+  "end": 472
+ },
+ {
+  "kind": "variable",
+  "name": "AUTH_PLAIN_KEY",
+  "start": 472,
+  "end": 519
+ },
+ {
+  "kind": "variable",
+  "name": "AUTH_CHANGED_KEY",
+  "start": 519,
+  "end": 593
+ },
+ {
+  "kind": "variable",
+  "name": "AUTH_USERNAME_KEY",
+  "start": 593,
+  "end": 656
+ },
+ {
+  "kind": "variable",
+  "name": "DEFAULT_PASSWORD",
+  "start": 656,
+  "end": 721
+ },
+ {
+  "kind": "variable",
+  "name": "DEFAULT_USERNAME",
+  "start": 721,
+  "end": 756
+ },
+ {
+  "kind": "function",
+  "name": "isDataLocked",
+  "start": 756,
+  "end": 822
+ },
+ {
+  "kind": "function",
+  "name": "setDataLocked",
+  "start": 822,
+  "end": 895
+ },
+ {
+  "kind": "function",
+  "name": "sha256",
+  "start": 895,
+  "end": 1158
+ },
+ {
+  "kind": "function",
+  "name": "ensureAuthPassword",
+  "start": 1158,
+  "end": 1986
+ },
+ {
+  "kind": "function",
+  "name": "getUsername",
+  "start": 1986,
+  "end": 2328
+ },
+ {
+  "kind": "function",
+  "name": "changeUsername",
+  "start": 2328,
+  "end": 2798
+ },
+ {
+  "kind": "function",
+  "name": "isFirstUse",
+  "start": 2798,
+  "end": 3124
+ },
+ {
+  "kind": "function",
+  "name": "getPlainPassword",
+  "start": 3124,
+  "end": 3508
+ },
+ {
+  "kind": "function",
+  "name": "verifyPassword",
+  "start": 3508,
+  "end": 3906
+ },
+ {
+  "kind": "function",
+  "name": "changePassword",
+  "start": 3906,
+  "end": 4717
+ },
+ {
+  "kind": "function",
+  "name": "getRawDb",
+  "start": 4717,
+  "end": 5244
+ },
+ {
+  "kind": "function",
+  "name": "getDbUrl",
+  "start": 5244,
+  "end": 5376
+ },
+ {
+  "kind": "function",
+  "name": "isAuthQuery",
+  "start": 5376,
+  "end": 5538
+ },
+ {
+  "kind": "function",
+  "name": "getDb",
+  "start": 5538,
+  "end": 6673
+ },
+ {
+  "kind": "function",
+  "name": "ignoreSchemaError",
+  "start": 6673,
+  "end": 6767
+ },
+ {
+  "kind": "function",
+  "name": "ensureSchema",
+  "start": 6767,
+  "end": 41744
+ },
+ {
+  "kind": "function",
+  "name": "getParts",
+  "start": 41744,
+  "end": 42306
+ },
+ {
+  "kind": "function",
+  "name": "getPart",
+  "start": 42306,
+  "end": 42470
+ },
+ {
+  "kind": "function",
+  "name": "savePart",
+  "start": 42470,
+  "end": 44147
+ },
+ {
+  "kind": "function",
+  "name": "deletePart",
+  "start": 44147,
+  "end": 44713
+ },
+ {
+  "kind": "function",
+  "name": "getPriceHistory",
+  "start": 44713,
+  "end": 44899
+ },
+ {
+  "kind": "function",
+  "name": "getCategories",
+  "start": 44899,
+  "end": 45083
+ },
+ {
+  "kind": "function",
+  "name": "getMainCategories",
+  "start": 45083,
+  "end": 45481
+ },
+ {
+  "kind": "function",
+  "name": "getSubCategories",
+  "start": 45481,
+  "end": 45763
+ },
+ {
+  "kind": "function",
+  "name": "getProjects",
+  "start": 45763,
+  "end": 46325
+ },
+ {
+  "kind": "function",
+  "name": "getProject",
+  "start": 46325,
+  "end": 46520
+ },
+ {
+  "kind": "function",
+  "name": "saveProject",
+  "start": 46520,
+  "end": 47663
+ },
+ {
+  "kind": "function",
+  "name": "deleteProject",
+  "start": 47663,
+  "end": 47804
+ },
+ {
+  "kind": "function",
+  "name": "getProductCategories",
+  "start": 47804,
+  "end": 48014
+ },
+ {
+  "kind": "function",
+  "name": "saveProductCategory",
+  "start": 48014,
+  "end": 48449
+ },
+ {
+  "kind": "function",
+  "name": "deleteProductCategory",
+  "start": 48449,
+  "end": 48936
+ },
+ {
+  "kind": "function",
+  "name": "ensureDefaultCategories",
+  "start": 48936,
+  "end": 49326
+ },
+ {
+  "kind": "function",
+  "name": "copyProject",
+  "start": 49326,
+  "end": 51515
+ },
+ {
+  "kind": "function",
+  "name": "getProjectBOMs",
+  "start": 51515,
+  "end": 52452
+ },
+ {
+  "kind": "function",
+  "name": "recordProjectCostSnapshot",
+  "start": 52452,
+  "end": 55362
+ },
+ {
+  "kind": "function",
+  "name": "getProjectCostSnapshots",
+  "start": 55362,
+  "end": 55582
+ },
+ {
+  "kind": "function",
+  "name": "getSnapshotBOMDetail",
+  "start": 55582,
+  "end": 56515
+ },
+ {
+  "kind": "function",
+  "name": "deleteProjectCostSnapshot",
+  "start": 56515,
+  "end": 56688
+ },
+ {
+  "kind": "function",
+  "name": "addBOMItem",
+  "start": 56688,
+  "end": 58095
+ },
+ {
+  "kind": "function",
+  "name": "addVirtualBOMItem",
+  "start": 58095,
+  "end": 59021
+ },
+ {
+  "kind": "function",
+  "name": "updateBOMItem",
+  "start": 59021,
+  "end": 60870
+ },
+ {
+  "kind": "function",
+  "name": "updateBOMRefProject",
+  "start": 60870,
+  "end": 61133
+ },
+ {
+  "kind": "function",
+  "name": "deleteBOMItem",
+  "start": 61133,
+  "end": 62042
+ },
+ {
+  "kind": "function",
+  "name": "getModules",
+  "start": 62042,
+  "end": 62283
+ },
+ {
+  "kind": "function",
+  "name": "getModuleItems",
+  "start": 62283,
+  "end": 62491
+ },
+ {
+  "kind": "function",
+  "name": "saveModule",
+  "start": 62491,
+  "end": 63009
+ },
+ {
+  "kind": "function",
+  "name": "getModuleCategories",
+  "start": 63009,
+  "end": 63302
+ },
+ {
+  "kind": "function",
+  "name": "getModuleCategoryOrder",
+  "start": 63302,
+  "end": 63740
+ },
+ {
+  "kind": "function",
+  "name": "saveModuleCategoryOrder",
+  "start": 63740,
+  "end": 63955
+ },
+ {
+  "kind": "function",
+  "name": "deleteModule",
+  "start": 63955,
+  "end": 64080
+ },
+ {
+  "kind": "function",
+  "name": "updateModuleCategoryByName",
+  "start": 64080,
+  "end": 64285
+ },
+ {
+  "kind": "function",
+  "name": "syncPartsProjectsField",
+  "start": 64285,
+  "end": 65570
+ },
+ {
+  "kind": "function",
+  "name": "syncProjectModulesToLibrary",
+  "start": 65570,
+  "end": 67742
+ },
+ {
+  "kind": "function",
+  "name": "saveModuleItem",
+  "start": 67742,
+  "end": 69346
+ },
+ {
+  "kind": "function",
+  "name": "deleteModuleItem",
+  "start": 69346,
+  "end": 70214
+ },
+ {
+  "kind": "function",
+  "name": "getModuleCost",
+  "start": 70214,
+  "end": 70399
+ },
+ {
+  "kind": "function",
+  "name": "getLibraryModules",
+  "start": 70399,
+  "end": 72279
+ },
+ {
+  "kind": "function",
+  "name": "getLibraryModuleItems",
+  "start": 72279,
+  "end": 72538
+ },
+ {
+  "kind": "function",
+  "name": "updateLibraryModuleItem",
+  "start": 72538,
+  "end": 74200
+ },
+ {
+  "kind": "function",
+  "name": "deleteLibraryModule",
+  "start": 74200,
+  "end": 74748
+ },
+ {
+  "kind": "function",
+  "name": "renameLibraryModule",
+  "start": 74748,
+  "end": 75168
+ },
+ {
+  "kind": "function",
+  "name": "getProjectModuleSummary",
+  "start": 75168,
+  "end": 75786
+ },
+ {
+  "kind": "function",
+  "name": "getCompetitors",
+  "start": 75786,
+  "end": 76155
+ },
+ {
+  "kind": "function",
+  "name": "getCompetitor",
+  "start": 76155,
+  "end": 76324
+ },
+ {
+  "kind": "function",
+  "name": "saveCompetitor",
+  "start": 76324,
+  "end": 77089
+ },
+ {
+  "kind": "function",
+  "name": "deleteCompetitor",
+  "start": 77089,
+  "end": 77345
+ },
+ {
+  "kind": "function",
+  "name": "getCompetitorBOMs",
+  "start": 77345,
+  "end": 77559
+ },
+ {
+  "kind": "function",
+  "name": "addCompetitorBOMItem",
+  "start": 77559,
+  "end": 78136
+ },
+ {
+  "kind": "function",
+  "name": "updateCompetitorBOMItem",
+  "start": 78136,
+  "end": 78513
+ },
+ {
+  "kind": "function",
+  "name": "deleteCompetitorBOMItem",
+  "start": 78513,
+  "end": 78657
+ },
+ {
+  "kind": "function",
+  "name": "getCompetitorParts",
+  "start": 78657,
+  "end": 78816
+ },
+ {
+  "kind": "function",
+  "name": "saveCompetitorPart",
+  "start": 78816,
+  "end": 79610
+ },
+ {
+  "kind": "function",
+  "name": "deleteCompetitorPart",
+  "start": 79610,
+  "end": 79752
+ },
+ {
+  "kind": "function",
+  "name": "getFeatures",
+  "start": 79752,
+  "end": 80152
+ },
+ {
+  "kind": "function",
+  "name": "saveFeature",
+  "start": 80152,
+  "end": 80536
+ },
+ {
+  "kind": "function",
+  "name": "deleteFeature",
+  "start": 80536,
+  "end": 80671
+ },
+ {
+  "kind": "function",
+  "name": "getScores",
+  "start": 80671,
+  "end": 81010
+ },
+ {
+  "kind": "function",
+  "name": "saveScore",
+  "start": 81010,
+  "end": 81589
+ },
+ {
+  "kind": "function",
+  "name": "getAllScoresForRefs",
+  "start": 81589,
+  "end": 82156
+ },
+ {
+  "kind": "function",
+  "name": "getModuleNames",
+  "start": 82156,
+  "end": 82724
+ },
+ {
+  "kind": "function",
+  "name": "getModuleFeatureLinks",
+  "start": 82724,
+  "end": 83090
+ },
+ {
+  "kind": "function",
+  "name": "setModuleFeatureLinks",
+  "start": 83090,
+  "end": 83503
+ },
+ {
+  "kind": "function",
+  "name": "getSkus",
+  "start": 83503,
+  "end": 83851
+ },
+ {
+  "kind": "function",
+  "name": "getAllSkus",
+  "start": 83851,
+  "end": 84012
+ },
+ {
+  "kind": "function",
+  "name": "saveSku",
+  "start": 84012,
+  "end": 84588
+ },
+ {
+  "kind": "function",
+  "name": "deleteSku",
+  "start": 84588,
+  "end": 84801
+ },
+ {
+  "kind": "function",
+  "name": "getSkuDiffs",
+  "start": 84801,
+  "end": 84962
+ },
+ {
+  "kind": "function",
+  "name": "saveSkuDiff",
+  "start": 84962,
+  "end": 85750
+ },
+ {
+  "kind": "function",
+  "name": "deleteSkuDiff",
+  "start": 85750,
+  "end": 85878
+ },
+ {
+  "kind": "function",
+  "name": "getAllSkuDiffs",
+  "start": 85878,
+  "end": 86332
+ },
+ {
+  "kind": "function",
+  "name": "normalizePartName",
+  "start": 86332,
+  "end": 86697
+ },
+ {
+  "kind": "function",
+  "name": "getPartAliases",
+  "start": 86697,
+  "end": 87064
+ },
+ {
+  "kind": "function",
+  "name": "savePartAlias",
+  "start": 87064,
+  "end": 87518
+ },
+ {
+  "kind": "function",
+  "name": "deletePartAlias",
+  "start": 87518,
+  "end": 87651
+ },
+ {
+  "kind": "function",
+  "name": "getCompareCache",
+  "start": 87651,
+  "end": 87942
+ },
+ {
+  "kind": "function",
+  "name": "saveCompareCache",
+  "start": 87942,
+  "end": 88445
+ },
+ {
+  "kind": "function",
+  "name": "upsertInsight",
+  "start": 88445,
+  "end": 89139
+ },
+ {
+  "kind": "function",
+  "name": "getInsights",
+  "start": 89139,
+  "end": 89278
+ },
+ {
+  "kind": "function",
+  "name": "getUnreadInsightCount",
+  "start": 89278,
+  "end": 89471
+ },
+ {
+  "kind": "function",
+  "name": "markInsightRead",
+  "start": 89471,
+  "end": 89700
+ },
+ {
+  "kind": "function",
+  "name": "getSetting",
+  "start": 89700,
+  "end": 90005
+ },
+ {
+  "kind": "function",
+  "name": "setSetting",
+  "start": 90005,
+  "end": 90198
+ },
+ {
+  "kind": "function",
+  "name": "loadContextEntries",
+  "start": 90198,
+  "end": 90499
+ },
+ {
+  "kind": "function",
+  "name": "saveContextEntry",
+  "start": 90499,
+  "end": 90806
+ },
+ {
+  "kind": "function",
+  "name": "deleteContextEntry",
+  "start": 90806,
+  "end": 90951
+ },
+ {
+  "kind": "function",
+  "name": "getCostReviews",
+  "start": 90951,
+  "end": 91220
+ },
+ {
+  "kind": "function",
+  "name": "saveCostReview",
+  "start": 91220,
+  "end": 91792
+ },
+ {
+  "kind": "function",
+  "name": "deleteCostReview",
+  "start": 91792,
+  "end": 91934
+ },
+ {
+  "kind": "function",
+  "name": "getMeasures",
+  "start": 91934,
+  "end": 92123
+ },
+ {
+  "kind": "function",
+  "name": "saveMeasure",
+  "start": 92123,
+  "end": 92830
+ },
+ {
+  "kind": "function",
+  "name": "deleteMeasure",
+  "start": 92830,
+  "end": 92965
+ },
+ {
+  "kind": "function",
+  "name": "getTargets",
+  "start": 92965,
+  "end": 93207
+ },
+ {
+  "kind": "function",
+  "name": "saveTarget",
+  "start": 93207,
+  "end": 93705
+ },
+ {
+  "kind": "function",
+  "name": "deleteTarget",
+  "start": 93705,
+  "end": 93838
+ },
+ {
+  "kind": "function",
+  "name": "getDashboardStats",
+  "start": 93838,
+  "end": 95609
+ },
+ {
+  "kind": "export",
+  "name": "{ getDb }",
+  "start": 95609,
+  "end": 95691
+ },
+ {
+  "kind": "function",
+  "name": "getTrendItem",
+  "start": 95691,
+  "end": 95859
+ },
+ {
+  "kind": "function",
+  "name": "getTrendItemByCategory",
+  "start": 95859,
+  "end": 96119
+ },
+ {
+  "kind": "function",
+  "name": "getTrendItemsWithDetails",
+  "start": 96119,
+  "end": 96595
+ },
+ {
+  "kind": "function",
+  "name": "getQuickTrendItems",
+  "start": 96595,
+  "end": 97166
+ },
+ {
+  "kind": "function",
+  "name": "saveQuickTrendItem",
+  "start": 97166,
+  "end": 97550
+ },
+ {
+  "kind": "function",
+  "name": "deleteQuickTrendItem",
+  "start": 97550,
+  "end": 97693
+ },
+ {
+  "kind": "function",
+  "name": "saveTrendItem",
+  "start": 97693,
+  "end": 99287
+ },
+ {
+  "kind": "function",
+  "name": "deleteTrendItem",
+  "start": 99287,
+  "end": 99425
+ },
+ {
+  "kind": "function",
+  "name": "addTrendMapping",
+  "start": 99425,
+  "end": 99832
+ },
+ {
+  "kind": "function",
+  "name": "getTrendSources",
+  "start": 99832,
+  "end": 100022
+ },
+ {
+  "kind": "function",
+  "name": "saveTrendSource",
+  "start": 100022,
+  "end": 100347
+ },
+ {
+  "kind": "function",
+  "name": "clearTrendSources",
+  "start": 100347,
+  "end": 100518
+ },
+ {
+  "kind": "function",
+  "name": "getTrendConversations",
+  "start": 100518,
+  "end": 100728
+ },
+ {
+  "kind": "function",
+  "name": "saveTrendConversation",
+  "start": 100728,
+  "end": 101068
+ },
+ {
+  "kind": "function",
+  "name": "getTrendSnapshots",
+  "start": 101068,
+  "end": 101359
+ },
+ {
+  "kind": "function",
+  "name": "getLatestTrendSnapshot",
+  "start": 101359,
+  "end": 101595
+ },
+ {
+  "kind": "function",
+  "name": "localNow",
+  "start": 101595,
+  "end": 101933
+ },
+ {
+  "kind": "function",
+  "name": "saveTrendSnapshot",
+  "start": 101933,
+  "end": 102661
+ },
+ {
+  "kind": "function",
+  "name": "getTrendInsightDimensions",
+  "start": 102661,
+  "end": 102887
+ },
+ {
+  "kind": "function",
+  "name": "deleteTrendSnapshot",
+  "start": 102887,
+  "end": 103302
+ },
+ {
+  "kind": "function",
+  "name": "saveTrendInsightDimensions",
+  "start": 103302,
+  "end": 103957
+ },
+ {
+  "kind": "function",
+  "name": "getTrendKeyEvents",
+  "start": 103957,
+  "end": 104167
+ },
+ {
+  "kind": "function",
+  "name": "saveTrendKeyEvent",
+  "start": 104167,
+  "end": 104639
+ },
+ {
+  "kind": "function",
+  "name": "getMaterialCategories",
+  "start": 104639,
+  "end": 104794
+ },
+ {
+  "kind": "function",
+  "name": "addMaterialCategory",
+  "start": 104794,
+  "end": 105151
+ },
+ {
+  "kind": "function",
+  "name": "removeMaterialCategory",
+  "start": 105151,
+  "end": 105335
+ },
+ {
+  "kind": "variable",
+  "name": "PRESET_PROVIDERS",
+  "start": 105335,
+  "end": 105491
+ },
+ {
+  "kind": "function",
+  "name": "ensurePresetProviders",
+  "start": 105491,
+  "end": 106756
+ },
+ {
+  "kind": "function",
+  "name": "getApiProviders",
+  "start": 106756,
+  "end": 106836
+ },
+ {
+  "kind": "function",
+  "name": "saveApiProvider",
+  "start": 106836,
+  "end": 107315
+ },
+ {
+  "kind": "function",
+  "name": "deleteApiProvider",
+  "start": 107315,
+  "end": 107457
+ },
+ {
+  "kind": "function",
+  "name": "setActiveProvider",
+  "start": 107457,
+  "end": 107766
+ },
+ {
+  "kind": "function",
+  "name": "updateProviderPriorities",
+  "start": 107766,
+  "end": 108226
+ },
+ {
+  "kind": "function",
+  "name": "getOutboundRequestLogs",
+  "start": 108226,
+  "end": 108413
+ },
+ {
+  "kind": "function",
+  "name": "clearOutboundRequestLogs",
+  "start": 108413,
+  "end": 108541
+ },
+ {
+  "kind": "function",
+  "name": "logOutboundRequest",
+  "start": 108541,
+  "end": 108909
+ },
+ {
+  "kind": "function",
+  "name": "getAllDecompositionNodes",
+  "start": 108909,
+  "end": 109136
+ },
+ {
+  "kind": "function",
+  "name": "getDecompositionTree",
+  "start": 109136,
+  "end": 109365
+ },
+ {
+  "kind": "function",
+  "name": "getDecompositionNode",
+  "start": 109365,
+  "end": 109548
+ },
+ {
+  "kind": "function",
+  "name": "saveDecompositionNode",
+  "start": 109548,
+  "end": 111288
+ },
+ {
+  "kind": "function",
+  "name": "deleteDecompositionNode",
+  "start": 111288,
+  "end": 111659
+ },
+ {
+  "kind": "function",
+  "name": "getDecompositionHistory",
+  "start": 111659,
+  "end": 111874
+ },
+ {
+  "kind": "function",
+  "name": "searchDecompositionNodes",
+  "start": 111874,
+  "end": 112077
+ },
+ {
+  "kind": "function",
+  "name": "saveRollupContribution",
+  "start": 112077,
+  "end": 112520
+ },
+ {
+  "kind": "function",
+  "name": "saveRollupFeedback",
+  "start": 112520,
+  "end": 113255
+ },
+ {
+  "kind": "function",
+  "name": "getAllChecklistWithLogs",
+  "start": 113255,
+  "end": 113916
+ },
+ {
+  "kind": "function",
+  "name": "updateChecklistActive",
+  "start": 113916,
+  "end": 114113
+ },
+ {
+  "kind": "function",
+  "name": "deleteAnalysisChecklistItem",
+  "start": 114113,
+  "end": 114270
+ },
+ {
+  "kind": "function",
+  "name": "getRollupContributions",
+  "start": 114270,
+  "end": 114463
+ },
+ {
+  "kind": "function",
+  "name": "getAllRollupFeedback",
+  "start": 114463,
+  "end": 114615
+ },
+ {
+  "kind": "function",
+  "name": "getAllPartSuppliers",
+  "start": 114615,
+  "end": 114827
+ },
+ {
+  "kind": "function",
+  "name": "getPartSuppliers",
+  "start": 114827,
+  "end": 115008
+ },
+ {
+  "kind": "function",
+  "name": "getSupplierProfiles",
+  "start": 115008,
+  "end": 115218
+ },
+ {
+  "kind": "function",
+  "name": "getSupplierProfile",
+  "start": 115218,
+  "end": 115409
+ },
+ {
+  "kind": "function",
+  "name": "saveSupplierProfile",
+  "start": 115409,
+  "end": 116342
+ },
+ {
+  "kind": "function",
+  "name": "deleteSupplierProfile",
+  "start": 116342,
+  "end": 116488
+ },
+ {
+  "kind": "function",
+  "name": "addPartSupplier",
+  "start": 116488,
+  "end": 116941
+ },
+ {
+  "kind": "function",
+  "name": "updatePartSupplier",
+  "start": 116941,
+  "end": 118018
+ },
+ {
+  "kind": "function",
+  "name": "deletePartSupplier",
+  "start": 118018,
+  "end": 118373
+ },
+ {
+  "kind": "function",
+  "name": "updatePartWeightedCost",
+  "start": 118373,
+  "end": 119416
+ },
+ {
+  "kind": "function",
+  "name": "getProjectSuppliers",
+  "start": 119416,
+  "end": 119762
+ },
+ {
+  "kind": "function",
+  "name": "saveProjectSupplier",
+  "start": 119762,
+  "end": 120562
+ },
+ {
+  "kind": "function",
+  "name": "deleteProjectSupplier",
+  "start": 120562,
+  "end": 120712
+ },
+ {
+  "kind": "function",
+  "name": "getProjectSupplierPriceHistory",
+  "start": 120712,
+  "end": 121006
+ },
+ {
+  "kind": "function",
+  "name": "saveProjectSupplierPriceHistory",
+  "start": 121006,
+  "end": 121380
+ },
+ {
+  "kind": "function",
+  "name": "getSupplierPriceHistory",
+  "start": 121380,
+  "end": 121656
+ },
+ {
+  "kind": "function",
+  "name": "getAllApiProviders",
+  "start": 121656,
+  "end": 121872
+ },
+ {
+  "kind": "function",
+  "name": "getApiProvidersByType",
+  "start": 121872,
+  "end": 122070
+ },
+ {
+  "kind": "function",
+  "name": "getActiveApiProviders",
+  "start": 122070,
+  "end": 122286
+ },
+ {
+  "kind": "function",
+  "name": "addApiProvider",
+  "start": 122286,
+  "end": 122865
+ },
+ {
+  "kind": "function",
+  "name": "updateApiProvider",
+  "start": 122865,
+  "end": 123364
+ },
+ {
+  "kind": "function",
+  "name": "toggleApiProviderActive",
+  "start": 123364,
+  "end": 123562
+ },
+ {
+  "kind": "function",
+  "name": "saveAIRequestLog",
+  "start": 123562,
+  "end": 124794
+ },
+ {
+  "kind": "function",
+  "name": "updateAIRequestLog",
+  "start": 124794,
+  "end": 126205
+ },
+ {
+  "kind": "function",
+  "name": "saveAIUsageLog",
+  "start": 126205,
+  "end": 126954
+ },
+ {
+  "kind": "function",
+  "name": "getTokenUsageStats",
+  "start": 126954,
+  "end": 128256
+ },
+ {
+  "kind": "function",
+  "name": "getAllAIRequestLogs",
+  "start": 128256,
+  "end": 128450
+ },
+ {
+  "kind": "function",
+  "name": "deleteAIRequestLog",
+  "start": 128450,
+  "end": 128595
+ },
+ {
+  "kind": "function",
+  "name": "clearAllAIRequestLogs",
+  "start": 128595,
+  "end": 128714
+ },
+ {
+  "kind": "function",
+  "name": "getModuleRules",
+  "start": 128714,
+  "end": 128926
+ },
+ {
+  "kind": "function",
+  "name": "saveModuleRule",
+  "start": 128926,
+  "end": 129639
+ },
+ {
+  "kind": "function",
+  "name": "deleteModuleRule",
+  "start": 129639,
+  "end": 129777
+ },
+ {
+  "kind": "function",
+  "name": "clearModuleRules",
+  "start": 129777,
+  "end": 129886
+ },
+ {
+  "kind": "function",
+  "name": "getWorkLogs",
+  "start": 129886,
+  "end": 130749
+ },
+ {
+  "kind": "function",
+  "name": "getWorkLogsGroupedByProject",
+  "start": 130749,
+  "end": 131365
+ },
+ {
+  "kind": "function",
+  "name": "getWorkLog",
+  "start": 131365,
+  "end": 131525
+ },
+ {
+  "kind": "function",
+  "name": "saveWorkLog",
+  "start": 131525,
+  "end": 132386
+ },
+ {
+  "kind": "function",
+  "name": "toggleWorkLogDone",
+  "start": 132386,
+  "end": 132555
+ },
+ {
+  "kind": "function",
+  "name": "deleteWorkLog",
+  "start": 132555,
+  "end": 132685
+ },
+ {
+  "kind": "function",
+  "name": "getWorkLogCategories",
+  "start": 132685,
+  "end": 132846
+ },
+ {
+  "kind": "function",
+  "name": "getWorkSummaries",
+  "start": 132846,
+  "end": 133046
+ },
+ {
+  "kind": "function",
+  "name": "saveWorkSummary",
+  "start": 133046,
+  "end": 133350
+ },
+ {
+  "kind": "function",
+  "name": "deleteWorkSummary",
+  "start": 133350,
+  "end": 133489
+ }
+]
