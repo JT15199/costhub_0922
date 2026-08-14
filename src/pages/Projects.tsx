@@ -373,13 +373,18 @@ export default function Projects() {
   };
   // 情报操作：确认同一 / 标记不同（沉淀别名，作用域=情报所属模块；处理后该组从情报消失）
   const confirmInsightGroup = async (ins: any, g: any) => {
-    for (const r of g.rows) {
-      await savePartAlias({ module_name: ins.module_name, alias_name: r.name, alias_model: r.model, canonical_name: g.name, canonical_model: '', source: 'user_confirmed' });
+    try {
+      for (const r of g.rows) {
+        await savePartAlias({ module_name: ins.module_name, alias_name: r.name, alias_model: r.model, canonical_name: g.name, canonical_model: '', source: 'user_confirmed' });
+      }
+      await rebuildModuleInsight(ins);
+      await markInsightRead(ins.category, ins.module_name); // 保持已读，红点不闪
+      window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
+      message.success('已确认「' + g.name + '」，此后相同写法自动归组，该情报已消除');
+    } catch (e: any) {
+      console.error('确认同一失败:', e);
+      message.error('确认失败：' + (e?.message || e));
     }
-    await rebuildModuleInsight(ins);
-    await markInsightRead(ins.category, ins.module_name); // 保持已读，红点不闪
-    window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
-    message.success(`已确认「${g.name}」，此后相同写法自动归组`);
   };
   const rejectInsightGroup = async (ins: any, g: any) => {
     const keys = g.rows.map((r: any) => partKey(r)).sort().join(';');

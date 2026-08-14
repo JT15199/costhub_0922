@@ -102,12 +102,18 @@ export async function runAiIdentifyOnce(rows: any[], aliases: any[]): Promise<an
   return groups;
 }
 
-// 差异情报判定：AI 疑似组必报；规则组价差明显（≥¥10 且 ≥10%）也报
+// 差异情报判定：AI 疑似组必报（已人工确认的行先过滤——确认后该组应消失，不再打扰）；
+// 规则组价差明显（≥¥10 且 ≥10%）也报
 export function buildInsights(aiGroups: any[], rows: any[], aliases: any[]): any[] {
   const out: any[] = [];
+  // 已确认别名集合（user_confirmed → alias 归到 canonical，这些行不再算疑似）
+  const confirmed = new Set<string>();
+  aliases.filter((a: any) => a.source === 'user_confirmed').forEach((a: any) => confirmed.add(partKey(a)));
   aiGroups.forEach((g: any) => {
-    const prices = g.rows.map((r: any) => r.cost);
-    out.push({ type: 'ai', name: g.name, reason: g.reason, rows: g.rows, diff: Math.round((Math.max(...prices) - Math.min(...prices)) * 100) / 100 });
+    const unconfirmed = (g.rows || []).filter((r: any) => !confirmed.has(partKey(r)));
+    if (unconfirmed.length < 2) return; // 整组已确认 → 情报消失
+    const prices = unconfirmed.map((r: any) => r.cost);
+    out.push({ type: 'ai', name: g.name, reason: g.reason, rows: unconfirmed, diff: Math.round((Math.max(...prices) - Math.min(...prices)) * 100) / 100 });
   });
   buildRuleGroups(rows, aliases).forEach((g: any) => {
     if (g.rows.length < 2) return;
