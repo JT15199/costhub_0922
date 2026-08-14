@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { message, Dropdown, Modal, Badge } from 'antd';
 import { runAutoCompare } from './autoCompare';
+import { runAutoAdvisor } from './autoAdvisor';
 import { getInsights } from './db';
 import defaultLogo from './assets/costhub-logo.png';
 // 页面级懒加载（v2.3.19 性能优化）：按页分包，首次进入才加载对应 chunk
@@ -110,6 +111,27 @@ export default function App() {
   }, []);
   useEffect(() => {
     // 持续轮询：每 60 秒探查一轮（Ollama 未运行/未配置自动跳过；指纹命中不调模型，只有变化才识别——探查仔细，不快）
+  const advisorRunningRef = useRef(false);
+  const scheduleAppAdvisor = useCallback(() => {
+    if (advisorRunningRef.current) return;
+    advisorRunningRef.current = true;
+    (async () => {
+      try {
+        const r = await runAutoAdvisor();
+        // 只在新建议出现时提醒（日常轮询静默）
+        if (r && r.found > 0) {
+          message.success(`AI 助理发现 ${r.found} 条成本机会/风险点（见「本地 AI → 自主建议」）`);
+        }
+      } catch (e) { console.warn('自主分析失败:', e); }
+      advisorRunningRef.current = false;
+    })();
+  }, []);
+  useEffect(() => {
+    // 自主分析轮询：每 60 秒探查一轮（规则层纯计算很快；AI 润色内置 30 分钟节流；指纹去重不重复提醒）
+    const iv = setInterval(() => scheduleAppAdvisor(), 60 * 1000);
+    scheduleAppAdvisor(); // 打开应用立即探查一轮
+    return () => clearInterval(iv);
+  }, [scheduleAppAdvisor]);
     const iv = setInterval(() => scheduleAppCompare(), 60 * 1000);
     scheduleAppCompare(); // 打开应用立即探查一轮
     // 导入/改价等变更事件（Projects 触发）→ 强制立即扫描

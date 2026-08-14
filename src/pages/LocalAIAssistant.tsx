@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Button, Input, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space } from 'antd';
+import { Button, Input, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Badge } from 'antd';
 import {
   SendOutlined, RobotOutlined, PlusOutlined, HistoryOutlined,
   ThunderboltOutlined, TeamOutlined, ClearOutlined,
@@ -14,6 +14,8 @@ import * as XLSX from 'xlsx';
 import { getDb, saveProject, getModuleRules, saveModuleRule, deleteModuleRule, clearModuleRules, loadContextEntries, saveContextEntry, deleteContextEntry, getSetting, setSetting, saveAIRequestLog } from '../db';
 import { MAIN_CATEGORIES } from '../constants';
 import { startOllamaStream, logLocalAICall } from '../ollama';
+import { getAdvisorInsights, updateAdvisorStatus } from '../db/advisor';
+import { runAutoAdvisor } from '../autoAdvisor';
 import DemoGenerator from '../components/DemoGenerator';
 
 // ===== Types =====
@@ -978,6 +980,14 @@ export default function LocalAIAssistant() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionId, setSessionId] = useState<number|null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // ===== 自主建议（后台分析引擎） =====
+  const [advisorList, setAdvisorList] = useState<any[]>([]);
+  const [advisorOpen, setAdvisorOpen] = useState(false);
+  const [advisorRunning, setAdvisorRunning] = useState(false);
+  const [advisorShowDone, setAdvisorShowDone] = useState(false);
+  const [advisorLastRun, setAdvisorLastRun] = useState('');
+  const [advisorProgress, setAdvisorProgress] = useState('');
+  const [advisorInsightBusy, setAdvisorInsightBusy] = useState<number | null>(null);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [elapsed, setElapsed] = useState(0); // 生成过程计时（秒）
@@ -1505,7 +1515,78 @@ export default function LocalAIAssistant() {
 
   const [expandedTool, setExpandedTool] = useState<string | null>(null);
 
-  return (
+  
+  // ===== 自主建议逻辑 =====
+  const loadAdvisor = useCallback(async () => {
+    try {
+      const [list, last] = await Promise.all([getAdvisorInsights(), getSetting('advisor_last_run', '')]);
+      setAdvisorList(list);
+      setAdvisorLastRun(last || '');
+    } catch (e) { console.warn('加载自主建议失败', e); }
+  }, []);
+  useEffect(() => {
+    loadAdvisor();
+    const onDone = () => loadAdvisor();
+    window.addEventListener('costhub-advisor-done', onDone);
+    return () => window.removeEventListener('costhub-advisor-done', onDone);
+  }, [loadAdvisor]);
+  const fmtA = (t: string) => {
+    if (!t) return '';
+    const d = new Date(t.replace('T', ' '));
+    if (isNaN(d.getTime())) return t.slice(0, 16);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const runAdvisorNow = async () => {
+    setAdvisorRunning(true);
+    setAdvisorProgress('');
+    try {
+      const r = await runAutoAdvisor(m => setAdvisorProgress(m));
+      if (r) message.success(r.found > 0 ? `发现 ${r.found} 条机会/风险点` : '未发现新的机会/风险点');
+      else message.info('当前没有在研项目，无需分析');
+    } catch (e: any) {
+      message.error('分析失败：' + (e?.message || e));
+    }
+    setAdvisorRunning(false);
+    await loadAdvisor();
+  };
+  const copyPrompt = async (p: string) => {
+    if (!p) { message.warning('该建议暂无可复制的提示词'); return; }
+    try {
+      await navigator.clipboard.writeText(p);
+      message.success('提示词已复制，可粘贴到 AI 助手 / 全局问询执行');
+    } catch { message.warning('复制失败，请手动选择复制'); }
+  };
+  const setAdvisorStatus = async (id: number, status: string) => {
+    try {
+      await updateAdvisorStatus(id, status);
+      await loadAdvisor();
+      message.success(status === 'done' ? '已标记处理 ✓' : '已忽略（数据变化后会重新提醒）');
+    } catch (e: any) { message.error('操作失败：' + (e?.message || e)); }
+  };
+  const insightForAdvisor = async (ins: any) => {
+    setAdvisorInsightBusy(ins.id);
+    setAdvisorProgress('');
+    try {
+      const { agentSearchLoop } = await import('../trendService');
+      const r = await agentSearchLoop(ins.ref_name, '', 'price-trend', m => setAdvisorProgress(m));
+      const extra = `\n\n🔍 行业洞察（${fmtA(new Date().toISOString())}）：方向 ${r.trend_direction}，置信度 ${r.confidence_level}${r.magnitude_min != null ? `，近1-3月幅度约 ${r.magnitude_min}%~${r.magnitude_max}%` : ''}\n${r.summary}\n💡 建议动作：${r.suggested_action}`;
+      await updateAdvisorStatus(ins.id, 'open', { detail: (ins.detail || '') + extra });
+      await loadAdvisor();
+      message.success('行业洞察已完成，结论已回填到建议卡');
+    } catch (e: any) {
+      message.error('行业洞察失败：' + (e?.message || e) + '（需配置云端 LLM Key 或开启原生搜索）');
+    }
+    setAdvisorInsightBusy(null);
+    setAdvisorProgress('');
+  };
+  const ADVISOR_TYPE_META: Record<string, { icon: string; color: string; label: string }> = {
+    stale_project_cost: { icon: '🕐', color: '#3B82F6', label: '成本久未变动' },
+    stale_part_price: { icon: '💰', color: '#F59E0B', label: '久未调价·议价机会' },
+    target_gap: { icon: '🎯', color: '#EF4444', label: '超目标·风险' },
+    single_supplier: { icon: '⚠️', color: '#8B5CF6', label: '单一供应商·风险' },
+  };
+return (
     <div className="local-ai-root" style={{ display: 'flex', height: '100%', gap: 0, overflow: 'hidden' }}>
       {/* Left Panel */}
       <div className="local-ai-left" style={{ width: 220, minWidth: 220, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
@@ -1519,6 +1600,66 @@ export default function LocalAIAssistant() {
             <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{connStatus === 'ok' ? model || '已连接' : connStatus === 'fail' ? '连接失败' : '未连接'}</span>
             <Button size="small" type="text" icon={<SyncOutlined />} onClick={testConnection} />
           </div>
+      {/* ===== 自主建议（后台分析引擎） ===== */}
+      <div style={{ margin: '0 12px 10px', border: '1px solid var(--color-border)', borderRadius: 10, background: 'var(--color-surface)', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: 'pointer', userSelect: 'none' }} onClick={() => setAdvisorOpen(!advisorOpen)}>
+          <span style={{ fontSize: 15 }}>🤖</span>
+          <b style={{ fontSize: 13 }}>自主建议</b>
+          {(() => { const n = advisorList.filter((x: any) => x.status === 'open').length; return n > 0 ? <Badge count={n} size="small" /> : null; })()}
+          <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {advisorLastRun ? `上次分析 ${fmtA(advisorLastRun)}` : '尚未运行'}
+          </span>
+          <span style={{ fontSize: 11, color: '#8B5CF6' }}>{advisorOpen ? '收起 ▲' : '展开 ▼'}</span>
+        </div>
+        {advisorOpen && (
+          <div style={{ padding: '0 12px 12px' }}>
+            <div style={{ marginBottom: 8, fontSize: 11.5, color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
+              空闲时自动分析：项目成本长期未变动、大额物料久未调价、领域超目标、单一供应商依赖——以资深成本经理视角找机会/风险点。
+              处理方式：<b>复制提示词</b>交给 AI 执行议价/分析，或 <b>生成行业洞察</b>自动查行情回填结论。
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <Button size="small" type="primary" loading={advisorRunning} onClick={runAdvisorNow}>⚡ 立即分析</Button>
+              <Button size="small" type={advisorShowDone ? 'default' : 'primary'} onClick={() => setAdvisorShowDone(!advisorShowDone)}>
+                {advisorShowDone ? '显示全部' : '仅看待处理'}
+              </Button>
+              {advisorProgress && <span style={{ fontSize: 11, color: '#8B5CF6' }}><Spin size="small" style={{ marginRight: 4 }} />{advisorProgress}</span>}
+            </div>
+            {(() => {
+              const list = advisorShowDone ? advisorList : advisorList.filter((x: any) => x.status === 'open');
+              if (list.length === 0) {
+                return <div style={{ fontSize: 12, color: '#94A3B8', padding: '14px 0', textAlign: 'center' }}>暂无建议——系统空闲时自动分析，或点「立即分析」手动触发</div>;
+              }
+              return list.map((ins: any) => {
+                const meta = ADVISOR_TYPE_META[ins.insight_type] || { icon: '💡', color: '#64748B', label: ins.insight_type };
+                return (
+                  <div key={ins.id} style={{ border: '1px solid ' + meta.color + '33', borderLeft: '3px solid ' + meta.color, borderRadius: 8, padding: '8px 10px', marginBottom: 8, background: ins.status === 'open' ? 'var(--color-surface)' : '#F8FAFC', opacity: ins.status === 'open' ? 1 : 0.75 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span>{meta.icon}</span>
+                      <b style={{ fontSize: 12.5 }}>{ins.title}</b>
+                      <Tag color={meta.color} style={{ margin: 0 }}>{meta.label}</Tag>
+                      {ins.source === 'ai' && <Tag color="purple" style={{ margin: 0 }}>AI 润色</Tag>}
+                      {ins.status !== 'open' && <Tag style={{ margin: 0 }} color={ins.status === 'done' ? 'green' : 'default'}>{ins.status === 'done' ? '已处理' : '已忽略'}</Tag>}
+                      <span style={{ marginLeft: 'auto', fontSize: 10.5, color: '#94A3B8' }}>{fmtA(ins.created_at)}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#475569', marginTop: 4, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{ins.detail}</div>
+                    {ins.prompt && (
+                      <div style={{ marginTop: 6, background: '#F5F7FF', border: '1px dashed #C7D2FE', borderRadius: 6, padding: '6px 8px', fontSize: 11.5, color: '#4F46E5', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                        💬 提示词：{ins.prompt}
+                      </div>
+                    )}
+                    <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <Button size="small" onClick={() => copyPrompt(ins.prompt)}>📋 复制提示词</Button>
+                      {ins.status === 'open' && <Button size="small" loading={advisorInsightBusy === ins.id} onClick={() => insightForAdvisor(ins)}>🔍 生成行业洞察</Button>}
+                      {ins.status === 'open' && <Button size="small" type="primary" onClick={() => setAdvisorStatus(ins.id, 'done')}>✓ 已处理</Button>}
+                      {ins.status === 'open' && <Button size="small" onClick={() => setAdvisorStatus(ins.id, 'dismissed')}>忽略</Button>}
+                    </div>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        )}
+      </div>
           {/* 运行状态栏：让用户始终知道后台在跑 */}
           {streaming && (
             <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--color-primary)', background: 'var(--color-accent-blue-bg)', borderRadius: 6, padding: '3px 8px' }}>

@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
-import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Tag, message, Popconfirm, Tabs, Row, Col, Tooltip, Card, Statistic, Upload, Alert, DatePicker, Checkbox, AutoComplete, Radio, Tree, Badge } from 'antd';
+import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Segmented, Tag, message, Popconfirm, Tabs, Row, Col, Tooltip, Card, Statistic, Upload, Alert, DatePicker, Checkbox, AutoComplete, Radio, Tree, Badge } from 'antd';
 import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined, InboxOutlined, DollarOutlined, TagOutlined, LineChartOutlined, BarChartOutlined, ToolOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, AimOutlined, BuildOutlined, HistoryOutlined, EyeOutlined, CheckOutlined, CloseOutlined, RobotOutlined, BulbOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import ReactECharts from 'echarts-for-react/esm/core';
@@ -321,6 +321,7 @@ export default function Projects() {
   // ====== 报价情报（后台识别由 App 级驱动：空闲/导入/改价自动扫描，发现问题在此提醒） ======
   const [insightModal, setInsightModal] = useState(false);
   const [insights, setInsights] = useState<any[]>([]);
+  const [insightPendingOnly, setInsightPendingOnly] = useState(true); // 待处理/全部
   const [unreadMods, setUnreadMods] = useState<Set<string>>(new Set());
   const loadInsights = async () => {
     const list = await getInsights();
@@ -380,19 +381,32 @@ export default function Projects() {
       await rebuildModuleInsight(ins);
       await markInsightRead(ins.category, ins.module_name); // 保持已读，红点不闪
       window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
-      message.success('已确认「' + g.name + '」，此后相同写法自动归组，该情报已消除');
+      // 潜在节省 = 组内最高单价 - 最低单价（每台），提示下一步动作
+      const prices = g.rows.map((r: any) => r.cost || 0);
+      const maxP = Math.max(...prices), minP = Math.min(...prices);
+      const save = (maxP - minP) * Math.max(...g.rows.map((r: any) => r.quantity || 1));
+      await loadInsights(); // 立即刷新弹窗：已处理的组消失
+      message.success(save > 0.01
+        ? '已确认「' + g.name + '」为同一物料（别名已沉淀，下次自动归组）。若按最低价 ¥' + minP.toFixed(2) + ' 谈，每台最多可省 ¥' + save.toFixed(2) + '，建议找对应采购议价'
+        : '已确认「' + g.name + '」为同一物料，别名已沉淀，下次自动归组');
     } catch (e: any) {
       console.error('确认同一失败:', e);
       message.error('确认失败：' + (e?.message || e));
     }
   };
   const rejectInsightGroup = async (ins: any, g: any) => {
-    const keys = g.rows.map((r: any) => partKey(r)).sort().join(';');
-    await savePartAlias({ module_name: ins.module_name, alias_name: `#NEG#${keys}`, alias_model: '', canonical_name: '', canonical_model: '', source: 'marked_different' });
-    await rebuildModuleInsight(ins);
-    await markInsightRead(ins.category, ins.module_name); // 保持已读，红点不闪
-    window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
-    message.success('已标记不同，AI 不再建议该组合');
+    try {
+      const keys = g.rows.map((r: any) => partKey(r)).sort().join(';');
+      await savePartAlias({ module_name: ins.module_name, alias_name: `#NEG#${keys}`, alias_model: '', canonical_name: '', canonical_model: '', source: 'marked_different' });
+      await rebuildModuleInsight(ins);
+      await markInsightRead(ins.category, ins.module_name); // 保持已读，红点不闪
+      window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
+      await loadInsights(); // 立即刷新弹窗：该组消失，AI 永不再建议
+      message.success('已标记不同，AI 不再建议该组合（该组已从情报中消除）');
+    } catch (e: any) {
+      console.error('标记不同失败:', e);
+      message.error('操作失败：' + (e?.message || e));
+    }
   };
   // 新增差异器件（add 到指定 SKU，弹窗保留作批量/复杂场景）
   const saveAddPart = async () => {
@@ -2837,19 +2851,35 @@ export default function Projects() {
       <Modal title={<span><BulbOutlined /> 报价情报（AI 后台自动识别）</span>} open={insightModal} onCancel={() => setInsightModal(false)} footer={null} width={820}
         styles={{ body: { maxHeight: '72vh', overflow: 'auto' } }}>
         <div style={{ marginBottom: 10, fontSize: 12, color: '#94A3B8' }}>
-          导入 BOM 或报价变动后自动后台识别；发现"疑似同物料但报价差异明显"时在此提醒。确认后沉淀别名，下次自动归组。
+          导入 BOM 或报价变动后自动后台识别；发现"疑似同物料但报价差异明显"时在此提醒。
+          确认同一 → 沉淀别名自动归组（组即消除）；标记不同 → AI 永不再建议；知道了 → 保持待处理，稍后处理。
         </div>
-        {insights.length === 0 && <div style={{ textAlign: 'center', padding: 40, color: '#94A3B8', fontSize: 12 }}>暂无情报——导入 BOM 或修改报价后会自动后台识别</div>}
-        {insights.map((ins, idx) => {
-          let data: any[] = [];
-          try { data = JSON.parse(ins.insight_json); } catch { data = []; }
-          return (
-            <div key={idx} style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>
-                📦 {ins.module_name}
-                {ins.status === 'unread' && <Tag color="red" style={{ marginLeft: 8 }}>未读</Tag>}
+        <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Segmented size="small" value={insightPendingOnly ? 'pending' : 'all'} options={[{ label: '待处理', value: 'pending' }, { label: '全部', value: 'all' }]}
+            onChange={(v: any) => setInsightPendingOnly(v === 'pending')} />
+          <span style={{ fontSize: 11.5, color: '#94A3B8' }}>待处理 = 还有未处理的情报组</span>
+        </div>
+        {(() => {
+          const list = insights.filter(ins => {
+            let d: any[] = [];
+            try { d = JSON.parse(ins.insight_json); } catch { d = []; }
+            return insightPendingOnly ? d.length > 0 : true;
+          });
+          return list.length === 0
+            ? <div style={{ textAlign: 'center', padding: 40, color: '#94A3B8', fontSize: 12 }}>
+                {insightPendingOnly ? '没有待处理的情报——导入 BOM 或修改报价后会自动后台识别' : '暂无情报——导入 BOM 或修改报价后会自动后台识别'}
               </div>
-              {data.length === 0 && <div style={{ fontSize: 12, color: '#CBD5E1', padding: '4px 8px' }}>无异常（报价均在正常范围）</div>}
+            : list.map((ins, idx) => {
+                let data: any[] = [];
+                try { data = JSON.parse(ins.insight_json); } catch { data = []; }
+                return (
+                  <div key={idx} style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>
+                      📦 {ins.module_name}
+                      {ins.status === 'unread' && <Tag color="red" style={{ marginLeft: 8 }}>未读</Tag>}
+                      {data.length === 0 && <Tag color="green" style={{ marginLeft: 8 }}>已核对 ✓</Tag>}
+                    </div>
+                    {data.length === 0 && <div style={{ fontSize: 12, color: '#CBD5E1', padding: '4px 8px' }}>无异常（报价均在正常范围）</div>}
               {data.map((g: any, gi: number) => (
                 <div key={gi} style={{ border: g.type === 'ai' ? '1px dashed #C7D2FE' : '1px solid #E8ECF1', borderRadius: 8, marginBottom: 6, padding: '8px 12px', background: g.type === 'ai' ? '#F5F7FF' : '#FAFBFC' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
@@ -2872,9 +2902,10 @@ export default function Projects() {
                   </div>
                 </div>
               ))}
-            </div>
-          );
-        })}
+                </div>
+                );
+              });
+        })()}
       </Modal>
 
     </div>
