@@ -1,6 +1,6 @@
 [package]
 name = "costhub"
-version = "2.3.14"
+version = "2.3.19"
 description = "显示器成本管理系统"
 authors = ["MonitorCost"]
 license = ""

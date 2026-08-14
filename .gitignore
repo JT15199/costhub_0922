@@ -32,3 +32,13 @@ src-tauri/icons/
 *.db-shm
 *.db-wal
 monitor_cost.db
+# CostHub runtime artifacts
+src-tauri/target/release/costhub.db*
+*.db.pre_*
+*.db.bak
+*.db-journal
+backups/
+exports/
+.fuse_hidden*
+tsc-check.txt
+*.tsbuildinfo

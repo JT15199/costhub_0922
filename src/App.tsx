@@ -300,7 +300,7 @@ export default function App() {
                     </div>
                   ) },
                 { type: 'divider' },
-                { key: 'version', label: <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>CostHub v2.3.18</span> },
+                { key: 'version', label: <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>CostHub v2.3.19</span> },
               ],
             }}
             placement="topRight"
