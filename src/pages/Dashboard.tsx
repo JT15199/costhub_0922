@@ -327,10 +327,12 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             {auditLastAt && <span style={{ marginLeft: 8 }}>上次 {auditLastAt}</span>}
           </span>
         </div>
-        {auditFindings.length > 0 ? (
+        {(() => {
+          const unreadFindings = auditFindings.filter((f: any) => f.status === 'unread');
+          return unreadFindings.length > 0 ? (
           <div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {(auditOpen ? auditFindings : auditFindings.slice(0, 2)).map((f: any) => (
+              {(auditOpen ? unreadFindings : unreadFindings.slice(0, 2)).map((f: any) => (
                 <div key={f.id} onClick={() => goToAuditObject(f)}
                   style={{ padding: '10px 14px', background: f.level === 'warn' ? '#FFFBEB' : '#F0F7FF', border: f.level === 'warn' ? '1px solid #FDE68A' : '1px solid #BFDBFE', borderRadius: 10, cursor: 'pointer', transition: 'box-shadow 0.2s' }}
                   onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(10,132,255,0.12)'; }}
@@ -354,22 +356,23 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                 </div>
               ))}
             </div>
-            {auditFindings.length > 2 && (
+            {unreadFindings.length > 2 && (
               <div style={{ marginTop: 8, textAlign: 'center' }}>
                 <a onClick={() => setAuditOpen(o => !o)} style={{ fontSize: 12, color: '#0A84FF' }}>
-                  {auditOpen ? '收起 ▲' : '展开全部（' + (auditFindings.length - 2) + ' 条）▼'}
+                  {auditOpen ? '收起 ▲' : '展开全部（' + (unreadFindings.length - 2) + ' 条）▼'}
                 </a>
               </div>
             )}
           </div>
-        ) : (
+          ) : (
           <div style={{ padding: '6px 2px', fontSize: 13, color: '#94A3B8' }}>
-            暂无洞察。点「AI 自主巡检」让本地模型扫描全库，找成本机会点和占比偏高的意见——不重复您已知道的事实。
+            暂无待处理洞察。已标记已读/忽略的发现不再提示；若问题内容发生变化（如占比升高、新增情报）会作为新情况重新提醒。
           </div>
-        )}
+          );
+        })()}
       </div>
 
-      {/* ===== ③ 统计卡（导航入口） ===== */}
+      {/* ===== ④ 统计卡（导航入口） ===== */}
       <div className="stat-cards">
         <div className="stat-card card-a" onClick={() => onNavigate?.('parts')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">器件总数</div><div className="stat-value">{stats.total_parts}</div></div>
         <div className="stat-card card-b" onClick={() => onNavigate?.('projects')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">项目总数</div><div className="stat-value">{stats.total_projects}</div></div>
