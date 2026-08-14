@@ -20,6 +20,7 @@ const LoginScreen = lazy(() => import('./pages/LoginScreen'));
 import { ThemeProvider } from './theme/ThemeContext';
 import { ThemeSwitcher } from './theme/ThemeSwitcher';
 import GlobalAI from './components/GlobalAI';
+import AIGuide from './components/AIGuide';
 import {
   BarChartOutlined, ToolOutlined, AppstoreOutlined, ProjectOutlined,
   ShopOutlined, LineChartOutlined, FileTextOutlined, PartitionOutlined, CalendarOutlined,
@@ -56,6 +57,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 全局 AI 问询
   const [globalAiOpen, setGlobalAiOpen] = useState(false);
+  // 首次 AI 能力引导
+  const [aiGuideOpen, setAiGuideOpen] = useState(false);
   // 使用说明弹窗
   const [guideOpen, setGuideOpen] = useState(false);
   const [customLogo] = useState(() => localStorage.getItem('costhub_custom_logo') || '');
@@ -122,6 +125,11 @@ export default function App() {
       try { await syncProjectModulesToLibrary(); } catch (e) { console.warn('模块库同步失败:', e); }
       // 修复 parts.projects 字段（历史数据未更新项目关联）
       try { await syncPartsProjectsField(); } catch (e) { console.warn('projects 字段修复失败:', e); }
+      // 首次使用 AI 能力引导（只看一次）
+      if (!localStorage.getItem('costhub-ai-guide-seen')) {
+        localStorage.setItem('costhub-ai-guide-seen', '1');
+        setAiGuideOpen(true);
+      }
     })();
   };
 
@@ -369,6 +377,9 @@ export default function App() {
 
       {/* 全局 AI 问询（上下文感知，本地模型） */}
       <GlobalAI open={globalAiOpen} onClose={() => setGlobalAiOpen(false)} />
+
+      {/* 首次 AI 能力引导 */}
+      <AIGuide open={aiGuideOpen} onClose={() => setAiGuideOpen(false)} onOpenSettings={() => setSettingsOpen(true)} />
 
       {/* 使用说明弹窗（HTML 页面） */}
       <Modal
