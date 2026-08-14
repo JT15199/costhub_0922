@@ -539,7 +539,7 @@ dependencies = [
 
 [[package]]
 name = "costhub"
-version = "2.3.14"
+version = "2.3.19"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
