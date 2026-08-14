@@ -116,8 +116,7 @@ export default function App() {
       }
     })();
   }, []);
-  useEffect(() => {
-    // 持续轮询：每 60 秒探查一轮（Ollama 未运行/未配置自动跳过；指纹命中不调模型，只有变化才识别——探查仔细，不快）
+  // ====== 自主分析（AI 助理后台建议）：60 秒轮询，规则+AI 润色，指纹去重 ======
   const advisorRunningRef = useRef(false);
   const scheduleAppAdvisor = useCallback(() => {
     if (advisorRunningRef.current) return;
@@ -139,6 +138,8 @@ export default function App() {
     scheduleAppAdvisor(); // 打开应用立即探查一轮
     return () => clearInterval(iv);
   }, [scheduleAppAdvisor]);
+  useEffect(() => {
+    // 持续轮询：每 60 秒探查一轮（Ollama 未运行/未配置自动跳过；指纹命中不调模型，只有变化才识别——探查仔细，不快）
     const iv = setInterval(() => scheduleAppCompare(), 60 * 1000);
     scheduleAppCompare(); // 打开应用立即探查一轮
     // 导入/改价等变更事件（Projects 触发）→ 强制立即扫描
