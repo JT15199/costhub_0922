@@ -373,6 +373,13 @@ async fn send_http(method: &str, request: HttpRequest) -> Result<HttpResponse, S
         .await
         .map_err(|e| format!("Network request failed: {e}"))?;
     let status = response.status();
+    // 诊断：非成功状态（尤其 504/502 网关类）打印状态码，便于定位是 Ollama 还是中间代理返回
+    if !status.is_success() {
+        let code = status.as_u16();
+        if code == 504 || code == 502 || code == 408 {
+            eprintln!("[costhub-http] {} {} -> HTTP {}（疑似代理/网关返回，而非 Ollama）", method, request.url, code);
+        }
+    }
 
     // 改进错误处理：提供更详细的错误信息
     let body = match response.text().await {
