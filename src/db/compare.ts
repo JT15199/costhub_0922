@@ -70,6 +70,11 @@ export async function getUnreadInsightCount() {
 }
 
 
+export async function markInsightUnread(category: string, moduleName: string) {
+  const d = await getDb();
+  await d.execute("UPDATE part_insights SET status = 'unread' WHERE category = ? AND module_name = ?", [category || '', moduleName]);
+}
+
 export async function markInsightRead(category: string, moduleName: string) {
   await (await getDb()).execute("UPDATE part_insights SET status = 'read' WHERE category = ? AND module_name = ?", [category || '', moduleName]);
 }

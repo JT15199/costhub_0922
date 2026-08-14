@@ -4,7 +4,7 @@ import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOut
 import * as XLSX from 'xlsx';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
-import { getProjects, saveProject, deleteProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, syncProjectModulesToLibrary, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, deleteSku, saveSkuDiff, deleteSkuDiff, getAllSkuDiffs, getAllSkus, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead } from '../db';
+import { getProjects, saveProject, deleteProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, syncProjectModulesToLibrary, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, deleteSku, saveSkuDiff, deleteSkuDiff, getAllSkuDiffs, getAllSkus, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead, markInsightUnread } from '../db';
 import { TIERS, PROJECT_STATUSES, PROJECT_TYPES, SCREEN_SIZES, RESOLUTIONS, REFRESH_RATES, PANEL_TYPES, MAIN_CATEGORIES, SUB_CATEGORIES, MEASURE_STATUSES, getCategoryColor } from '../constants';
 import { getMainCategories, getSetting } from '../db';
 import { startOllamaStream, logLocalAICall } from '../ollama';
@@ -367,7 +367,11 @@ export default function Projects() {
       const cache = await getCompareCache(ins.category, ins.module_name);
       let groups: any[] = [];
       if (cache && cache.result_json) { try { groups = JSON.parse(cache.result_json); } catch { groups = []; } }
-      await upsertInsight(ins.category, ins.module_name, JSON.stringify(buildInsights(groups, rows, aliases)));
+      // 已确认别名集合：组内所有行都已被用户确认归组 → 该组已处理，不再提醒（新行/数据变化会自然重新出现）
+      const confirmedSet = new Set<string>();
+      aliases.filter((a: any) => a.source === 'user_confirmed').forEach((a: any) => confirmedSet.add(`${normalizePartName(a.alias_name)}|${normalizePartName(a.alias_model)}`));
+      const rebuilt = buildInsights(groups, rows, aliases).filter((g: any) => (g.rows || []).some((r: any) => !confirmedSet.has(partKey(r))));
+      await upsertInsight(ins.category, ins.module_name, JSON.stringify(rebuilt));
     } catch (e) {
       console.error('重算情报失败', e);
     }
@@ -430,15 +434,27 @@ export default function Projects() {
     }
     setInsightBusyKey(null);
   };
-  // 知道了 = 归档：立即从当前视图消失 + 已读（不重算；数据变化后新情报会自动重新出现）
+  // 知道了 = 归档（已读）：从「待处理」消失，留在「全部」可查看可恢复；不重算，数据变化后新情报自动重新出现
   const markKnownInsight = async (ins: any) => {
-    setInsights(prev => prev.filter(x => x.id !== ins.id));
+    setInsights(prev => prev.map(x => x.id === ins.id ? { ...x, status: 'read' } : x));
     try {
       await markInsightRead(ins.category, ins.module_name);
       window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
-      message.success('已标记已读，该模块情报已归档');
+      message.success('已归档（已读）——可在「全部」中查看，需要时点「恢复待处理」');
     } catch (e: any) {
       console.error('标记已读失败:', e);
+      await loadInsights();
+    }
+  };
+  // 恢复待处理：从「全部」拉回「待处理」
+  const restoreInsight = async (ins: any) => {
+    setInsights(prev => prev.map(x => x.id === ins.id ? { ...x, status: 'unread' } : x));
+    try {
+      await markInsightUnread(ins.category, ins.module_name);
+      window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
+      message.success('已恢复为待处理');
+    } catch (e: any) {
+      console.error('恢复失败:', e);
       await loadInsights();
     }
   };
@@ -2886,22 +2902,18 @@ export default function Projects() {
         styles={{ body: { maxHeight: '72vh', overflow: 'auto' } }}>
         <div style={{ marginBottom: 10, fontSize: 12, color: '#94A3B8' }}>
           导入 BOM 或报价变动后自动后台识别；发现"疑似同物料但报价差异明显"时在此提醒。
-          确认同一 → 沉淀别名自动归组（组即消除）；标记不同 → AI 永不再建议；知道了 → 保持待处理，稍后处理。
+          确认同一 → 沉淀别名自动归组（组即消除，不再重现）；标记不同 → AI 永不再建议；归档（已读）→ 移出待处理，可在「全部」查看或恢复。
         </div>
         <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
           <Segmented size="small" value={insightPendingOnly ? 'pending' : 'all'} options={[{ label: '待处理', value: 'pending' }, { label: '全部', value: 'all' }]}
             onChange={(v: any) => setInsightPendingOnly(v === 'pending')} />
-          <span style={{ fontSize: 11.5, color: '#94A3B8' }}>待处理 = 还有未处理的情报组</span>
+          <span style={{ fontSize: 11.5, color: '#94A3B8' }}>待处理 = 未读情报；归档的可在「全部」查看/恢复</span>
         </div>
         {(() => {
-          const list = insights.filter(ins => {
-            let d: any[] = [];
-            try { d = JSON.parse(ins.insight_json); } catch { d = []; }
-            return insightPendingOnly ? d.length > 0 : true;
-          });
+          const list = insights.filter(ins => insightPendingOnly ? ins.status === 'unread' : true);
           return list.length === 0
             ? <div style={{ textAlign: 'center', padding: 40, color: '#94A3B8', fontSize: 12 }}>
-                {insightPendingOnly ? '没有待处理的情报——导入 BOM 或修改报价后会自动后台识别' : '暂无情报——导入 BOM 或修改报价后会自动后台识别'}
+                {insightPendingOnly ? '没有待处理的情报（未读）——导入 BOM 或修改报价后会自动后台识别' : '暂无情报——导入 BOM 或修改报价后会自动后台识别'}
               </div>
             : list.map((ins, idx) => {
                 let data: any[] = [];
@@ -2911,6 +2923,7 @@ export default function Projects() {
                     <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>
                       📦 {ins.module_name}
                       {ins.status === 'unread' && <Tag color="red" style={{ marginLeft: 8 }}>未读</Tag>}
+                      {ins.status === 'read' && data.length > 0 && <Tag color="default" style={{ marginLeft: 8 }}>已归档</Tag>}
                       {data.length === 0 && <Tag color="green" style={{ marginLeft: 8 }}>已核对 ✓</Tag>}
                     </div>
                     {data.length === 0 && <div style={{ fontSize: 12, color: '#CBD5E1', padding: '4px 8px' }}>无异常（报价均在正常范围）</div>}
@@ -2939,10 +2952,11 @@ export default function Projects() {
                       <span style={{ fontVariantNumeric: 'tabular-nums' }}>¥{r.cost.toFixed(2)} × {r.quantity}</span>
                     </div>
                   ))}
-                  <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
+                  <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <Button size="small" type="primary" loading={insightBusyKey === (ins.id + '|' + gi)} onClick={() => confirmInsightGroup(ins, g, gi)}>✓ 确认同一器件</Button>
                     <Button size="small" loading={insightBusyKey === (ins.id + '|' + gi)} onClick={() => rejectInsightGroup(ins, g, gi)}>标记不同</Button>
-                    <Button size="small" onClick={() => markKnownInsight(ins)}>知道了（归档）</Button>
+                    <Button size="small" onClick={() => markKnownInsight(ins)}>{ins.status === 'read' ? '归档（已读）' : '知道了（归档）'}</Button>
+                    {ins.status === 'read' && <Button size="small" onClick={() => restoreInsight(ins)}>↩ 恢复待处理</Button>}
                   </div>
                 </div>
               ))}
