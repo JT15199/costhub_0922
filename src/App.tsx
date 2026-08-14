@@ -86,7 +86,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState('');
 
   // ====== 报价比对：持续后台探查（只要 Ollama 空闲就扫；60 秒一轮，探查仔细不急；发现情报才提示） ======
-  const [autoProgress, setAutoProgress] = useState<{ done: number; total: number; current: string } | null>(null);
+  const [autoProgress, setAutoProgress] = useState<{ done: number; total: number; current: string; remaining?: number } | null>(null);
   const [insightCount, setInsightCount] = useState(0);
   const autoRunningRef = useRef(false);
   const refreshInsightCount = useCallback(async () => {
@@ -102,10 +102,17 @@ export default function App() {
       autoRunningRef.current = false;
       window.dispatchEvent(new CustomEvent('costhub-compare-done'));
       refreshInsightCount();
-      // 只在有情报或失败时提示，日常轮询静默不打扰
+            // 分批提示：一轮只识别 3 个模块（60 秒后自动续下一批）；有情报/失败才提醒，全部无异常静默
       if (r) {
-        if (r.failed > 0) message.warning(`后台识别完成：${r.scanned} 个模块，${r.failed} 个识别失败（可打开模块「跨项目比对」手动重试）`);
-        else if (r.scanned > 0 && r.insights > 0) message.success(`发现 ${r.insights} 条报价情报（见「报价情报」）`);
+        if (r.remaining > 0) {
+          if (r.insights > 0 || r.failed > 0) {
+            message.info(`本批识别 ${r.scanned} 个模块${r.insights > 0 ? `，发现 ${r.insights} 条报价情报（见「报价情报」）` : ''}${r.failed > 0 ? `，${r.failed} 个失败` : ''}；剩余 ${r.remaining} 个模块将自动继续`);
+          }
+        } else if (r.failed > 0) {
+          message.warning(`后台识别完成：${r.scanned} 个模块，${r.failed} 个识别失败（模型太慢/超时已跳过，可打开模块「跨项目比对」手动重试）`);
+        } else if (r.scanned > 0 && r.insights > 0) {
+          message.success(`识别完成：发现 ${r.insights} 条报价情报（见「报价情报」）`);
+        }
       }
     })();
   }, []);
@@ -273,7 +280,7 @@ export default function App() {
       {autoProgress && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 1000, background: '#EEF2FF', borderBottom: '1px solid #C7D2FE', padding: '3px 14px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: '#334155' }}>
           <RobotOutlined className="ai-breathe" style={{ color: '#0A84FF' }} />
-          <span>正在后台识别物料报价差异（{autoProgress.done}/{autoProgress.total}）· 当前：{autoProgress.current}…发现异常会通过「报价情报」提醒</span>
+          <span>正在后台识别物料报价差异（{autoProgress.done}/{autoProgress.total}）· 当前：{autoProgress.current}{autoProgress.remaining ? `· 剩余 ${autoProgress.remaining} 个模块分批自动继续` : ''}…发现异常会通过「报价情报」提醒</span>
         </div>
       )}
       <aside className="sidebar">

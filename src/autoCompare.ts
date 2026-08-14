@@ -89,13 +89,24 @@ export async function runAiIdentifyOnce(rows: any[], aliases: any[]): Promise<an
 规则：1) 每组至少 2 个序号 2) 每行只能出现在一组 3) 不确定就不要列出 4) 没有疑似组就只输出"无"`;
   const userPrompt = ungrouped.map((r, i) => `[${i}] ${r.project} | ${r.name} | ${r.model} | ¥${r.cost}`).join('\n');
   let full = '';
+  // 单模块超时（60s）：模型太慢/卡住时直接跳过，不拖住整轮识别；超时后取消流监听
   await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let cleanupFn: (() => void) | undefined;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { if (typeof cleanupFn === 'function') cleanupFn(); } catch { /* 取消监听失败忽略 */ }
+      fn();
+    };
+    const timer = setTimeout(() => finish(() => reject(new Error('识别超时（60s）——模型响应太慢，该模块已跳过，可稍后手动重试'))), 60000);
     startOllamaStream(url, model,
       [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }],
       t => { full += t; }, () => {},
-      () => resolve(), e => reject(new Error(e)),
+      () => finish(resolve), e => finish(() => reject(new Error(e))),
       { endpoint: 'native', json: false, think: false, num_predict: 1500, temperature: 0.2 },
-    );
+    ).then(fn => { cleanupFn = fn; }).catch(() => { /* 错误会走 onError */ });
   });
   const groups = parseAiGroups(full, ungrouped)
     .filter((g: any) => { const gk = g.rows.map((r: any) => partKey(r)).sort().join(';'); return !negSet.has(gk); });
@@ -134,14 +145,14 @@ export function buildInsights(aiGroups: any[], rows: any[], aliases: any[]): any
   return out;
 }
 
-export interface AutoCompareResult { scanned: number; insights: number; failed: number; }
+export interface AutoCompareResult { scanned: number; insights: number; failed: number; remaining: number; }
 
 /**
  * 全品类后台识别。跳过条件（返回 null，静默）：未配置模型 / Ollama 未运行 / 无 ≥2 项目的品类。
  * onProgress：进度回调（done/total/current）。
  * 识别失败自动重试一次；单模块失败计入 failed 不阻塞队列。
  */
-export async function runAutoCompare(onProgress?: (p: { done: number; total: number; current: string }) => void): Promise<AutoCompareResult | null> {
+export async function runAutoCompare(onProgress?: (p: { done: number; total: number; current: string; remaining?: number }) => void): Promise<AutoCompareResult | null> {
   const model = await getSetting('local_ai_model', '');
   if (!model) return null;
   // Ollama 运行探测：走 Rust http_get 代理（浏览器 fetch 会被 CORS 拦截——localhost:11434 无 Access-Control-Allow-Origin 头）；不可用则静默跳过
@@ -173,11 +184,14 @@ export async function runAutoCompare(onProgress?: (p: { done: number; total: num
     }
     mods.forEach(m => jobs.push({ cat, mod: m, projs: sameCat }));
   }
-  if (jobs.length === 0) return { scanned: 0, insights: 0, failed: 0 };
-  let failCount = 0, insightTotal = 0;
-  for (let i = 0; i < jobs.length; i++) {
+  if (jobs.length === 0) return { scanned: 0, insights: 0, failed: 0, remaining: 0 };
+  // 分批识别：每轮最多识别 BATCH_SIZE 个"需要 AI"的模块（缓存命中秒过不计批容量）。
+  // 一轮跑完即停，App 60 秒轮询自动续下一批 → 结果渐进出现，不会一次转半天；单模块超时/失败跳过不阻塞。
+  const BATCH_SIZE = 3;
+  let failCount = 0, insightTotal = 0, scannedCount = 0, aiBatch = 0, i = 0;
+  for (; i < jobs.length && aiBatch < BATCH_SIZE; i++) {
     const { cat, mod, projs } = jobs[i];
-    onProgress?.({ done: i, total: jobs.length, current: mod });
+    onProgress?.({ done: i, total: jobs.length, current: mod, remaining: jobs.length - i });
     try {
       const rows: any[] = [];
       for (const p of projs) {
@@ -190,23 +204,27 @@ export async function runAutoCompare(onProgress?: (p: { done: number; total: num
       const aliases = await getPartAliases(mod);
       const cache = await getCompareCache(cat, mod);
       let groups: any[] = [];
-      if (cache && cache.fingerprint === fp && cache.result_json) {
+      const needsAI = !(cache && cache.fingerprint === fp && cache.result_json);
+      if (!needsAI) {
         try { groups = JSON.parse(cache.result_json); } catch { groups = []; }
       } else {
+        aiBatch++; // 计入批容量（无论成败，防止坏模块占满整轮）
         try {
           groups = await runAiIdentifyOnce(rows, aliases);
-        } catch {
-          groups = await runAiIdentifyOnce(rows, aliases); // 自动重试一次
+        } catch (e: any) {
+          if (String(e?.message || '').includes('超时')) throw e; // 超时是模型太慢，直接跳过不重试
+          groups = await runAiIdentifyOnce(rows, aliases); // 其他偶发错误自动重试一次
         }
         await saveCompareCache(cat, mod, fp, JSON.stringify(groups));
       }
       const ins = buildInsights(groups, rows, aliases);
       insightTotal += ins.length;
       await upsertInsight(cat, mod, JSON.stringify(ins));
+      scannedCount++;
     } catch {
       failCount++;
     }
-    onProgress?.({ done: i + 1, total: jobs.length, current: mod });
+    onProgress?.({ done: i + 1, total: jobs.length, current: mod, remaining: jobs.length - i - 1 });
   }
-  return { scanned: jobs.length, insights: insightTotal, failed: failCount };
+  return { scanned: scannedCount, insights: insightTotal, failed: failCount, remaining: Math.max(0, jobs.length - i) };
 }
