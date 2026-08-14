@@ -128,7 +128,7 @@ export function buildInsights(aiGroups: any[], rows: any[], aliases: any[]): any
   const out: any[] = [];
   // 已确认别名集合（user_confirmed → alias 归到 canonical，这些行不再算疑似）
   const confirmed = new Set<string>();
-  aliases.filter((a: any) => a.source === 'user_confirmed').forEach((a: any) => confirmed.add(partKey(a)));
+  aliases.filter((a: any) => a.source === 'user_confirmed').forEach((a: any) => confirmed.add(`${normalizePartName(a.alias_name)}|${normalizePartName(a.alias_model)}`));
   aiGroups.forEach((g: any) => {
     const unconfirmed = (g.rows || []).filter((r: any) => !confirmed.has(partKey(r)));
     if (unconfirmed.length < 2) return; // 整组已确认 → 情报消失

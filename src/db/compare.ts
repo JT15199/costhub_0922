@@ -25,6 +25,11 @@ export async function getPartAliases(moduleName?: string) {
 
 
 export async function savePartAlias(data: any) {
+  // 去重：同模块 + 同别名名/型号 + 同来源已存在则跳过（确认组内多行同名时只沉淀一条）
+  const d0 = await getDb();
+  const dup = await d0.select<any[]>('SELECT id FROM part_aliases WHERE module_name = ? AND alias_name = ? AND alias_model = ? AND source = ? LIMIT 1',
+    [data.module_name || '', data.alias_name, data.alias_model || '', data.source || 'user_confirmed']);
+  if (dup?.[0]) return;
   await (await getDb()).execute('INSERT INTO part_aliases (module_name, alias_name, alias_model, canonical_name, canonical_model, main_category, sub_category, source) VALUES (?,?,?,?,?,?,?,?)',
     [data.module_name || '', data.alias_name, data.alias_model || '', data.canonical_name, data.canonical_model || '', data.main_category || '', data.sub_category || '', data.source || 'user_confirmed']);
 }

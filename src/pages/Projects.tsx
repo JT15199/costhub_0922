@@ -372,10 +372,11 @@ export default function Projects() {
       aliases.filter((a: any) => a.source === 'user_confirmed').forEach((a: any) => confirmedSet.add(`${normalizePartName(a.alias_name)}|${normalizePartName(a.alias_model)}`));
       const rebuilt = buildInsights(groups, rows, aliases).filter((g: any) => (g.rows || []).some((r: any) => !confirmedSet.has(partKey(r))));
       await upsertInsight(ins.category, ins.module_name, JSON.stringify(rebuilt));
+      return rebuilt.length === 0; // true = 该模块已全部处理完
     } catch (e) {
       console.error('重算情报失败', e);
+      return false;
     }
-    await loadInsights();
   };
   // 情报操作：确认同一 / 标记不同（沉淀别名，作用域=情报所属模块；处理后该组从情报消失）
   // 乐观移除指定模块的指定组（立即反馈，不等后台）
@@ -397,8 +398,8 @@ export default function Projects() {
       for (const r of g.rows) {
         await savePartAlias({ module_name: ins.module_name, alias_name: r.name, alias_model: r.model, canonical_name: g.name, canonical_model: '', source: 'user_confirmed' });
       }
-      await rebuildModuleInsight(ins);
-      await markInsightRead(ins.category, ins.module_name); // 保持已读，红点不闪
+      const allDone = await rebuildModuleInsight(ins);
+      if (allDone) await markInsightRead(ins.category, ins.module_name); // 全部处理完才归档已读；还有其他组则保持待处理
       window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
       // 潜在节省 = 组内最高单价 - 最低单价（每台），提示下一步动作
       const prices = g.rows.map((r: any) => r.cost || 0);
@@ -422,8 +423,8 @@ export default function Projects() {
     try {
       const keys = g.rows.map((r: any) => partKey(r)).sort().join(';');
       await savePartAlias({ module_name: ins.module_name, alias_name: `#NEG#${keys}`, alias_model: '', canonical_name: '', canonical_model: '', source: 'marked_different' });
-      await rebuildModuleInsight(ins);
-      await markInsightRead(ins.category, ins.module_name); // 保持已读，红点不闪
+      const allDone = await rebuildModuleInsight(ins);
+      if (allDone) await markInsightRead(ins.category, ins.module_name); // 全部处理完才归档；还有其他组则保持待处理
       window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
       await loadInsights(); // 后台校正
       message.success('已标记不同，AI 不再建议该组合（该组已从情报中消除）');
