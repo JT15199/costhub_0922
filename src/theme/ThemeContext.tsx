@@ -9,6 +9,8 @@ interface ThemeContextType {
   theme: Theme;
   setTheme: (themeName: string) => void;
   availableThemes: typeof themes;
+  lowFx: boolean;
+  setLowFx: (v: boolean) => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -29,6 +31,8 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const [currentTheme, setCurrentTheme] = useState<string>(() => {
     return localStorage.getItem('app-theme') || 'red';
   });
+  // 低特效模式（兼容低配/远程桌面/老 WebView2 环境）：关毛玻璃 + 关动画，根治"界面发灰卡住/弹窗打不开"
+  const [lowFx, setLowFxState] = useState<boolean>(() => localStorage.getItem('app-lowfx') === '1');
 
   const theme = themes[currentTheme] || themes.red;
 
@@ -38,6 +42,8 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
 
     // 写入 data-theme 属性，供主题专属 CSS 使用
     root.setAttribute('data-theme', currentTheme);
+    // 低特效模式属性（CSS 见 index.css §14 低特效模式）
+    root.setAttribute('data-lowfx', lowFx ? 'on' : 'off');
 
     // 颜色变量
     Object.entries(theme.colors).forEach(([key, value]) => {
@@ -50,8 +56,12 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     root.style.setProperty('--font-serif', theme.typography.fontSerif);
     root.style.setProperty('--font-mono', theme.typography.fontMono);
 
-    // 应用body背景色
-    document.body.style.backgroundColor = theme.colors.canvas;
+    // 应用body背景色（macOS主题用CSS渐变，其余用背景色）
+    if (currentTheme === 'macos') {
+      document.body.style.backgroundColor = 'transparent';
+    } else {
+      document.body.style.backgroundColor = theme.colors.canvas;
+    }
     document.body.style.color = theme.colors.textPrimary;
     document.body.style.fontFamily = theme.typography.fontSans;
 
@@ -63,6 +73,10 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     if (themes[themeName]) {
       setCurrentTheme(themeName);
     }
+  };
+  const setLowFx = (v: boolean) => {
+    setLowFxState(v);
+    localStorage.setItem('app-lowfx', v ? '1' : '0');
   };
 
   // Ant Design 主题配置（适配minimalist设计）
@@ -125,7 +139,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   };
 
   return (
-    <ThemeContext.Provider value={{ currentTheme, theme, setTheme, availableThemes: themes }}>
+    <ThemeContext.Provider value={{ currentTheme, theme, setTheme, availableThemes: themes, lowFx, setLowFx }}>
       <ConfigProvider theme={antdThemeConfig}>
         {children}
       </ConfigProvider>

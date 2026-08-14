@@ -1,10 +1,11 @@
-import { useEffect, useState, useCallback } from 'react';
-import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Tag, message, Popconfirm, Tooltip, Upload, Row, Col } from 'antd';
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import { Button, Input, Select, Space, Modal, Form, InputNumber, Tag, message, Popconfirm, Tooltip, Upload, Row, Col } from 'antd';
 import type { TableRowSelection } from 'antd/es/table/interface';
-import { PlusOutlined, EditOutlined, DeleteOutlined, DownloadOutlined, UploadOutlined, HistoryOutlined, SearchOutlined, ShopOutlined, ToolOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, DownloadOutlined, UploadOutlined, HistoryOutlined, SearchOutlined, ShopOutlined, ToolOutlined, CheckOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import { getParts, savePart, deletePart, getCategories, getPriceHistory, getMainCategories, getPartSuppliers, addPartSupplier, updatePartSupplier, deletePartSupplier } from '../db';
-import { MAIN_CATEGORIES, SUB_CATEGORIES, CATEGORY_COLORS } from '../constants';
+import { MAIN_CATEGORIES, SUB_CATEGORIES, getCategoryColor } from '../constants';
+import DataTable from '../components/DataTable';
 
 export default function PartsLibrary() {
   const [parts, setParts] = useState<any[]>([]);
@@ -37,6 +38,72 @@ export default function PartsLibrary() {
     setLoading(false);
   }, [search, typeFilter, mainCat]);
   useEffect(() => { load(); }, [load]);
+
+  // ====== 项目筛选：选某项目只显示该项目 BOM 里使用的器件 ======
+  const [projectFilter, setProjectFilter] = useState('');
+  const [allProjects, setAllProjects] = useState<any[]>([]);
+  // 该项目 BOM 关联的器件 ID 集合
+  const [projectPartIds, setProjectPartIds] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    (async () => {
+      try {
+        const { getProjects } = await import('../db');
+        setAllProjects(await getProjects());
+      } catch { /* 忽略 */ }
+    })();
+  }, []);
+  useEffect(() => {
+    (async () => {
+      if (!projectFilter) { setProjectPartIds(new Set()); return; }
+      try {
+        const proj = allProjects.find((p: any) => p.name === projectFilter);
+        if (!proj) { setProjectPartIds(new Set()); return; }
+        const db = await (await import('../db')).getDb();
+        const rows = await db.select<any[]>(
+          'SELECT DISTINCT part_id FROM project_boms WHERE project_id = ? AND COALESCE(is_deleted,0) = 0 AND part_id IS NOT NULL',
+          [proj.id]
+        );
+        setProjectPartIds(new Set(rows.map((r: any) => r.part_id)));
+      } catch { setProjectPartIds(new Set()); }
+    })();
+  }, [projectFilter, allProjects]);
+  // 前端过滤：BOM 反查（最准确）+ projects 字段匹配（兼容旧数据）双保险
+  const filteredParts = useMemo(() => {
+    if (!projectFilter) return parts;
+    const proj = allProjects.find((p: any) => p.name === projectFilter);
+    const matchKeys = [projectFilter];
+    if (proj) {
+      if (proj.code) matchKeys.push(proj.code);
+      if (proj.name) matchKeys.push(proj.name);
+    }
+    return parts.filter((p: any) => {
+      if (projectPartIds.has(p.id)) return true; // BOM 反查命中
+      const projText = `${p.projects || ''}`;
+      return matchKeys.some(k => k && projText.includes(k)); // projects 字段匹配
+    });
+  }, [parts, projectFilter, allProjects, projectPartIds]);
+
+  // 子类选项按大类联动：大类已选 → 只显示该大类下的子类（常量表 + 数据库实际值合并）
+  const subCatOptions = useMemo(() => {
+    if (!mainCat) return categories.map(c => ({ label: c, value: c }));
+    // 常量表定义的子类 + 当前大类下 parts 里实际存在的子类（支持自定义子类）
+    const fromConst = SUB_CATEGORIES[mainCat] || [];
+    const fromParts = Array.from(new Set(parts.filter(p => p.main_category === mainCat).map(p => p.sub_category).filter(Boolean))) as string[];
+    const merged = Array.from(new Set([...fromConst, ...fromParts]));
+    return merged.map(c => ({ label: c, value: c }));
+  }, [mainCat, categories, parts]);
+
+  // 编辑弹窗用：任意大类的动态子类选项（常量 + 数据库实际值）
+  const getSubOptionsFor = (mainCatValue: string) => {
+    const fromConst = SUB_CATEGORIES[mainCatValue] || [];
+    const fromParts = Array.from(new Set(parts.filter(p => p.main_category === mainCatValue).map(p => p.sub_category).filter(Boolean))) as string[];
+    return Array.from(new Set([...fromConst, ...fromParts])).map(c => ({ label: c, value: c }));
+  };
+  // 切换大类时清空子类筛选，避免出现"硬件类 + 包材类子类"的无效组合
+  const handleMainCatChange = (v: string) => {
+    setMainCat(v || '');
+    if (v !== mainCat) setTypeFilter('');
+  };
 
   const handleImport = (file: File) => {
     const r = new FileReader();
@@ -231,12 +298,12 @@ export default function PartsLibrary() {
   };
 
   const cols = [
-    { title: 'ID', dataIndex: 'id', width: 55 },
-    { title: '大类', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={CATEGORY_COLORS[v]}>{v}</Tag> },
+    { title: 'ID', dataIndex: 'id', width: 50 },
+    { title: '大类', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={getCategoryColor(v)}>{v}</Tag> },
     { title: '子类', dataIndex: 'sub_category', width: 100 },
-    { title: '名称', dataIndex: 'name', ellipsis: true },
-    { title: '型号', dataIndex: 'model', ellipsis: true },
-    { title: '成本(¥)', dataIndex: 'cost', width: 100, align: 'right' as const, render: (v: number) => <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>{v?.toFixed(4)}</span> },
+    { title: '名称', dataIndex: 'name', width: 200, ellipsis: true },
+    { title: '型号', dataIndex: 'model', width: 150, ellipsis: true },
+    { title: '成本(¥)', dataIndex: 'cost', width: 100, align: 'right' as const, render: (v: number) => <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>{v?.toFixed(2)}</span> },
     { title: '项目', dataIndex: 'projects', width: 100, ellipsis: true },
     { title: '操作', width: 180, render: (_: any, r: any) => (
       <Space size="small">
@@ -255,8 +322,16 @@ export default function PartsLibrary() {
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
           <Space wrap>
             <Input prefix={<SearchOutlined />} placeholder="搜索..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: 200 }} allowClear />
-            <Select placeholder="大类" value={mainCat || undefined} onChange={v => setMainCat(v || '')} allowClear style={{ width: 110 }} options={mainCats.map(c => ({ label: c, value: c }))} />
-            <Select placeholder="子类" value={typeFilter || undefined} onChange={v => setTypeFilter(v || '')} allowClear style={{ width: 130 }} options={categories.map(c => ({ label: c, value: c }))} />
+            <Select placeholder="大类" value={mainCat || undefined} onChange={handleMainCatChange} allowClear style={{ width: 110 }} options={mainCats.map(c => ({ label: c, value: c }))} />
+            <Select placeholder="子类" value={typeFilter || undefined} onChange={v => setTypeFilter(v || '')} allowClear style={{ width: 130 }} options={subCatOptions} />
+            {/* 项目筛选：选某项目只显示关联该项目的器件 */}
+            <Select
+              placeholder="项目" allowClear showSearch style={{ width: 180 }}
+              value={projectFilter || undefined}
+              onChange={v => { setProjectFilter(v || ''); setSelKeys([]); }}
+              optionFilterProp="label"
+              options={allProjects.map((p: any) => ({ label: `${p.code} · ${p.name}`, value: p.name }))}
+            />
           </Space>
           <Space>
             <Upload beforeUpload={handleImport} showUploadList={false}><Button icon={<UploadOutlined />}>导入Excel</Button></Upload>
@@ -267,7 +342,7 @@ export default function PartsLibrary() {
         <div style={{ marginBottom: 8 }}>{selKeys.length > 0 && (
           <Popconfirm title={`批量删除 ${selKeys.length} 条？`} onConfirm={batchDelete}><Button size="small" danger icon={<DeleteOutlined />}>删除选中 ({selKeys.length})</Button></Popconfirm>
         )}</div>
-        <Table dataSource={parts} columns={cols} rowKey="id" size="middle" loading={loading} rowSelection={rowSel} pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `共 ${t} 条` }} scroll={{ x: 900 }} />
+        <DataTable tableId="parts_lib" dataSource={filteredParts} columns={cols} rowKey="id" size="middle" loading={loading} rowSelection={rowSel} pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `共 ${t} 条` }} scroll={{ x: 900 }} />
       </div>
 
       <Modal title={editing?.id ? '编辑器件' : '新增器件'} open={modalOpen} onOk={handleSave} onCancel={() => { setModalOpen(false); setEditing(null); form.resetFields(); }} width={560} destroyOnClose>
@@ -275,12 +350,12 @@ export default function PartsLibrary() {
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item label="大类" name="main_category">
-                <Select options={mainCats.map(c => ({ label: c, value: c }))} onChange={(v) => { const subs = SUB_CATEGORIES[v] || []; form.setFieldValue('sub_category', subs[0] || ''); form.setFieldValue('category', v); }} />
+                <Select options={mainCats.map(c => ({ label: c, value: c }))} onChange={(v) => { const subs = getSubOptionsFor(v).map((x: any) => x.value); form.setFieldValue('sub_category', subs[0] || ''); form.setFieldValue('category', v); }} />
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item label="子类" name="sub_category">
-                <Select options={(SUB_CATEGORIES[form.getFieldValue('main_category')] || []).map(c => ({ label: c, value: c }))} />
+                <Select options={getSubOptionsFor(form.getFieldValue('main_category'))} />
               </Form.Item>
             </Col>
           </Row>
@@ -298,8 +373,8 @@ export default function PartsLibrary() {
       </Modal>
 
       <Modal title={`价格历史 - ${historyName}`} open={historyOpen} onCancel={() => setHistoryOpen(false)} footer={null} width={600}>
-        <Table dataSource={historyData} rowKey="id" size="small" pagination={false}
-          columns={[{ title: '旧价', dataIndex: 'old_cost', render: (v: number) => v?.toFixed(4) }, { title: '新价', dataIndex: 'new_cost', render: (v: number) => v?.toFixed(4) }, { title: '变动', key: 'd', render: (_: any, r: any) => <span style={{ color: r.new_cost > r.old_cost ? '#EF4444' : '#10B981' }}>{(r.new_cost - r.old_cost).toFixed(4)}</span> }, { title: '时间', dataIndex: 'changed_at' }]} />
+        <DataTable tableId="parts_price_hist" dataSource={historyData} rowKey="id" size="small" pagination={false}
+          columns={[{ title: '旧价', dataIndex: 'old_cost', render: (v: number) => v?.toFixed(2) }, { title: '新价', dataIndex: 'new_cost', render: (v: number) => v?.toFixed(2) }, { title: '变动', key: 'd', render: (_: any, r: any) => <span style={{ color: r.new_cost > r.old_cost ? '#EF4444' : '#10B981' }}>{(r.new_cost - r.old_cost).toFixed(2)}</span> }, { title: '时间', dataIndex: 'changed_at' }]} />
       </Modal>
 
       <Modal
@@ -343,7 +418,7 @@ export default function PartsLibrary() {
           </Form>
         </div>
 
-        <Table
+        <DataTable tableId="parts_suppliers"
           dataSource={suppliers}
           rowKey="id"
           size="small"
@@ -379,7 +454,7 @@ export default function PartsLibrary() {
                     fontWeight: 500,
                     color: isLowest ? '#10B981' : isHighest ? '#EF4444' : undefined
                   }}>
-                    ¥{v?.toFixed(4)}
+                    ¥{v?.toFixed(2)}
                   </span>
                 );
               }
@@ -462,11 +537,11 @@ export default function PartsLibrary() {
                   <div>
                     <span style={{ color: '#64748B', marginRight: 8 }}>价格区间:</span>
                     <span style={{ fontFamily: 'monospace', fontWeight: 500, color: '#10B981' }}>
-                      ¥{minPrice.toFixed(4)}
+                      ¥{minPrice.toFixed(2)}
                     </span>
                     <span style={{ margin: '0 8px', color: '#94A3B8' }}>~</span>
                     <span style={{ fontFamily: 'monospace', fontWeight: 500, color: '#EF4444' }}>
-                      ¥{maxPrice.toFixed(4)}
+                      ¥{maxPrice.toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -480,14 +555,14 @@ export default function PartsLibrary() {
                     }}>
                       {totalShare.toFixed(2)}%
                     </span>
-                    {Math.abs(totalShare - 100) < 0.01 && <span style={{ color: '#10B981', marginLeft: 8 }}>✓</span>}
+                    {Math.abs(totalShare - 100) < 0.01 && <CheckOutlined style={{ color: '#10B981', marginLeft: 8 }} />}
                     {totalShare > 100 && <span style={{ color: '#EF4444', marginLeft: 8, fontSize: 12 }}>超出100%</span>}
                     {totalShare < 100 && totalShare > 0 && <span style={{ color: '#F59E0B', marginLeft: 8, fontSize: 12 }}>未达100%</span>}
                   </div>
                   <div>
                     <span style={{ color: '#64748B', marginRight: 8 }}>加权成本:</span>
                     <span style={{ fontSize: 18, fontWeight: 700, color: '#CF0A2C', fontFamily: 'monospace' }}>
-                      ¥{weightedPrice.toFixed(4)}
+                      ¥{weightedPrice.toFixed(2)}
                     </span>
                   </div>
                 </div>

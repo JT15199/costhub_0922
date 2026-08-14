@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Table, Select, Button, Space, Row, Col, message, Card, Statistic, Tag } from 'antd';
-import { DownloadOutlined } from '@ant-design/icons';
+import { Select, Button, Space, Row, Col, message, Card, Statistic, Tag } from 'antd';
+import { DownloadOutlined, FileOutlined, SearchOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import * as XLSX from 'xlsx';
 import { getProjects, getProject, getProjectBOMs } from '../db';
-import { CATEGORY_COLORS } from '../constants';
+import { CATEGORY_COLORS, getCategoryColor } from '../constants';
+import DataTable from '../components/DataTable';
+import { chartTooltip, chartAxisStyle, chartGrid, chartPieSeries, chartBarSeries, chartTextMuted, barGradient } from '../chartTheme';
 
 export default function Reports() {
   const [projects, setProjects] = useState<any[]>([]);
@@ -32,6 +34,8 @@ export default function Reports() {
     setProject(p1); setProject2(p2); setBoms(b1); setBoms2(b2);
   };
 
+  // 与供应商 Excel 计价口径一致：行小计先舍入 2 位再累加
+  // 计算口径：中间计算一律用原始值，显示层用 toFixed(2) 舍入
   const total = boms.reduce((s, b) => s + (b.part_cost || 0) * b.quantity, 0);
   const total2 = boms2.reduce((s, b) => s + (b.part_cost || 0) * b.quantity, 0);
 
@@ -39,38 +43,33 @@ export default function Reports() {
   boms.forEach(b => { byCat[b.main_category] = (byCat[b.main_category] || 0) + (b.part_cost || 0) * b.quantity; });
 
   const pieOption = {
-    tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
-    series: [{
-      type: 'pie', radius: ['45%', '75%'], center: ['50%', '55%'], padAngle: 2,
-      itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-      label: { show: false },
-      emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
+    tooltip: chartTooltip('item'),
+    series: [chartPieSeries({
       data: Object.entries(byCat).map(([k, v]) => ({ name: k, value: v, itemStyle: { color: CATEGORY_COLORS[k] || '#64748B' } })),
-    }],
+    })],
   };
 
   const barOption = {
-    tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: Object.keys(byCat), axisLabel: { rotate: 30, fontSize: 11 } },
-    yAxis: { type: 'value', name: '成本 (¥)' },
-    series: [{
-      type: 'bar', barWidth: '55%',
-      data: Object.entries(byCat).map(([k, v]) => ({ value: v, itemStyle: { color: CATEGORY_COLORS[k] || '#64748B', borderRadius: [6, 6, 0, 0] } })),
-      label: { show: true, position: 'top', formatter: (p: any) => `¥${p.value.toFixed(0)}`, fontSize: 10 },
-    }],
-    grid: { top: 10, right: 20, bottom: 60, left: 60 },
+    tooltip: chartTooltip('axis'),
+    xAxis: { type: 'category', data: Object.keys(byCat), ...chartAxisStyle(11, { rotate: 30 }) },
+    yAxis: { type: 'value', name: '成本 (¥)', ...chartAxisStyle() },
+    series: [chartBarSeries({
+      data: Object.entries(byCat).map(([k, v]) => ({ value: v, itemStyle: { color: barGradient(CATEGORY_COLORS[k] || '#64748B') } })),
+      label: { show: true, position: 'top', formatter: (p: any) => `¥${p.value.toFixed(0)}`, fontSize: 10, color: chartTextMuted() },
+    })],
+    grid: chartGrid({ bottom: 60 }),
   };
 
   const compareBarOption = {
-    tooltip: { trigger: 'axis' },
-    legend: { data: [project?.code || '项目A', project2?.code || '项目B'], bottom: 0 },
-    xAxis: { type: 'category', data: [...new Set([...Object.keys(byCat), ...Object.keys(boms2.reduce((m: any, b: any) => ({ ...m, [b.main_category]: 1 }), {}))])], axisLabel: { rotate: 30, fontSize: 11 } },
-    yAxis: { type: 'value', name: '成本 (¥)' },
+    tooltip: chartTooltip('axis'),
+    legend: { data: [project?.code || '项目A', project2?.code || '项目B'], bottom: 0, textStyle: { color: chartTextMuted() } },
+    xAxis: { type: 'category', data: [...new Set([...Object.keys(byCat), ...Object.keys(boms2.reduce((m: any, b: any) => ({ ...m, [b.main_category]: 1 }), {}))])], ...chartAxisStyle(11, { rotate: 30 }) },
+    yAxis: { type: 'value', name: '成本 (¥)', ...chartAxisStyle() },
     series: [
-      { name: project?.code || 'A', type: 'bar', barGap: '10%', data: Object.keys(byCat).map(k => byCat[k] || 0), itemStyle: { color: '#CF0A2C', borderRadius: [6, 6, 0, 0] } },
-      { name: project2?.code || 'B', type: 'bar', data: Object.keys(byCat).map(k => (boms2.filter(b => b.main_category === k).reduce((s, b) => s + (b.part_cost || 0) * b.quantity, 0))), itemStyle: { color: '#2563EB', borderRadius: [6, 6, 0, 0] } },
+      { name: project?.code || 'A', type: 'bar', barGap: '10%', data: Object.keys(byCat).map(k => byCat[k] || 0), itemStyle: { color: '#0A84FF', borderRadius: [8, 8, 0, 0] } },
+      { name: project2?.code || 'B', type: 'bar', data: Object.keys(byCat).map(k => (boms2.filter(b => b.main_category === k).reduce((s, b) => s + (b.part_cost || 0) * b.quantity, 0))), itemStyle: { color: '#5E5CE6', borderRadius: [8, 8, 0, 0] } },
     ],
-    grid: { top: 10, right: 20, bottom: 40, left: 60 },
+    grid: chartGrid({ bottom: 40 }),
   };
 
   const exportSingle = () => {
@@ -85,18 +84,18 @@ export default function Reports() {
   };
 
   const bomCols = [
-    { title: '大类', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={CATEGORY_COLORS[v]}>{v}</Tag> },
+    { title: '大类', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={getCategoryColor(v)}>{v}</Tag> },
     { title: '类型', dataIndex: 'category', width: 90 },
     { title: '名称', dataIndex: 'part_name' },
     { title: '型号', dataIndex: 'part_model' },
     { title: '单价(¥)', dataIndex: 'part_cost', width: 100, align: 'right' as const, render: (v: number) => v?.toFixed(4) },
     { title: '数量', dataIndex: 'quantity', width: 60, align: 'center' as const },
-    { title: '小计(¥)', key: 'sub', width: 100, align: 'right' as const, render: (_: any, r: any) => <b>{((r.part_cost || 0) * r.quantity).toFixed(2)}</b> },
+    { title: '小计(¥)', key: 'sub', width: 100, align: 'right' as const, render: (_: any, r: any) => <b>{((r.part_cost || 0) * r.quantity).toFixed(4)}</b> },
   ];
 
   return (
     <div>
-      <div className="page-title">📄 成本报告</div>
+      <div className="page-title"><FileOutlined /> 成本报告</div>
       <div className="content-card" style={{ marginBottom: 16 }}>
         <Space wrap>
           <Select value={reportType} onChange={v => { setReportType(v); setProject(null); setProject2(null); }} style={{ width: 160 }}
@@ -107,7 +106,7 @@ export default function Reports() {
             <Select placeholder="选择对比项目" value={pid2} onChange={v => setPid2(v)} style={{ width: 280 }}
               options={projects.filter(p => p.id !== pid1).map(p => ({ label: `[${p.code}] ${p.name}`, value: p.id }))} />
           )}
-          <Button type="primary" onClick={() => reportType === 'single' ? generateSingle() : generateCompare()}>🔍 生成报告</Button>
+          <Button type="primary" icon={<SearchOutlined />} onClick={() => reportType === 'single' ? generateSingle() : generateCompare()}>生成报告</Button>
         </Space>
       </div>
 
@@ -132,7 +131,7 @@ export default function Reports() {
 
           <div className="content-card">
             <div className="card-header"><h3>BOM 明细</h3><Button icon={<DownloadOutlined />} onClick={exportSingle}>导出Excel</Button></div>
-            <Table dataSource={boms} columns={bomCols} rowKey="id" size="small" pagination={{ pageSize: 20 }} />
+            <DataTable tableId="report_boms" dataSource={boms} columns={bomCols} rowKey="id" size="small" pagination={{ pageSize: 20 }} />
           </div>
         </>
       )}

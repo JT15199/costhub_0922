@@ -309,4 +309,135 @@ export const themes: Record<string, Theme> = {
       fontMono: "'SF Mono', 'Consolas', monospace",
     },
   },
+
+  macos: {
+    name: 'macos',
+    label: 'macOS 玻璃',
+    colors: {
+      primary: '#0A84FF',
+      primaryHover: '#0071E3',
+      primaryActive: '#005AC1',
+
+      canvas: '#E8EBF0',
+      surface: 'rgba(255,255,255,0.62)',
+      elevated: 'rgba(255,255,255,0.85)',
+
+      textPrimary: '#1D1D1F',
+      textSecondary: '#6E6E73',
+      textTertiary: '#86868B',
+
+      border: 'rgba(0,0,0,0.08)',
+      divider: 'rgba(0,0,0,0.06)',
+
+      accentRed: '#FF3B30',
+      accentRedBg: 'rgba(255,59,48,0.12)',
+      accentBlue: '#0A84FF',
+      accentBlueBg: 'rgba(10,132,255,0.12)',
+      accentGreen: '#34C759',
+      accentGreenBg: 'rgba(52,199,89,0.12)',
+      accentYellow: '#FF9F0A',
+      accentYellowBg: 'rgba(255,159,10,0.14)',
+
+      success: '#34C759',
+      error: '#FF3B30',
+      warning: '#FF9F0A',
+      info: '#0A84FF',
+
+      shadowCard: '0 8px 30px rgba(0,0,0,0.10)',
+      shadowHover: '0 16px 40px rgba(0,0,0,0.16)',
+    },
+    typography: {
+      fontSans: "'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      fontSerif: "'Newsreader', 'Georgia', serif",
+      fontMono: "'SF Mono', 'Consolas', monospace",
+    },
+  },
+
+  elegant: {
+    name: 'elegant',
+    label: '精致现代',
+    colors: {
+      primary: '#6366F1',
+      primaryHover: '#4F46E5',
+      primaryActive: '#4338CA',
+
+      // 暖白画布 + 纯白卡片，柔和层次
+      canvas: '#F6F5F4',
+      surface: '#FFFFFF',
+      elevated: '#FFFFFF',
+
+      textPrimary: '#201F1D',
+      textSecondary: '#6E6A64',
+      textTertiary: '#A8A39B',
+
+      border: '#E8E4DE',
+      divider: 'rgba(99,102,241,0.08)',
+
+      accentRed: '#E5484D',
+      accentRedBg: '#FDECEC',
+      accentBlue: '#3E63DD',
+      accentBlueBg: '#EEF2FE',
+      accentGreen: '#30A46C',
+      accentGreenBg: '#E9F9F1',
+      accentYellow: '#F5A524',
+      accentYellowBg: '#FEF6E6',
+
+      success: '#30A46C',
+      error: '#E5484D',
+      warning: '#F5A524',
+      info: '#3E63DD',
+
+      shadowCard: '0 1px 2px rgba(32,31,29,0.04), 0 4px 16px rgba(32,31,29,0.06)',
+      shadowHover: '0 2px 4px rgba(32,31,29,0.05), 0 12px 32px rgba(99,102,241,0.14)',
+    },
+    typography: {
+      fontSans: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif",
+      fontSerif: "'Newsreader', 'Georgia', serif",
+      fontMono: "'JetBrains Mono', 'SF Mono', 'Consolas', monospace",
+    },
+  },
+
+  glass: {
+    name: 'glass',
+    label: '玻璃拟态',
+    colors: {
+      primary: '#0EA5E9',
+      primaryHover: '#0284C7',
+      primaryActive: '#0369A1',
+
+      // 深色渐变底 + 半透明白卡片（毛玻璃）
+      canvas: '#0F172A',
+      surface: 'rgba(255,255,255,0.07)',
+      elevated: 'rgba(255,255,255,0.12)',
+
+      textPrimary: '#F1F5F9',
+      textSecondary: '#CBD5E1',
+      textTertiary: '#94A3B8',
+
+      border: 'rgba(255,255,255,0.12)',
+      divider: 'rgba(255,255,255,0.08)',
+
+      accentRed: '#F87171',
+      accentRedBg: 'rgba(248,113,113,0.14)',
+      accentBlue: '#38BDF8',
+      accentBlueBg: 'rgba(56,189,248,0.14)',
+      accentGreen: '#4ADE80',
+      accentGreenBg: 'rgba(74,222,128,0.14)',
+      accentYellow: '#FBBF24',
+      accentYellowBg: 'rgba(251,191,36,0.14)',
+
+      success: '#4ADE80',
+      error: '#F87171',
+      warning: '#FBBF24',
+      info: '#38BDF8',
+
+      shadowCard: '0 8px 32px rgba(0,0,0,0.35)',
+      shadowHover: '0 16px 48px rgba(14,165,233,0.28)',
+    },
+    typography: {
+      fontSans: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif",
+      fontSerif: "'Newsreader', 'Georgia', serif",
+      fontMono: "'JetBrains Mono', 'SF Mono', 'Consolas', monospace",
+    },
+  },
 };

@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
-import { Card, Button, Input, Select, Tag, Space, Modal, Form, message, Tabs, Row, Col, Statistic, Table, Popconfirm, Empty, InputNumber, Radio } from 'antd';
-import { ShopOutlined, AppstoreOutlined, UnorderedListOutlined, EditOutlined, DeleteOutlined, HistoryOutlined } from '@ant-design/icons';
-import { getAllPartSuppliers, getParts, addPartSupplier, updatePartSupplier, deletePartSupplier, getSupplierPriceHistory, getProjects, getProjectSuppliers } from '../db';
+import { useState, useEffect, useMemo } from 'react';
+import { Card, Button, Input, Select, Tag, Space, Modal, Form, message, Tabs, Row, Col, Statistic, Table, Popconfirm, Empty, InputNumber, Radio, Upload } from 'antd';
+import { ShopOutlined, AppstoreOutlined, UnorderedListOutlined, EditOutlined, DeleteOutlined, HistoryOutlined, HomeOutlined, BuildOutlined, ToolOutlined, BarChartOutlined, SearchOutlined, CameraOutlined } from '@ant-design/icons';
+import { getAllPartSuppliers, getParts, addPartSupplier, updatePartSupplier, deletePartSupplier, getSupplierPriceHistory, getProjects, getProjectSuppliers, getSupplierProfiles, saveSupplierProfile } from '../db';
 import { getCategoryColor } from '../constants';
+import DataTable from '../components/DataTable';
 import type { PartSupplier, ProjectSupplier } from '../types';
 
 interface SupplierMapItem {
@@ -35,10 +36,20 @@ export default function SupplierManagement() {
 
   // 器件供应商数据
   const [supplierMap, setSupplierMap] = useState<SupplierMapItem[]>([]);
+  // 供应商档案（含Logo）
+  const [profiles, setProfiles] = useState<Record<string, any>>({});
+  const [uploadTarget, setUploadTarget] = useState<string | null>(null);
   const [allSuppliers, setAllSuppliers] = useState<PartSupplier[]>([]);
   const [allParts, setAllParts] = useState<any[]>([]);
   const [mainCategories, setMainCategories] = useState<string[]>([]);
   const [subCategories, setSubCategories] = useState<string[]>([]);
+  // 子类 → 大类 映射（用于筛选联动：选了大类后子类只显示该大类下的）
+  const [subCatToMain, setSubCatToMain] = useState<Record<string, string>>({});
+  // 按大类过滤后的子类选项
+  const filteredSubCats = useMemo(() => {
+    if (!mainCatFilter) return subCategories;
+    return subCategories.filter(c => subCatToMain[c] === mainCatFilter);
+  }, [mainCatFilter, subCategories, subCatToMain]);
 
   // 整机供应商数据
   const [projectSuppliers, setProjectSuppliers] = useState<ProjectSupplier[]>([]);
@@ -69,23 +80,43 @@ export default function SupplierManagement() {
     try {
       if (supplierType === 'part') {
         // 加载器件供应商数据
+        console.log('Loading part suppliers...');
         const suppliers = await getAllPartSuppliers();
-        const parts = await getParts();
+        console.log('Suppliers loaded:', suppliers);
+
+        const parts = await getParts('', '', '');
+        console.log('Parts loaded:', parts);
 
         setAllSuppliers(suppliers);
         setAllParts(parts);
 
-        // 提取大类和子类
+        // 提取大类和子类（子类记录所属大类，用于筛选联动）
         const mainCats = Array.from(new Set(parts.map((p: any) => p.main_category).filter(Boolean)));
+        const subCatMap: Record<string, string> = {}; // 子类 → 大类
+        parts.forEach((p: any) => {
+          if (p.sub_category && p.main_category) {
+            if (!subCatMap[p.sub_category]) subCatMap[p.sub_category] = p.main_category;
+          }
+        });
+        setSubCatToMain(subCatMap);
         const subCats = Array.from(new Set(parts.map((p: any) => p.sub_category).filter(Boolean)));
         setMainCategories(mainCats);
         setSubCategories(subCats);
 
         // 构建供应商地图
         buildSupplierMap(suppliers, parts);
+        // 加载供应商档案（Logo等）
+        try {
+          const profs = await getSupplierProfiles();
+          const pmap: Record<string, any> = {};
+          profs.forEach((p: any) => { pmap[p.supplier_name] = p; });
+          setProfiles(pmap);
+        } catch (e) { console.error('加载供应商档案失败:', e); }
       } else {
         // 加载整机供应商数据
+        console.log('Loading project suppliers...');
         const projects = await getProjects();
+        console.log('Projects loaded:', projects);
         setAllProjects(projects);
 
         // 获取所有整机供应商
@@ -94,11 +125,12 @@ export default function SupplierManagement() {
           const suppliers = await getProjectSuppliers(project.id!);
           allProjectSuppliers.push(...suppliers);
         }
+        console.log('Project suppliers loaded:', allProjectSuppliers);
         setProjectSuppliers(allProjectSuppliers);
       }
     } catch (e) {
-      console.error(e);
-      message.error('加载数据失败');
+      console.error('Error loading supplier data:', e);
+      message.error(`加载数据失败: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setLoading(false);
     }
@@ -280,13 +312,28 @@ export default function SupplierManagement() {
 
   return (
     <div style={{ padding: 20 }}>
-      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2 style={{ margin: 0 }}>🏢 供应商管理</h2>
+      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <h2 style={{ margin: 0 }}><HomeOutlined /> 供应商管理</h2>
         <Radio.Group value={supplierType} onChange={e => setSupplierType(e.target.value)} buttonStyle="solid">
-          <Radio.Button value="part">🔧 器件供应商</Radio.Button>
-          <Radio.Button value="project">🏭 整机供应商</Radio.Button>
+          <Radio.Button value="part"><ToolOutlined /> 器件供应商</Radio.Button>
+          <Radio.Button value="project"><BuildOutlined /> 整机供应商（ODM）</Radio.Button>
         </Radio.Group>
       </div>
+
+      {/* ODM 说明条（整机供应商视图下显示） */}
+      {supplierType === 'project' && (
+        <Card size="small" style={{ marginBottom: 16, background: '#F0F9FF', borderColor: '#BAE6FD' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 12.5, color: '#334155', lineHeight: 1.7 }}>
+            <BuildOutlined style={{ color: '#0369A1', fontSize: 16, marginTop: 2 }} />
+            <div>
+              <b style={{ color: '#0C4A6E' }}>整机供应商（ODM）</b>：指承接整机生产制造的 ODM 工厂，可能提供<b>部分物料或全部物料</b>（含整机 BOM、结构件、组装等）。
+              <div style={{ marginTop: 2 }}>
+                添加方式：在<b>「项目管理」→ 项目详情 → 🏭 整机供应商</b>标签页中为该项目的 ODM 工厂录入报价与份额，此处自动汇总展示。
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {supplierType === 'part' ? (
         <>
@@ -298,7 +345,11 @@ export default function SupplierManagement() {
                 style={{ width: 120 }}
                 allowClear
                 value={mainCatFilter || undefined}
-                onChange={v => setMainCatFilter(v || '')}
+                onChange={v => {
+                  setMainCatFilter(v || '');
+                  // 切换大类时清空子类筛选，避免无效组合
+                  if (v !== mainCatFilter) setSubCatFilter('');
+                }}
               >
                 {mainCategories.map(c => (
                   <Select.Option key={c} value={c}>{c}</Select.Option>
@@ -311,7 +362,7 @@ export default function SupplierManagement() {
                 value={subCatFilter || undefined}
                 onChange={v => setSubCatFilter(v || '')}
               >
-                {subCategories.map(c => (
+                {filteredSubCats.map(c => (
                   <Select.Option key={c} value={c}>{c}</Select.Option>
                 ))}
               </Select>
@@ -361,6 +412,11 @@ export default function SupplierManagement() {
                 value={searchText}
                 onChange={e => setSearchText(e.target.value)}
               />
+              {supplierType === 'project' && (
+                <span style={{ fontSize: 12, color: '#94A3B8' }}>
+                  ODM 供应商在「项目管理」中添加后自动出现在这里
+                </span>
+              )}
             </Space>
           </Card>
         </>
@@ -436,8 +492,25 @@ export default function SupplierManagement() {
                                       }}
                                       onClick={() => showSupplierDetail(supplier)}
                                     >
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                                        {/* 供应商Logo（有档案显示图片，无档案显示首字母） */}
+                                        <div style={{
+                                          width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                          background: '#fff', border: '1px solid #eee', overflow: 'hidden',
+                                          fontSize: 14, fontWeight: 600, color: getCategoryColor(supplier.mainCategories[0] || '其他'),
+                                        }}
+                                          onClick={(e) => { e.stopPropagation(); setUploadTarget(supplier.supplierName); }}
+                                        >
+                                          {profiles[supplier.supplierName]?.logo
+                                            ? <img src={profiles[supplier.supplierName].logo} alt="logo" style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 3 }} />
+                                            : <CameraOutlined style={{ fontSize: 16, color: '#bbb' }} />}
+                                        </div>
+                                        <div style={{ fontSize: 14, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                          <ShopOutlined style={{ marginRight: 4 }} />{supplier.supplierName}
+                                        </div>
+                                      </div>
                                       <Statistic
-                                        title={<div style={{ fontSize: 14, fontWeight: 600 }}><ShopOutlined /> {supplier.supplierName}</div>}
                                         value={supplier.partCount}
                                         suffix="个器件"
                                         valueStyle={{ fontSize: 18 }}
@@ -483,7 +556,7 @@ export default function SupplierManagement() {
                   });
 
                   return Object.keys(groupedBySupplier).length === 0 ? (
-                    <Empty description="暂无整机供应商数据" />
+                    <Empty description="暂无整机供应商数据 — 请到「项目管理」的项目详情中添加工厂整机报价" />
                   ) : (
                     <Row gutter={[16, 16]}>
                       {Object.entries(groupedBySupplier).map(([supplierName, projects]) => {
@@ -498,16 +571,19 @@ export default function SupplierManagement() {
                               style={{ height: '100%' }}
                             >
                               <Statistic
-                                title={<div style={{ fontSize: 14, fontWeight: 600 }}><ShopOutlined /> {supplierName}</div>}
+                                title={<div style={{ fontSize: 14, fontWeight: 600 }}><BuildOutlined /> {supplierName} <Tag color="blue" style={{ fontSize: 9, marginLeft: 4 }}>ODM</Tag></div>}
                                 value={totalProjects}
                                 suffix="个项目"
                                 valueStyle={{ fontSize: 18 }}
                               />
                               <div style={{ marginTop: 10, fontSize: 12, color: '#666' }}>
-                                平均报价：¥{avgPrice.toFixed(2)}
+                                平均整机报价：¥{avgPrice.toFixed(2)}
                               </div>
                               <div style={{ marginTop: 8, fontSize: 11, color: '#888' }}>
-                                {projects.map(p => p.projectCode).join(', ')}
+                                承接项目：{projects.map(p => p.projectCode).join(', ')}
+                              </div>
+                              <div style={{ marginTop: 8, fontSize: 11, color: '#0369A1' }}>
+                                <BuildOutlined style={{ marginRight: 4 }} />ODM 提供部分或全部物料，报价/份额在项目详情中管理
                               </div>
                             </Card>
                           </Col>
@@ -523,7 +599,7 @@ export default function SupplierManagement() {
             key: 'list',
             label: <span><UnorderedListOutlined /> 详细列表</span>,
             children: supplierType === 'part' ? (
-              <Table
+              <DataTable tableId="sup_detail"
                 dataSource={detailListData}
                 rowKey="id"
                 size="small"
@@ -557,7 +633,7 @@ export default function SupplierManagement() {
                 ]}
               />
             ) : (
-              <Table
+              <DataTable tableId="sup_odm_list"
                 dataSource={projectSupplierListData}
                 rowKey="id"
                 size="small"
@@ -585,14 +661,14 @@ export default function SupplierManagement() {
           },
           supplierType === 'part' ? {
             key: 'stats',
-            label: <span>📊 数据统计</span>,
+            label: <span><BarChartOutlined /> 数据统计</span>,
             children: (
               <div>
                 <Row gutter={[16, 16]}>
                   {/* 供应商排行榜 */}
                   <Col xs={24} lg={12}>
                     <Card title="供应商排行榜（按供货数量）" size="small">
-                      <Table
+                      <DataTable tableId="sup_rank"
                         dataSource={Array.from(new Set(allSuppliers.map(s => s.supplier_name)))
                           .map(name => {
                             const supplies = allSuppliers.filter(s => s.supplier_name === name);
@@ -673,7 +749,7 @@ export default function SupplierManagement() {
                   {/* 高价器件Top10 */}
                   <Col xs={24} lg={12}>
                     <Card title="高价器件 Top10（降本重点）" size="small">
-                      <Table
+                      <DataTable tableId="sup_top10"
                         dataSource={allSuppliers
                           .map(s => {
                             const part = allParts.find(p => p.id === s.part_id);
@@ -698,7 +774,7 @@ export default function SupplierManagement() {
                   {/* 大类供应商分布 */}
                   <Col xs={24} lg={12}>
                     <Card title="大类供应商分布" size="small">
-                      <Table
+                      <DataTable tableId="sup_bycat"
                         dataSource={mainCategories.map(cat => {
                           const catParts = allParts.filter((p: any) => p.main_category === cat);
                           const catSuppliers = new Set(
@@ -730,10 +806,78 @@ export default function SupplierManagement() {
                 </Row>
               </div>
             )
-          } : null,
+          } : (
+            // 整机供应商（ODM）统计
+            {
+              key: 'stats',
+              label: <span><BarChartOutlined /> ODM 统计</span>,
+              children: (
+                <div>
+                  <Row gutter={[16, 16]}>
+                    {/* 项目 ODM 覆盖 */}
+                    <Col xs={24} lg={12}>
+                      <Card title="各项目 ODM 供应商覆盖" size="small">
+                        <DataTable tableId="sup_odm_byproj"
+                          dataSource={allProjects.map(proj => {
+                            const sups = projectSuppliers.filter(s => s.project_id === proj.id);
+                            const active = sups.filter(s => s.is_active);
+                            const weighted = active.reduce((sum, s) => sum + (s.quoted_price || 0) * (s.share_ratio || 0) / 100, 0);
+                            return {
+                              key: proj.id,
+                              code: proj.code,
+                              name: proj.name,
+                              count: sups.length,
+                              activeCount: active.length,
+                              weighted,
+                            };
+                          })}
+                          rowKey="key"
+                          size="small"
+                          pagination={false}
+                          columns={[
+                            { title: '项目代号', dataIndex: 'code', width: 110 },
+                            { title: '项目名称', dataIndex: 'name', ellipsis: true },
+                            { title: 'ODM 数', dataIndex: 'count', width: 70, align: 'right' },
+                            { title: '启用', dataIndex: 'activeCount', width: 60, align: 'right', render: (v: number, r: any) => v === r.count ? <Tag color="green" style={{ fontSize: 9 }}>全部</Tag> : v },
+                            { title: '加权报价(¥)', dataIndex: 'weighted', width: 120, align: 'right', render: (v: number) => v > 0 ? <span style={{ fontFamily: 'monospace' }}>¥{v.toFixed(2)}</span> : <span style={{ color: '#ccc' }}>-</span> },
+                          ]}
+                        />
+                      </Card>
+                    </Col>
+                    {/* ODM 供应商覆盖项目数 */}
+                    <Col xs={24} lg={12}>
+                      <Card title="ODM 供应商承接项目数" size="small">
+                        <DataTable tableId="sup_odm_rank"
+                          dataSource={Array.from(new Set(projectSuppliers.map(s => s.supplier_name)))
+                            .map(name => {
+                              const sups = projectSuppliers.filter(s => s.supplier_name === name);
+                              const projCount = new Set(sups.map(s => s.project_id)).size;
+                              const avgPrice = sups.reduce((sum, s) => sum + (s.quoted_price || 0), 0) / sups.length;
+                              return { name, projCount, avgPrice };
+                            })
+                            .sort((a, b) => b.projCount - a.projCount)}
+                          rowKey="name"
+                          size="small"
+                          pagination={false}
+                          columns={[
+                            { title: 'ODM 供应商', dataIndex: 'name', ellipsis: true, render: (v: string) => <><BuildOutlined style={{ marginRight: 4, color: '#0369A1' }} />{v}</> },
+                            { title: '承接项目', dataIndex: 'projCount', width: 100, align: 'right' },
+                            { title: '平均报价(¥)', dataIndex: 'avgPrice', width: 120, align: 'right', render: (v: number) => `¥${v.toFixed(2)}` },
+                          ]}
+                        />
+                      </Card>
+                    </Col>
+                  </Row>
+                  <div style={{ marginTop: 12, fontSize: 11.5, color: '#94A3B8' }}>
+                    💡 ODM 供应商的报价、份额、报价历史在「项目管理 → 项目详情 → 🏭 整机供应商」中维护，此处自动汇总。
+                  </div>
+                </div>
+              )
+            }
+          ),
           supplierType === 'part' ? {
             key: 'compare',
-            label: <span>🔍 供应商对比</span>,
+            label: <span><SearchOutlined /> 供应商对比</span>,
             children: (
               <div>
                 <Card size="small" style={{ marginBottom: 20 }}>
@@ -759,7 +903,7 @@ export default function SupplierManagement() {
                     {/* 供货范围对比 */}
                     <Col xs={24}>
                       <Card title="供货范围对比" size="small">
-                        <Table
+                        <DataTable tableId="sup_compare"
                           dataSource={selectedSuppliers.map(supplierName => {
                             const supplies = allSuppliers.filter(s => s.supplier_name === supplierName);
                             const categories = new Set(
@@ -908,7 +1052,7 @@ export default function SupplierManagement() {
             <div style={{ marginBottom: 15, fontSize: 13, color: '#666' }}>
               供货器件数量：<strong>{selectedSupplier.partCount}</strong> 个
             </div>
-            <Table
+            <DataTable tableId="sup_detail_parts"
               dataSource={selectedSupplier.parts}
               rowKey="supplierId"
               size="small"
@@ -980,12 +1124,12 @@ export default function SupplierManagement() {
         footer={null}
         width={800}
       >
-        <Table
+        <DataTable tableId="sup_price_hist"
           dataSource={priceHistory}
           rowKey="id"
           size="small"
           pagination={false}
-          scroll={{ x: 'max-content' }}
+          scroll={{ x: 800 }}
           columns={[
             { title: '变更时间', dataIndex: 'changed_at', width: 150 },
             { title: '旧价格', dataIndex: 'old_price', width: 100, render: (v: number) => `¥${v.toFixed(2)}` },
@@ -1006,6 +1150,63 @@ export default function SupplierManagement() {
             { title: '变更原因', dataIndex: 'change_reason', ellipsis: true }
           ]}
         />
+      </Modal>
+
+      {/* 供应商Logo上传弹窗 */}
+      <Modal
+        title={`上传 Logo - ${uploadTarget || ''}`}
+        open={!!uploadTarget}
+        onCancel={() => setUploadTarget(null)}
+        footer={null}
+        width={420}
+      >
+        <Upload
+          accept="image/png,image/jpeg,image/svg+xml"
+          showUploadList={false}
+          beforeUpload={(file) => {
+            // 限制2MB以内
+            if (file.size > 2 * 1024 * 1024) { message.warning('图片请小于2MB'); return false; }
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+              const base64 = String(e.target?.result || '');
+              if (uploadTarget) {
+                try {
+                  await saveSupplierProfile({ supplier_name: uploadTarget, logo: base64 });
+                  // 刷新档案
+                  const profs = await getSupplierProfiles();
+                  const pmap: Record<string, any> = {};
+                  profs.forEach((p: any) => { pmap[p.supplier_name] = p; });
+                  setProfiles(pmap);
+                  message.success('Logo 已上传');
+                } catch (err: any) { message.error(`上传失败：${err?.message || err}`); }
+              }
+            };
+            reader.readAsDataURL(file);
+            return false;
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '20px 0', border: '1px dashed #d9d9d9', borderRadius: 8, cursor: 'pointer' }}>
+            <CameraOutlined style={{ fontSize: 36, color: '#999' }} />
+            <div style={{ fontSize: 13, color: '#666' }}>点击选择图片（PNG/JPG/SVG，小于2MB）</div>
+            {uploadTarget && profiles[uploadTarget]?.logo && (
+              <img src={profiles[uploadTarget].logo} alt="logo" style={{ width: 60, height: 60, objectFit: 'contain' }} />
+            )}
+          </div>
+        </Upload>
+        {uploadTarget && profiles[uploadTarget]?.logo && (
+          <div style={{ textAlign: 'center', marginTop: 8 }}>
+            <Button size="small" danger onClick={async () => {
+              if (uploadTarget) {
+                await saveSupplierProfile({ supplier_name: uploadTarget, logo: '' });
+                const profs = await getSupplierProfiles();
+                const pmap: Record<string, any> = {};
+                profs.forEach((p: any) => { pmap[p.supplier_name] = p; });
+                setProfiles(pmap);
+                message.success('已移除 Logo');
+              }
+            }}>移除 Logo</Button>
+          </div>
+        )}
       </Modal>
     </div>
   );

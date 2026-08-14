@@ -10,6 +10,7 @@ import {
   ArrowLeftOutlined, BranchesOutlined, SafetyCertificateOutlined, BugOutlined,
   RiseOutlined, FallOutlined, MinusOutlined,
   BarsOutlined, BarChartOutlined, ClockCircleOutlined, HistoryOutlined, InboxOutlined,
+  LinkOutlined, BulbOutlined, SignalFilled, CheckSquareFilled, BorderOutlined, WarningOutlined,
 } from '@ant-design/icons';
 import {
   ReactFlow, MiniMap, Controls, Background, Panel, useNodesState, useEdgesState,
@@ -30,10 +31,17 @@ import {
   getParts,
 } from '../db';
 import { hasLLMConfig } from '../apiConfig';
-import { agentSearchLoop, askLLM, createStructuredInsight, BUILTIN_SKILLS, extractLLMJson } from '../trendService';
+import { agentSearchLoop, askLLM, createStructuredInsight, BUILTIN_SKILLS, extractLLMJson, getActiveSkills, getSkill } from '../trendService';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getCategoryColor } from '../constants';
+
+// 统一时间格式化：兼容本地时间（YYYY-MM-DD HH:MM:SS）与旧 ISO UTC（带 T）两种格式
+function formatTime(t: string): string {
+  if (!t) return '未知时间';
+  const s = String(t);
+  return s.length >= 16 ? s.slice(0, 16).replace('T', ' ') : s;
+}
 
 const ROLLUP_SKILL = `# 层级趋势汇总（Rollup）Skill
 
@@ -139,7 +147,7 @@ function DecompNode({ data, selected }: any) {
         style={{ position: 'absolute', left: 7, top: 8, fontSize: 14, cursor: 'pointer', color: isChecked ? 'var(--brand, #6366F1)' : '#94A3B8', userSelect: 'none' }}
         onClick={(e) => { e.stopPropagation(); if (checkToggleFn && data.dbId) checkToggleFn(data.dbId, false); }}
       >
-        {isChecked ? '☑' : '☐'}
+        {isChecked ? <CheckSquareFilled style={{ fontSize: 14 }} /> : <BorderOutlined style={{ fontSize: 14 }} />}
       </span>
       <div style={{ fontWeight: 700, color: 'var(--text-primary, #1E293B)', marginBottom: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {data.trendIcon && <span style={{ marginRight: 4 }}>{data.trendIcon}</span>}{data.label}
@@ -339,10 +347,165 @@ export default function Decomposition(_props: any) {
     }
   }, []);
 
+  // ====== 快捷洞察（无需分解树，直接洞察单个物料行情） ======
+  const [quickItems, setQuickItems] = useState<any[]>([]);
+  const [quickSnapMap, setQuickSnapMap] = useState<Record<number, any>>({});
+  // 添加快捷洞察弹窗
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [quickAddName, setQuickAddName] = useState('');
+  // 快捷洞察详情弹窗
+  const [quickDetailItem, setQuickDetailItem] = useState<any>(null);
+  const [quickDetailSnaps, setQuickDetailSnaps] = useState<any[]>([]);
+  const [quickDetailDims, setQuickDetailDims] = useState<any[]>([]);
+  const [quickDetailLoading, setQuickDetailLoading] = useState(false);
+  // 详情弹窗中选中的批次时间（时间轴切换查看）
+  const [quickDetailBatch, setQuickDetailBatch] = useState<string>('');
+  // 快捷洞察追问
+  const [quickAskInput, setQuickAskInput] = useState('');
+  const [quickAskLoading, setQuickAskLoading] = useState(false);
+  const [quickAskHistory, setQuickAskHistory] = useState<{ q: string; a: string }[]>([]);
+
+  // 基于洞察结论追问（复用 agentSearchLoop + askLLM）
+  const quickAsk = async () => {
+    const q = quickAskInput.trim();
+    if (!q || !quickDetailItem) return;
+    setQuickAskInput('');
+    setQuickAskLoading(true);
+    try {
+      const { hasLLMConfig } = await import('../apiConfig');
+      const hasLLM = await hasLLMConfig();
+      if (!hasLLM) { message.warning('LLM 未配置'); setQuickAskLoading(false); return; }
+
+      const { agentSearchLoop, askLLM } = await import('../trendService');
+      // 最新快照作为洞察上下文
+      const ctxSnap = quickDetailSnaps[0];
+
+      message.loading({ content: '正在搜索并分析...', key: 'quickAsk', duration: 0 });
+      const searchResult = await agentSearchLoop(q, '追问', quickDetailItem.query_category,
+        (progress: string) => message.loading({ content: progress, key: 'quickAsk', duration: 0 }));
+
+      const contextPrompt = `# 追问上下文
+
+物料名称：${quickDetailItem.query_category}
+
+最新洞察结论（${formatTime(ctxSnap?.query_time || '')}）：
+${ctxSnap ? `- 趋势方向：${ctxSnap.direction}
+- 置信度：${ctxSnap.confidence_level}
+- 摘要：${ctxSnap.summary}` : '尚未洞察'}
+
+历史对话：
+${quickAskHistory.map(c => `Q: ${c.q}\nA: ${c.a}`).join('\n\n')}
+
+最新搜索结果：
+${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.snippet}\n来源: ${s.url}`).join('\n\n')}
+
+请基于以上上下文和最新搜索结果回答用户的追问。`;
+
+      const answer = await askLLM(contextPrompt, q);
+      setQuickAskHistory(prev => [...prev, { q, a: answer }]);
+      message.destroy('quickAsk');
+    } catch (e: any) {
+      message.destroy('quickAsk');
+      message.error('追问失败: ' + (e?.message || '未知错误'));
+    } finally {
+      setQuickAskLoading(false);
+    }
+  };
+
+  // 打开快捷洞察详情：加载该物料全部快照（含历史）+ 各 Skill 维度
+  const openQuickDetail = async (item: any) => {
+    setQuickDetailItem(item);
+    setQuickDetailLoading(true);
+    try {
+      const { getTrendSnapshots, getTrendInsightDimensions } = await import('../db');
+      const snaps = await getTrendSnapshots(item.id);
+      setQuickDetailSnaps(snaps);
+      // 默认选中最新批次（第一条的 query_time）
+      if (snaps.length > 0) setQuickDetailBatch(snaps[0].query_time || '');
+      // 加载每个快照的维度（含 _skill_used）
+      const allDims: any[] = [];
+      for (const snap of snaps) {
+        const dims = await getTrendInsightDimensions(snap.id);
+        dims.forEach((d: any) => { d._skill_used = snap.skill_used; d._snapshot_id = snap.id; d._query_time = snap.query_time; });
+        allDims.push(...dims);
+      }
+      setQuickDetailDims(allDims);
+    } catch (e: any) {
+      message.error('加载详情失败: ' + (e?.message || '未知错误'));
+    } finally {
+      setQuickDetailLoading(false);
+    }
+  };
+
+  // 快捷洞察：创建 trend_item（source_type=quick）并走正式洞察流程
+  const quickInsight = async (name: string, itemId?: number) => {
+    try {
+      const { saveQuickTrendItem } = await import('../db');
+      let trendItemId = itemId;
+      if (!trendItemId) {
+        trendItemId = await saveQuickTrendItem({ material_name: name, category_type: '直接查询' });
+      }
+      const mockNode = {
+        id: -1,
+        component_name: name,
+        node_type: 'terminal',
+        trend_item_id: trendItemId,
+      };
+      await requestInsightWithPreview(mockNode);
+    } catch (e: any) {
+      const errMsg = e?.message || e?.toString?.() || JSON.stringify(e) || '未知错误';
+      message.error('洞察失败：' + errMsg);
+    }
+  };
+
+  // 添加快捷洞察（仅创建条目，不立即洞察）
+  const confirmQuickAdd = async () => {
+    const name = quickAddName.trim();
+    if (!name) { message.warning('请输入物料名称'); return; }
+    try {
+      const { saveQuickTrendItem, getQuickTrendItems } = await import('../db');
+      await saveQuickTrendItem({ material_name: name, category_type: '直接查询' });
+      message.success(`已添加「${name}」，点击洞察按钮查询行情`);
+      setQuickAddName(''); setQuickAddOpen(false);
+      setQuickItems(await getQuickTrendItems());
+    } catch (e: any) {
+      const errMsg = e?.message || e?.toString?.() || JSON.stringify(e) || '未知错误';
+      message.error(`添加失败：${errMsg}`);
+    }
+  };
+
+  const loadQuickItems = useCallback(async () => {
+    try {
+      const { getQuickTrendItems, getLatestTrendSnapshot } = await import('../db');
+      const items = await getQuickTrendItems();
+      setQuickItems(items);
+      const map: Record<number, any> = {};
+      for (const item of items) {
+        const snap = await getLatestTrendSnapshot(item.id);
+        if (snap) map[item.id] = snap;
+      }
+      setQuickSnapMap(map);
+    } catch (e) { console.error('加载快捷洞察失败:', e); }
+  }, []);
+
   useEffect(() => {
     loadTree();
     loadWatchedParts();
-  }, [loadTree, loadWatchedParts]);
+    loadQuickItems();
+  }, [loadTree, loadWatchedParts, loadQuickItems]);
+
+  // 页面激活时重新加载（器件库标记/取消关注、项目管理改动后切过来要同步）
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail || detail.page !== 'decomposition') return;
+      loadWatchedParts();
+      loadQuickItems();
+      loadTree();
+    };
+    window.addEventListener('app-page-active', handler);
+    return () => window.removeEventListener('app-page-active', handler);
+  }, [loadTree, loadWatchedParts, loadQuickItems]);
 
   // 进入树详情视图时构建 React Flow 节点。选中状态不参与布局，拖拽位置不会被点击重置。
   useEffect(() => {
@@ -409,7 +572,7 @@ export default function Decomposition(_props: any) {
         data: {
           label: node.component_name,
           trendColor: color,
-          trendIcon: direction ? TREND_ICONS[direction] : (node.node_type === 'terminal' && node.insight_status === 'pending' ? '⏳' : ''),
+          trendIcon: direction ? TREND_ICONS[direction] : (node.node_type === 'terminal' && node.insight_status === 'pending' ? <ClockCircleOutlined /> : ''),
           nodeType: node.node_type,
           costRatio: node.cost_ratio_estimate,
           sourceType: node.source_type,
@@ -485,9 +648,11 @@ export default function Decomposition(_props: any) {
 
       const lastAgg = snaps.filter((s: any) => s.source_type === 'aggregated');
       if (lastAgg.length > 0) {
-        const contribs = await getRollupContributions(lastAgg[lastAgg.length - 1].id);
+        // snaps 按 query_time DESC，取第一条即最新汇总
+        const latestAgg = lastAgg[0];
+        const contribs = await getRollupContributions(latestAgg.id);
         setRollupContributions(contribs);
-        setRollupResult(lastAgg[lastAgg.length - 1]);
+        setRollupResult(latestAgg);
       } else { setRollupContributions([]); setRollupResult(null); }
     } else { setSnapshots([]); setConversations([]); setTrendSources([]); setRollupContributions([]); setRollupResult(null); }
   }, [nodes, trendItems]);
@@ -518,9 +683,15 @@ export default function Decomposition(_props: any) {
   // ====== 单节点洞察（带预览确认） ======
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [previewTargetNode, setPreviewTargetNode] = useState<any>(null);
+  // 本次洞察选择的 Skill（弹窗中多选，默认带出设置中激活的）
+  const [previewSkills, setPreviewSkills] = useState<string[]>([]);
+  const [allSkills, setAllSkills] = useState<any[]>([]);
 
   const requestInsightWithPreview = (node: any) => {
     setPreviewTargetNode(node);
+    // 打开弹窗时加载 Skill 列表（静态导入，即时可用），默认选中设置中激活的
+    setAllSkills(BUILTIN_SKILLS.filter(s => s.id !== 'custom'));
+    setPreviewSkills(getActiveSkills().map(s => s.id));
     setPreviewModalOpen(true);
   };
 
@@ -539,11 +710,12 @@ export default function Decomposition(_props: any) {
         status: 'success',
       });
     } catch {}
-    await handleNodeInsight(previewTargetNode);
+    await handleNodeInsight(previewTargetNode, previewSkills);
   };
 
   // ====== 洞察 ======
-  const handleNodeInsight = async (node: any) => {
+  // skillIds 可选：本次洞察指定使用的 Skill（弹窗选择）；不传则用设置中激活的
+  const handleNodeInsight = async (node: any, skillIds?: string[]) => {
     setInsightLoading(true);
     try {
       console.log('开始洞察节点:', node);
@@ -570,11 +742,15 @@ export default function Decomposition(_props: any) {
         return;
       }
 
-      // 获取激活的Skill列表（支持多选）
+      // 获取本次洞察使用的Skill列表（弹窗选择优先，未选择则用设置中激活的）
       console.log('获取 Skill 列表...');
-      const { getActiveSkills } = await import('../trendService');
-      const skills = getActiveSkills();
-      console.log('激活的 Skills:', skills);
+      let skills: any[];
+      if (skillIds && skillIds.length > 0) {
+        skills = skillIds.map(id => getSkill(id)).filter(Boolean);
+      } else {
+        skills = getActiveSkills();
+      }
+      console.log('使用的 Skills:', skills.map((s: any) => s.name));
 
       if (skills.length === 0) {
         message.warning('未选择任何Skill，请在设置中选择');
@@ -589,14 +765,17 @@ export default function Decomposition(_props: any) {
         (progress: string) => message.loading({ content: progress, key: 'insight', duration: 0 }));
       console.log('搜索结果:', result);
 
-      // 对每个激活的Skill生成洞察
-      for (let i = 0; i < skills.length; i++) {
-        const skill = skills[i];
+      // 对每个激活的Skill生成洞察（并行执行：各Skill独立LLM调用，可同时进行）
+      const structuredResults = await Promise.all(skills.map(async (skill, i) => {
         console.log(`生成洞察 ${i + 1}/${skills.length}:`, skill.name);
         message.loading({ content: `正在按「${skill.name}」生成采购结论 (${i + 1}/${skills.length})...`, key: 'insight', duration: 0 });
         const structured = await createStructuredInsight(workingNode.component_name, skill, result.allSources, result.summary);
-        console.log('结构化洞察结果:', structured);
+        console.log('结构化洞察结果:', skill.name, structured);
+        return { skill, structured };
+      }));
 
+      // 并行落库
+      await Promise.all(structuredResults.map(async ({ skill, structured }) => {
         const snapshotId = await saveTrendSnapshot({
           trend_item_id: workingNode.trend_item_id, source_type: 'direct_query', skill_used: skill.id,
           direction: structured.trend_direction, confidence_level: structured.confidence_level,
@@ -610,16 +789,17 @@ export default function Decomposition(_props: any) {
         for (const event of structured.key_events || []) {
           if (event.event_description) await saveTrendKeyEvent({ ...event, trend_snapshot_id: snapshotId! });
         }
-      }
+      }));
 
       await clearTrendSources(workingNode.trend_item_id);
-      for (const source of result.allSources) {
-        await saveTrendSource({ trend_item_id: workingNode.trend_item_id, source_title: source.title, source_url: source.url, excerpt: source.snippet });
-      }
+      await Promise.all(result.allSources.map((source: any) =>
+        saveTrendSource({ trend_item_id: workingNode.trend_item_id, source_title: source.title, source_url: source.url, excerpt: source.snippet })
+      ));
       await saveDecompositionNode({ ...workingNode, insight_status: 'queried' });
       message.destroy('insight');
       message.success(`「${workingNode.component_name}」洞察完成：使用了${skills.length}个Skill`);
       await loadTree();
+      loadQuickItems(); // 快捷洞察区同步刷新（含最近洞察时间/趋势）
       if (selectedId === workingNode.id) await selectNode(workingNode);
     } catch (e: any) {
       console.error('洞察失败 - 完整错误:', e);
@@ -667,13 +847,13 @@ export default function Decomposition(_props: any) {
       setConversations(prev => {
         const newConvs = [...prev];
         const idx = newConvs.findIndex(c => c.id === thinkingMsgId);
-        if (idx !== -1) newConvs[idx] = { ...newConvs[idx], answer: '🔍 正在搜索相关信息...' };
+        if (idx !== -1) newConvs[idx] = { ...newConvs[idx], answer: '正在搜索相关信息...' };
         return newConvs;
       });
       setConversations(prev => {
         const newConvs = [...prev];
         const idx = newConvs.findIndex(c => c.id === thinkingMsgId);
-        if (idx !== -1) newConvs[idx] = { ...newConvs[idx], answer: '🔍 正在搜索相关信息...' };
+        if (idx !== -1) newConvs[idx] = { ...newConvs[idx], answer: '正在搜索相关信息...' };
         return newConvs;
       });
 
@@ -685,7 +865,7 @@ export default function Decomposition(_props: any) {
           setConversations(prev => {
             const newConvs = [...prev];
             const idx = newConvs.findIndex(c => c.id === thinkingMsgId);
-            if (idx !== -1) newConvs[idx] = { ...newConvs[idx], answer: `🔍 ${progress}` };
+            if (idx !== -1) newConvs[idx] = { ...newConvs[idx], answer: progress };
             return newConvs;
           });
         }
@@ -695,12 +875,13 @@ export default function Decomposition(_props: any) {
       setConversations(prev => {
         const newConvs = [...prev];
         const idx = newConvs.findIndex(c => c.id === thinkingMsgId);
-        if (idx !== -1) newConvs[idx] = { ...newConvs[idx], answer: '💭 正在生成回答...' };
+        if (idx !== -1) newConvs[idx] = { ...newConvs[idx], answer: '正在生成回答...' };
         return newConvs;
       });
 
       const conversationHistory = await getTrendConversations(selectedNode.trend_item_id);
-      const latestSnapshot = snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
+      // snapshots 按 query_time DESC，第一条即最新洞察
+      const latestSnapshot = snapshots.length > 0 ? snapshots[0] : null;
 
       const contextPrompt = `# 追问上下文
 
@@ -745,7 +926,7 @@ ${searchResult.allSources.map((s: any, idx: number) => `${idx + 1}. ${s.title}\n
         (async () => {
           try {
             const allConversations = await getTrendConversations(selectedNode.trend_item_id);
-            const latestSnap = snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
+            const latestSnap = snapshots.length > 0 ? snapshots[0] : null;
             if (!latestSnap) return;
 
             const updatePrompt = `你是物料采购分析专家。请综合以下信息，更新「${selectedNode.component_name}」的洞察结论。
@@ -893,7 +1074,7 @@ ${allConversations.slice(-5).map((c: any) => `Q: ${c.question}\nA: ${c.answer}`)
       if (!hasLLM) { message.warning('未配置 LLM'); setAiDraftLoading(false); return; }
 
       // 步骤1：收集上下文
-      setAiAnalysisSteps(['📋 正在收集上下文信息...']);
+      setAiAnalysisSteps(['正在收集上下文信息...']);
       const parentInfo = aiDraftParentId ? await getDecompositionNode(aiDraftParentId) : null;
 
       // 获取完整的祖先链路（从根节点到当前节点）
@@ -921,10 +1102,10 @@ ${allConversations.slice(-5).map((c: any) => `Q: ${c.question}\nA: ${c.answer}`)
         ? `完整层级：${ancestorChain.join(' → ')} → ${aiDraftName}`
         : `顶层物料：${aiDraftName}`;
 
-      setAiAnalysisSteps(prev => [...prev, `✓ 上下文：${contextInfo}`]);
+      setAiAnalysisSteps(prev => [...prev, `上下文：${contextInfo}`]);
 
       // 步骤2：分析拆解策略
-      setAiAnalysisSteps(prev => [...prev, '🧠 AI正在分析拆解策略...']);
+      setAiAnalysisSteps(prev => [...prev, 'AI正在分析拆解策略...']);
       await new Promise(r => setTimeout(r, 500)); // 让用户看到过程
 
       // 改进的Prompt：融入完整上下文和Serenity产业链方法论
@@ -1010,26 +1191,26 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
       }
 
       // 步骤3：调用LLM
-      setAiAnalysisSteps(prev => [...prev, '🤖 AI正在生成拆解方案...']);
+      setAiAnalysisSteps(prev => [...prev, 'AI正在生成拆解方案...']);
       const response = await askLLM(systemPrompt, userPrompt);
 
       // 步骤4：解析结果
-      setAiAnalysisSteps(prev => [...prev, '🔍 正在解析和验证结果...']);
+      setAiAnalysisSteps(prev => [...prev, '正在解析和验证结果...']);
       const items = parseDecompositionItems(response);
 
       // 步骤5：验证合理性
       const totalRatio = items.reduce((sum, item) => sum + (item.cost_ratio_estimate || 0), 0);
       const validationMsg = totalRatio >= 95 && totalRatio <= 105
-        ? `✓ 成本占比验证通过（${totalRatio.toFixed(1)}%）`
-        : `⚠ 成本占比需要调整（${totalRatio.toFixed(1)}%）`;
+        ? `成本占比验证通过（${totalRatio.toFixed(1)}%）`
+        : `成本占比需要调整（${totalRatio.toFixed(1)}%）`;
       setAiAnalysisSteps(prev => [...prev, validationMsg]);
 
       // 步骤6：完成
-      setAiAnalysisSteps(prev => [...prev, `✅ 分析完成！生成了 ${items.length} 个子组件`]);
+      setAiAnalysisSteps(prev => [...prev, `分析完成！生成了 ${items.length} 个子组件`]);
       setAiDraftResult(items);
 
     } catch (e: any) {
-      setAiAnalysisSteps(prev => [...prev, `❌ 分析失败：${e.message}`]);
+      setAiAnalysisSteps(prev => [...prev, `分析失败：${e.message}`]);
       message.error(`AI 起草失败：${e.message}`);
     }
     setAiDraftLoading(false);
@@ -1097,7 +1278,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
           if (totalRatio < 99 || totalRatio > 101) {
             const confirmed = await new Promise<boolean>((resolve) => {
               Modal.confirm({
-                title: '⚠️ 成本占比校验失败',
+                title: '成本占比校验失败',
                 content: (
                   <div>
                     <p>当前父节点下的子节点成本占比总和为 <strong>{totalRatio.toFixed(1)}%</strong>，不在合理范围（99%-101%）内。</p>
@@ -1315,7 +1496,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
       if (warnings.length > 0) {
         const confirmed = await new Promise<boolean>((resolve) => {
           Modal.confirm({
-            title: '⚠️ 成本占比校验失败',
+            title: '成本占比校验失败',
             content: (
               <div>
                 <p>以下父节点的子节点成本占比总和不在合理范围（99%-101%）内：</p>
@@ -1362,20 +1543,25 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
   };
 
   // ====== 批量洞察 ======
-
-  // ====== 批量洞察 ======
   const runBatchInsight = () => setBatchInsightOpen(true);
   const confirmBatchInsight = async () => {
     const selected = nodes.filter((n: any) => checkedIds.has(n.id) && n.node_type === 'terminal');
     if (selected.length === 0) { message.warning('未选中 terminal 节点'); return; }
     setBatchInsightOpen(false);
     setBatchProgress({ done: 0, total: selected.length });
+    // 有界并发：同时最多2个洞察，避免 API 请求风暴，速度仍远快于串行
+    const CONCURRENCY = 2;
     let done = 0;
-    for (const node of selected) {
-      try { await handleNodeInsight(node); done++; } catch { done++; }
-      setBatchProgress({ done, total: selected.length });
-      if (done < selected.length) await new Promise(r => setTimeout(r, 1500));
-    }
+    const queue = [...selected];
+    const worker = async () => {
+      while (queue.length > 0) {
+        const node = queue.shift()!;
+        try { await handleNodeInsight(node); } catch { /* 单个失败不阻塞 */ }
+        done++;
+        setBatchProgress({ done, total: selected.length });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, selected.length) }, worker));
     setBatchProgress({ done: 0, total: 0 });
     message.success(`批量洞察完成：${done}/${selected.length}`);
     setCheckedIds(new Set());
@@ -1470,6 +1656,200 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
     return { total: children.length, confirmed, pendingInsight };
   };
 
+  const renderSkillDimensions = (skillId: string, dims: any[]) => {
+    const evidenceColors: Record<string, string> = { '强': '#10B981', '中': '#3B82F6', '弱': '#F59E0B', '未验证': '#94A3B8' };
+
+    // SWOT：2x2 四象限矩阵
+    if (skillId === 'swot') {
+      const quad = (key: string, color: string, bg: string) => {
+        const d = dims.find(x => x.dimension_type === key);
+        return (
+          <div style={{ padding: 10, background: bg, borderRadius: 8, border: `1px solid ${color}22` }}>
+            <div style={{ fontWeight: 700, fontSize: 12, color, marginBottom: 4 }}>{key}</div>
+            <div style={{ fontSize: 11.5, lineHeight: 1.6, color: '#334155' }}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{d?.content || '公开信息不足'}</ReactMarkdown>
+            </div>
+            {d?.source_url && (
+              <a href="#" onClick={(e) => { e.preventDefault(); openExternal(d.source_url); }} style={{ fontSize: 10.5, color: '#3B82F6' }}>
+                <LinkOutlined style={{ fontSize: 10, marginRight: 3 }} />{d.source_title || '来源'}
+              </a>
+            )}
+          </div>
+        );
+      };
+      return (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          {quad('优势(Strengths)', '#10B981', '#F0FDF4')}
+          {quad('劣势(Weaknesses)', '#EF4444', '#FEF2F2')}
+          {quad('机会(Opportunities)', '#3B82F6', '#EFF6FF')}
+          {quad('威胁(Threats)', '#F59E0B', '#FFFBEB')}
+        </div>
+      );
+    }
+
+    // PEST：四宫格
+    if (skillId === 'pest') {
+      const quads = [
+        { key: '政治(Political)', color: '#1E40AF', bg: '#EFF6FF' },
+        { key: '经济(Economic)', color: '#047857', bg: '#ECFDF5' },
+        { key: '社会(Social)', color: '#B45309', bg: '#FFFBEB' },
+        { key: '技术(Technological)', color: '#6D28D9', bg: '#F5F3FF' },
+      ];
+      return (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          {quads.map(q => {
+            const d = dims.find(x => x.dimension_type === q.key);
+            return (
+              <div key={q.key} style={{ padding: 10, background: q.bg, borderRadius: 8, border: `1px solid ${q.color}22` }}>
+                <div style={{ fontWeight: 700, fontSize: 12, color: q.color, marginBottom: 4 }}>{q.key}</div>
+                <div style={{ fontSize: 11.5, lineHeight: 1.6, color: '#334155' }}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{d?.content || '公开信息不足'}</ReactMarkdown>
+                </div>
+                {d?.source_url && (
+                  <a href="#" onClick={(e) => { e.preventDefault(); openExternal(d.source_url); }} style={{ fontSize: 10.5, color: '#3B82F6' }}>
+                    <LinkOutlined style={{ fontSize: 10, marginRight: 3 }} />{d.source_title || '来源'}
+                  </a>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // 竞争格局：波特五力强度条
+    if (skillId === 'competition') {
+      const five = [
+        { key: '供应商议价能力', strong: '供方强势', weak: '供方弱势' },
+        { key: '买方议价能力', strong: '买方强势', weak: '买方弱势' },
+        { key: '行业内竞争强度', strong: '竞争激烈', weak: '竞争缓和' },
+        { key: '替代品威胁', strong: '替代威胁大', weak: '替代威胁小' },
+        { key: '新进入者威胁', strong: '进入威胁大', weak: '进入威胁小' },
+      ];
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {five.map(f => {
+            const d = dims.find(x => x.dimension_type === f.key);
+            return (
+              <div key={f.key} style={{ padding: 8, background: '#fff', border: '1px solid #E2E8F0', borderRadius: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600, fontSize: 12 }}>{f.key}</span>
+                  <span style={{ fontSize: 10.5, color: '#9CA3AF' }}>{f.strong} ← → {f.weak}</span>
+                </div>
+                <div style={{ fontSize: 11.5, lineHeight: 1.6, color: '#334155' }}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{d?.content || '公开信息不足'}</ReactMarkdown>
+                </div>
+                {d?.source_url && (
+                  <a href="#" onClick={(e) => { e.preventDefault(); openExternal(d.source_url); }} style={{ fontSize: 10.5, color: '#3B82F6' }}>
+                    <LinkOutlined style={{ fontSize: 10, marginRight: 3 }} />{d.source_title || '来源'}
+                  </a>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // 风险评估：等级化风险卡
+    if (skillId === 'risk') {
+      const riskLevel = (content: string) => {
+        if (/高|严重|紧急|重大/.test(content)) return { color: '#DC2626', bg: '#FEF2F2', lbl: '高风险' };
+        if (/中|一般|中等/.test(content)) return { color: '#D97706', bg: '#FFFBEB', lbl: '中风险' };
+        if (/低|轻微|较小/.test(content)) return { color: '#059669', bg: '#ECFDF5', lbl: '低风险' };
+        return { color: '#6B7280', bg: '#F9FAFB', lbl: '待评估' };
+      };
+      return (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          {dims.map((d, idx) => {
+            const lv = riskLevel(d.content || '');
+            return (
+              <div key={idx} style={{ padding: 10, background: lv.bg, borderRadius: 8, border: `1px solid ${lv.color}33` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontWeight: 700, fontSize: 12 }}>{d.dimension_type}</span>
+                  <Tag color={lv.color} style={{ fontSize: 9.5, margin: 0, fontWeight: 700 }}>{lv.lbl}</Tag>
+                </div>
+                <div style={{ fontSize: 11.5, lineHeight: 1.6, color: '#334155' }}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{d.content}</ReactMarkdown>
+                </div>
+                {d.source_url && (
+                  <a href="#" onClick={(e) => { e.preventDefault(); openExternal(d.source_url); }} style={{ fontSize: 10.5, color: '#3B82F6' }}>
+                    <LinkOutlined style={{ fontSize: 10, marginRight: 3 }} />{d.source_title || '来源'}
+                  </a>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // 供应链韧性：三要素评分条
+    if (skillId === 'resilience') {
+      const scoreOf = (content: string) => {
+        if (/高|强|充足|多源|灵活/.test(content)) return { v: 85, color: '#10B981', lbl: '强' };
+        if (/中|一般|中等/.test(content)) return { v: 55, color: '#F59E0B', lbl: '中' };
+        if (/低|弱|不足|单一|缺乏/.test(content)) return { v: 25, color: '#EF4444', lbl: '弱' };
+        return { v: 50, color: '#94A3B8', lbl: '待评估' };
+      };
+      const scoreDims = dims.filter(d => d.dimension_type !== '韧性评分与建议');
+      const finalDim = dims.find(d => d.dimension_type === '韧性评分与建议');
+      return (
+        <div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {scoreDims.map((d, idx) => {
+              const sc = scoreOf(d.content || '');
+              return (
+                <div key={idx}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                    <span style={{ fontWeight: 600, fontSize: 12 }}>{d.dimension_type}</span>
+                    <Tag color={sc.color} style={{ fontSize: 9.5, margin: 0, fontWeight: 700 }}>{sc.lbl}</Tag>
+                  </div>
+                  <div style={{ height: 8, background: '#E5E7EB', borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{ width: `${sc.v}%`, height: '100%', background: sc.color, borderRadius: 4, transition: 'width .3s' }} />
+                  </div>
+                  <div style={{ fontSize: 11.5, lineHeight: 1.6, color: '#334155', marginTop: 4 }}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{d.content}</ReactMarkdown>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {finalDim && (
+            <div style={{ marginTop: 10, padding: 10, background: '#F0FDF4', border: '1px solid #86EFAC55', borderRadius: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: 12, color: '#047857', marginBottom: 4 }}>🎯 {finalDim.dimension_type}</div>
+              <div style={{ fontSize: 11.5, lineHeight: 1.6, color: '#334155' }}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{finalDim.content}</ReactMarkdown>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // 默认：标准列表
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {dims.map((dim: any, idx: number) => (
+          <div key={idx} style={{ padding: '8px 10px', background: '#fff', borderRadius: 8, border: '1px solid #E2E8F0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <span style={{ fontWeight: 600, fontSize: 13 }}><BorderOutlined style={{ fontSize: 11, marginRight: 4, color: '#3B82F6' }} />{dim.dimension_type}</span>
+              <Tag color={evidenceColors[dim.evidence_strength] || '#94A3B8'} style={{ fontSize: 9, margin: 0 }}>{dim.evidence_strength}</Tag>
+            </div>
+            <div style={{ fontSize: 12, lineHeight: 1.6, color: '#334155' }}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{dim.content}</ReactMarkdown>
+            </div>
+            {dim.source_url && (
+              <a href="#" onClick={(e) => { e.preventDefault(); openExternal(dim.source_url); }} style={{ fontSize: 11, color: '#3B82F6' }}>
+                <LinkOutlined style={{ fontSize: 11, marginRight: 4 }} />{dim.source_title || dim.source_url}
+              </a>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   // ====== 渲染：清单页 ======
   if (view === 'list') {
     if (loading) return <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 100 }}><Spin size="large" /></div>;
@@ -1477,7 +1857,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
       <div style={{ padding: '0 20px', maxWidth: 900, margin: '0 auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <div className="page-title" style={{ marginBottom: 0 }}>
-            <span className="emoji">📡</span> 物料趋势洞察
+            <SignalFilled /> 物料趋势洞察
           </div>
           <Space>
             <Button icon={<DownloadOutlined />} size="small" onClick={handleExport}>导出</Button>
@@ -1505,6 +1885,95 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
             </>
           )}
         </Space>
+
+        {/* 快捷洞察区：无需分解树，直接洞察单个物料行情 */}
+        <Card
+          size="small"
+          title={
+            <Space>
+              <ThunderboltOutlined style={{ color: '#F59E0B' }} />
+              <span>快捷洞察 ({quickItems.length})</span>
+              <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>
+                无需分解树，直接查询单个物料行情（如"锂电池"）
+              </span>
+            </Space>
+          }
+          extra={
+            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => { setQuickAddName(''); setQuickAddOpen(true); }} style={{ fontWeight: 600 }}>
+              添加物料
+            </Button>
+          }
+          style={{ marginBottom: 20, borderTop: '3px solid #F59E0B' }}
+        >
+          {quickItems.length === 0 ? (
+            <Empty description="还没有快捷洞察物料 — 点右上角「添加物料」直接洞察想查的行情（无需分解）" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ padding: '20px 0' }} />
+          ) : (
+            <>
+            <Row gutter={[12, 12]}>
+              {quickItems.map((item: any) => {
+                const snap = quickSnapMap[item.id];
+                const dir = snap?.direction || '';
+                const dirColor = TREND_COLORS[dir] || '#94A3B8';
+                const lastTime = snap?.query_time || item.last_queried_at;
+                return (
+                  <Col key={item.id} xs={24} sm={12} md={8} lg={6}>
+                    <Card
+                      size="small"
+                      hoverable
+                      style={{ borderLeft: `3px solid ${dirColor}`, cursor: 'pointer' }}
+                      bodyStyle={{ padding: '10px 12px' }}
+                      onClick={() => openQuickDetail(item)}
+                      actions={[
+                        <Button key="insight" size="small" type="primary" icon={<RadarChartOutlined />}
+                          onClick={(e) => { e.stopPropagation(); quickInsight(item.query_category, item.id); }}>
+                          洞察行情
+                        </Button>,
+                        <Popconfirm key="del" title={`删除「${item.query_category}」？`}
+                          onConfirm={async () => {
+                            const { deleteQuickTrendItem } = await import('../db');
+                            await deleteQuickTrendItem(item.id);
+                            message.success('已删除');
+                            loadQuickItems();
+                          }}>
+                          <Button size="small" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
+                        </Popconfirm>,
+                      ]}
+                    >
+                      <div style={{ marginBottom: 6 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>{item.query_category}</div>
+                        {/* 最近洞察时间 */}
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          <ClockCircleOutlined style={{ marginRight: 4 }} />
+                          {lastTime ? formatTime(lastTime) : '尚未洞察'}
+                        </div>
+                        {/* 成本趋势 */}
+                        {snap ? (
+                          <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <Tag color={dirColor} style={{ fontSize: 11, margin: 0 }}>{TREND_ICONS[dir] || ''} {dir}</Tag>
+                            <Tag style={{ fontSize: 10, margin: 0 }}>{snap.confidence_level}置信</Tag>
+                            {snap.magnitude_min != null && (
+                              <span style={{ fontSize: 11, color: '#666' }}>
+                                幅度 {String(snap.magnitude_min).replace('%', '')}%~{String(snap.magnitude_max).replace('%', '')}%
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{ marginTop: 6, fontSize: 11, color: '#F59E0B' }}>
+                            <ClockCircleOutlined style={{ marginRight: 4 }} />待洞察
+                          </div>
+                        )}
+                      </div>
+                    </Card>
+                  </Col>
+                );
+              })}
+            </Row>
+            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
+              <HistoryOutlined style={{ marginRight: 4 }} /> 点击卡片查看详情（分 Skill 结果 / 历史对比 / 融合总结）
+            </div>
+            </>
+          )}
+        </Card>
 
         {/* 关注物料区域 */}
         {watchedParts.length > 0 && (
@@ -1541,11 +2010,15 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                             let trendItem = await getTrendItemByCategory(part.name, part.main_category);
 
                             if (!trendItem) {
-                              // 创建 trend_item
+                              // 创建 trend_item（本地时间，与 SQLite 一致）
+                              const now = new Date();
+                              const pad = (n: number) => String(n).padStart(2, '0');
+                              const localTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
                               const newId = await saveTrendItem({
                                 material_name: part.name,
                                 category_type: part.main_category,
-                                last_queried_at: new Date().toISOString(),
+                                last_queried_at: localTime,
+                                source_type: 'quick',
                               });
                               trendItem = { id: newId, material_name: part.name, category_type: part.main_category };
                             }
@@ -1606,7 +2079,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
               ))}
             </Row>
             <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
-              💡 在"器件库"中开启"关注趋势"可将物料添加到此列表
+              <BulbOutlined style={{ marginRight: 4 }} /> 在"器件库"中开启"关注趋势"可将物料添加到此列表
             </div>
           </Card>
         )}
@@ -1668,7 +2141,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                             <Button size="small" type="primary" icon={<BranchesOutlined />} onClick={() => enterTreeView(node.id)}>查看分解树</Button>
                             <Button size="small" icon={<RadarChartOutlined />} onClick={() => requestInsightWithPreview(node)}>AI 洞察</Button>
                           </Space>
-                          {stats.pendingInsight > 0 && <div style={{ color: '#F59E0B' }}>⏳ {stats.pendingInsight} 个待洞察</div>}
+                          {stats.pendingInsight > 0 && <div style={{ color: '#F59E0B' }}><ClockCircleOutlined style={{ marginRight: 4 }} />{stats.pendingInsight} 个待洞察</div>}
                           <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>
                             {node.updated_at ? `更新于 ${node.updated_at.slice(0, 10)}` : ''}
                           </div>
@@ -1754,7 +2227,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                 });
               }}
             >
-              🐛 调试
+              调试
             </Button>
 
             <div style={{ flex: 1 }} />
@@ -1844,7 +2317,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                     <Tag color={selectedNode.node_type === 'terminal' ? 'orange' : 'blue'} style={{ marginLeft: 8 }}>
                       {selectedNode.node_type === 'terminal' ? '终端' : '结构'}
                     </Tag>
-                    {selectedNode.insight_status === 'pending' && selectedNode.node_type === 'terminal' && <Tag color="gold">⏳待洞察</Tag>}
+                    {selectedNode.insight_status === 'pending' && selectedNode.node_type === 'terminal' && <Tag color="gold" icon={<ClockCircleOutlined />}>待洞察</Tag>}
                     {rollupResult?.source_type === 'aggregated' && <Tag color="purple" icon={<BarChartOutlined />}>已汇总</Tag>}
                   </div>
                   <Space wrap>
@@ -1899,7 +2372,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
 
                 {selectedNode.node_type !== 'terminal' && childrenTotal.length > 0 && childrenQueried.length < childrenTotal.length && (
                   <div style={{ fontSize: 12, color: '#F59E0B', marginBottom: 8, padding: '4px 8px', background: '#FFF7ED', borderRadius: 6 }}>
-                    ⚠️ {childrenQueried.length}/{childrenTotal.length} 个子节点已洞察，汇总可能不完整。
+                    <WarningOutlined style={{ marginRight: 6 }} />{childrenQueried.length}/{childrenTotal.length} 个子节点已洞察，汇总可能不完整。
                   </div>
                 )}
 
@@ -1916,13 +2389,24 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                 {(() => {
                   const directSnaps = snapshots.filter(s => s.source_type !== 'aggregated');
                   if (directSnaps.length === 0) return null;
-                  const s = directSnaps[directSnaps.length - 1];
+                  // snapshots 按 query_time DESC 排序，第一条即最新洞察
+                  const s = directSnaps[0];
                   if (!s) return null;
+                  // 与上一次洞察方向对比（提示判断变化）
+                  const prev = directSnaps[1];
+                  const dirConflict = prev && prev.direction && s.direction
+                    && prev.direction !== s.direction
+                    && !['震荡', '信号不明确'].includes(s.direction);
                   return (
                     <div style={{ marginBottom: 12, padding: 12, background: 'var(--main-bg)', borderRadius: 10, border: '1px solid var(--card-border)' }}>
                       <div style={{ fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <RadarChartOutlined /> 最新洞察 {s.skill_used ? <Tag style={{ fontSize: 10 }}>框架：{s.skill_used}</Tag> : null}
                       </div>
+                      {dirConflict && (
+                        <div style={{ fontSize: 12, color: '#B45309', marginBottom: 8, padding: '6px 10px', background: '#FFF7ED', borderRadius: 6 }}>
+                          <WarningOutlined style={{ marginRight: 6 }} />本次方向「{s.direction}」与上次洞察「{prev.direction}」不同（{prev.query_time?.slice(0, 10)}），建议核实数据口径或查看历史快照对比。
+                        </div>
+                      )}
                       <Space><Tag color={TREND_COLORS[s.direction]} style={{ fontSize: 13 }}>{TREND_ICONS[s.direction]} {s.direction}</Tag><Tag>{s.confidence_level}置信</Tag>{s.magnitude_min != null && <Tag>幅度 {String(s.magnitude_min).replace('%', '')}% ~ {String(s.magnitude_max).replace('%', '')}%</Tag>}<span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.query_time?.slice(0, 10)}</span></Space>
                       <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.6 }}><ReactMarkdown remarkPlugins={[remarkGfm]}>{s.summary}</ReactMarkdown></div>
                       {/* 维度展示 */}
@@ -1973,7 +2457,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                                     color: 'white'
                                   }}>
                                     <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                      <span>💡</span>
+                                      <BulbOutlined style={{ fontSize: 16 }} />
                                       <span>多维度综合洞察</span>
                                     </div>
                                     <div style={{ fontSize: 12, lineHeight: 1.6, opacity: 0.95 }}>
@@ -1986,7 +2470,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                                     {Object.entries(groupedBySkill).map(([skillId, dims]) => {
                                       const skill = BUILTIN_SKILLS.find((s: any) => s.id === skillId);
                                       const skillName = skill ? skill.name : skillId;
-                                      const skillIcon = skill ? skill.icon : '📊';
+                                      const skillIcon = skill ? skill.icon : <BarChartOutlined />;
 
                                       return (
                                         <div key={skillId} style={{
@@ -2010,34 +2494,8 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                                             <span style={{ fontSize: 18 }}>{skillIcon}</span>
                                             <span>{skillName}</span>
                                           </div>
-                                          {dims.map((dim: any, idx: number) => {
-                            const evidenceColors: Record<string, string> = { '强': '#10B981', '中': '#3B82F6', '弱': '#F59E0B', '未验证': '#94A3B8' };
-                            return (
-                              <div key={idx} style={{ marginBottom: 10, padding: '8px 10px', background: '#FFF', borderRadius: 8, border: '1px solid #E2E8F0' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                                  <span style={{ fontWeight: 600, fontSize: 13 }}>🔹 {dim.dimension_type}</span>
-                                  <Tag color={evidenceColors[dim.evidence_strength] || '#94A3B8'} style={{ fontSize: 9, margin: 0 }}>{dim.evidence_strength}</Tag>
-                                </div>
-                                <div style={{ fontSize: 12, lineHeight: 1.6, color: '#334155' }}>
-                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{dim.content}</ReactMarkdown>
-                                </div>
-                                {dim.source_url && (
-                                  <div style={{ marginTop: 4 }}>
-                                    <a
-                                      href="#"
-                                      onClick={(e) => {
-                                        e.preventDefault();
-                                        openExternal(dim.source_url);
-                                      }}
-                                      style={{ fontSize: 11, color: '#3B82F6', cursor: 'pointer' }}
-                                    >
-                                      🔗 {dim.source_title || dim.source_url}
-                                    </a>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
+                                          {/* 按 Skill 定制呈现 */}
+                                          {renderSkillDimensions(skillId, dims)}
                                         </div>
                                       );
                                     })}
@@ -2049,52 +2507,14 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                               return Object.entries(groupedBySkill).map(([skillId, dims]) => {
                                 const skill = BUILTIN_SKILLS.find((s: any) => s.id === skillId);
                                 const skillName = skill ? skill.name : skillId;
-                                const skillIcon = skill ? skill.icon : '📊';
+                                const skillIcon = skill ? skill.icon : <BarChartOutlined />;
 
                                 return (
                                   <div key={skillId} style={{ marginBottom: 16, padding: 10, background: '#f9fafb', borderRadius: 6 }}>
                                     <div style={{ fontWeight: 500, marginBottom: 8, fontSize: 12, color: '#4b5563' }}>
                                       {skillIcon} {skillName}
                                     </div>
-                                    {dims.map((dim: any, idx: number) => {
-                                      const evidenceColors: Record<string, string> = {
-                                        '强': '#10b981',
-                                        '中': '#f59e0b',
-                                        '弱': '#ef4444',
-                                        '未验证': '#6b7280',
-                                      };
-                                      const evidenceColor = evidenceColors[dim.evidence_strength] || '#6b7280';
-
-                                      return (
-                                        <div key={idx} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: idx < dims.length - 1 ? '1px solid #e5e7eb' : 'none' }}>
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                                            <span style={{ fontSize: 11, fontWeight: 600, color: '#1f2937' }}>
-                                              {dim.dimension_type}
-                                            </span>
-                                            <Tag color={evidenceColor} style={{ fontSize: 10, padding: '0 6px', margin: 0 }}>
-                                              {dim.evidence_strength}
-                                            </Tag>
-                                          </div>
-                                          <div style={{ fontSize: 12, lineHeight: 1.6, color: '#334155' }}>
-                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{dim.content}</ReactMarkdown>
-                                          </div>
-                                          {dim.source_url && (
-                                            <div style={{ marginTop: 4 }}>
-                                              <a
-                                                href="#"
-                                                onClick={(e) => {
-                                                  e.preventDefault();
-                                                  openExternal(dim.source_url);
-                                                }}
-                                                style={{ fontSize: 11, color: '#3B82F6', cursor: 'pointer' }}
-                                              >
-                                                🔗 {dim.source_title || dim.source_url}
-                                              </a>
-                                            </div>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
+                                    {renderSkillDimensions(skillId, dims)}
                                   </div>
                                 );
                               });
@@ -2227,7 +2647,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                     { title: '名称', dataIndex: 'component_name', render: (v: string, r: any) => (<a onClick={() => selectNode(r)} style={{ cursor: 'pointer' }}>{v}</a>) },
                     { title: '类型', dataIndex: 'node_type', width: 60, render: (v: string) => <Tag color={v === 'terminal' ? 'orange' : 'blue'}>{v === 'terminal' ? '终端' : '结构'}</Tag> },
                     { title: '成本', dataIndex: 'cost_ratio_estimate', width: 55, render: (v: number) => v != null ? `${v}%` : '-' },
-                    { title: '洞察', dataIndex: 'insight_status', width: 50, render: (v: string) => v === 'queried' ? '✅' : '⏳' },
+                    { title: '洞察', dataIndex: 'insight_status', width: 50, render: (v: string) => v === 'queried' ? <CheckOutlined style={{ color: '#10B981' }} /> : <ClockCircleOutlined style={{ color: '#F59E0B' }} /> },
                     { title: '操作', width: 118, render: (_: any, r: any) => (
                       r.source_type !== 'user_confirmed' ? <Tag style={{ fontSize: 10 }}>确认后可用</Tag> : r.node_type === 'terminal' ? (
                         <Button size="small" type="link" icon={<RadarChartOutlined style={{ color: '#8B5CF6' }} />} onClick={(event) => { event.stopPropagation(); requestInsightWithPreview(r); }}>洞察</Button>
@@ -2261,7 +2681,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                   {conversations.length > 0 ? '继续追问' : '开始追问'}
                 </Button>
                 <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
-                  💡 点击打开对话窗口，自动联网搜索最新信息
+                  <BulbOutlined style={{ marginRight: 4 }} /> 点击打开对话窗口，自动联网搜索最新信息
                 </div>
               </div>
             </div>
@@ -2273,18 +2693,293 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
     </div>
   );
 
+  // ====== 按 Skill 定制维度呈现 ======
+  // 不同分析框架使用不同的可视化形式（SWOT矩阵/PEST四宫格/五力强度条/风险等级卡/韧性评分）
   // ====== 共享弹窗 ======
   function renderModals() {
     return (
       <>
+        {/* 添加快捷洞察物料弹窗 */}
+        <Modal title={<Space size={6}><ThunderboltOutlined />添加快捷洞察物料</Space>} open={quickAddOpen}
+          onCancel={() => setQuickAddOpen(false)}
+          onOk={confirmQuickAdd} okText="添加" cancelText="取消" width={440}>
+          <div style={{ padding: '8px 0' }}>
+            <div style={{ marginBottom: 8, fontSize: 12.5, color: '#64748b' }}>
+              输入想查询行情的物料名称（如"锂电池"、"MLCC"、"32寸LCD面板"），无需分解，直接洞察行情趋势。
+            </div>
+            <Input
+              placeholder="输入物料名称，如：锂电池"
+              value={quickAddName}
+              onChange={e => setQuickAddName(e.target.value)}
+              onPressEnter={confirmQuickAdd}
+              autoFocus
+              style={{ borderRadius: 8 }}
+            />
+          </div>
+        </Modal>
+
+        {/* 快捷洞察详情弹窗：分 Skill 结果 + 历史 + 融合总结 */}
+        <Modal
+          title={<Space size={6}><RadarChartOutlined style={{ color: '#F59E0B' }} />「{quickDetailItem?.query_category || ''}」洞察详情</Space>}
+          open={!!quickDetailItem}
+          onCancel={() => setQuickDetailItem(null)}
+          footer={null}
+          width={820}
+          destroyOnClose
+        >
+          {quickDetailLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+          ) : (
+            <div style={{ padding: '4px 0' }}>
+              {/* ===== 历史洞察时间轴（横向节点，点击切换批次） ===== */}
+              {(() => {
+                if (quickDetailSnaps.length === 0) {
+                  return <Empty description="尚未洞察，点击卡片上的「洞察行情」开始分析" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ padding: 30 }} />;
+                }
+                // 按 query_time 分批次（quickDetailSnaps 已按 id DESC，最新在前）
+                const byBatch: Record<string, any[]> = {};
+                quickDetailSnaps.forEach(s => {
+                  const k = s.query_time || 'unknown';
+                  if (!byBatch[k]) byBatch[k] = [];
+                  byBatch[k].push(s);
+                });
+                const batchKeys = Object.keys(byBatch);
+                // 时间轴节点：从左到右时间递增（最早在左，最近在右）
+                const timelineKeys = [...batchKeys].reverse();
+                // 当前选中批次（默认最新 = batchKeys[0]，即 timelineKeys 最右）
+                const curBatch = byBatch[quickDetailBatch] || byBatch[batchKeys[0]] || [];
+                const curKey = (quickDetailBatch && byBatch[quickDetailBatch]) ? quickDetailBatch : batchKeys[0];
+                const isLatest = curKey === batchKeys[0];
+
+                // 融合总结（选中批次多 Skill 时）
+                const dirs = curBatch.map(s => s.direction);
+                const upCount = dirs.filter(d => d === '上涨').length;
+                const downCount = dirs.filter(d => d === '下降').length;
+                const unClear = dirs.filter(d => !d || d === '信号不明确').length;
+                let fusedDir = '信号不明确';
+                let fusedConf = '低';
+                if (upCount > downCount && upCount > unClear) { fusedDir = '上涨'; fusedConf = upCount >= 2 ? '中' : '低'; }
+                else if (downCount > upCount && downCount > unClear) { fusedDir = '下降'; fusedConf = downCount >= 2 ? '中' : '低'; }
+                else if (unClear === 0 && upCount === downCount) { fusedDir = '震荡'; fusedConf = '中'; }
+
+                return (
+                  <div>
+                    {/* 时间轴 */}
+                    <div style={{ marginBottom: 14, padding: '12px 14px', background: '#F8FAFC', border: '1px solid #EEF2F8', borderRadius: 10 }}>
+                      <div style={{ fontSize: 11.5, fontWeight: 700, color: '#64748B', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <HistoryOutlined /> 历史洞察时间轴（{batchKeys.length} 批）
+                        <span style={{ fontWeight: 400, color: '#94A3B8' }}>点击节点切换查看</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 0, overflowX: 'auto', paddingBottom: 4 }}>
+                        {timelineKeys.map((k, idx) => {
+                          const batch = byBatch[k];
+                          const sel = k === curKey;
+                          // 该批次融合方向（多数）
+                          const bDirs = batch.map(s => s.direction);
+                          const bUp = bDirs.filter(d => d === '上涨').length;
+                          const bDown = bDirs.filter(d => d === '下降').length;
+                          const bDir = bUp > bDown ? '上涨' : bDown > bUp ? '下降' : '震荡';
+                          const bColor = TREND_COLORS[bDir] || '#94A3B8';
+                          return (
+                            <div key={k} style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                              <div
+                                onClick={() => setQuickDetailBatch(k)}
+                                style={{
+                                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer',
+                                  padding: '4px 2px', minWidth: 74,
+                                }}
+                              >
+                                {/* 节点圆（选中高亮） */}
+                                <div style={{
+                                  width: 14, height: 14, borderRadius: '50%',
+                                  background: sel ? bColor : '#fff',
+                                  border: `2.5px solid ${bColor}`,
+                                  boxShadow: sel ? `0 0 0 4px ${bColor}33` : 'none',
+                                  transition: 'all .2s',
+                                }} />
+                                <div style={{
+                                  fontSize: 10, fontWeight: sel ? 700 : 500,
+                                  color: sel ? '#1E293B' : '#64748B', whiteSpace: 'nowrap',
+                                }}>
+                                  {formatTime(k).slice(5)} {/* MM-DD HH:mm */}
+                                </div>
+                                <div style={{ fontSize: 9, color: sel ? bColor : '#94A3B8', fontWeight: 600 }}>
+                                  {TREND_ICONS[bDir] || ''} {bDir} · {batch.length}
+                                </div>
+                                {/* 选中节点显示删除按钮 */}
+                                {sel && batchKeys.length > 1 && (
+                                  <Popconfirm
+                                    title={`删除该批次（${formatTime(k)}）的 ${batch.length} 条洞察？`}
+                                    onConfirm={async () => {
+                                      try {
+                                        const { deleteTrendSnapshot } = await import('../db');
+                                        for (const s of batch) {
+                                          await deleteTrendSnapshot(s.id);
+                                        }
+                                        message.success('已删除该批次洞察');
+                                        // 重新加载详情
+                                        if (quickDetailItem) await openQuickDetail(quickDetailItem);
+                                        loadQuickItems();
+                                      } catch (e: any) {
+                                        message.error('删除失败: ' + (e?.message || '未知错误'));
+                                      }
+                                    }}
+                                  >
+                                    <Button
+                                      size="small" type="text" danger
+                                      icon={<DeleteOutlined />}
+                                      style={{ fontSize: 10, padding: 0, height: 18, marginTop: 2 }}
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  </Popconfirm>
+                                )}
+                              </div>
+                              {idx < batchKeys.length - 1 && (
+                                <div style={{ width: 18, height: 2, background: '#E2E8F0', marginTop: -22, flexShrink: 0 }} />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 选中批次的融合总结 */}
+                    {curBatch.length > 1 && (
+                      <div style={{ marginBottom: 14, padding: 14, background: 'linear-gradient(135deg, #F0F6FF, #EEF2F8)', borderRadius: 10, border: '1px solid #D5E0FF' }}>
+                        <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <MergeCellsOutlined style={{ color: '#4F46E5' }} /> {isLatest ? '多框架融合总结' : '该批次融合总结'}
+                          <Tag color={TREND_COLORS[fusedDir]} style={{ fontSize: 11, margin: 0 }}>{TREND_ICONS[fusedDir] || ''} {fusedDir}</Tag>
+                          <Tag style={{ fontSize: 10, margin: 0 }}>{fusedConf}置信</Tag>
+                          <span style={{ fontSize: 11, color: '#6B7280', fontWeight: 400 }}>{formatTime(curKey)}</span>
+                        </div>
+                        <div style={{ fontSize: 12.5, lineHeight: 1.9, color: '#3A4760', whiteSpace: 'pre-wrap' }}>
+                          {curBatch.map(s => `【${s.skill_used || '分析'}】${s.summary || ''}`).join('\n')}
+                        </div>
+                        <div style={{ marginTop: 6, fontSize: 11, color: '#6B7280' }}>
+                          ℹ️ 融合规则：以多数 Skill 方向为准；各 Skill 结果可分别查看下方详情
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 选中批次：按 Skill 分组差异化呈现 */}
+                    <div style={{ display: 'grid', gridTemplateColumns: curBatch.length > 1 ? '1fr 1fr' : '1fr', gap: 10 }}>
+                      {curBatch.map(s => {
+                        const skill = BUILTIN_SKILLS.find((x: any) => x.id === s.skill_used);
+                        const dims = quickDetailDims.filter(d => d._snapshot_id === s.id);
+                        return (
+                          <div key={s.id} style={{ padding: 12, background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid #F1F5F9' }}>
+                              <span style={{ fontSize: 15 }}>{skill?.icon || '📊'}</span>
+                              <span style={{ fontWeight: 700, fontSize: 13 }}>{skill?.name || s.skill_used || '分析'}</span>
+                              <span style={{ marginLeft: 'auto' }}>
+                                <Tag color={TREND_COLORS[s.direction]} style={{ fontSize: 10.5, margin: 0 }}>{TREND_ICONS[s.direction] || ''} {s.direction}</Tag>
+                                <Tag style={{ fontSize: 9.5, margin: '0 0 0 4px' }}>{s.confidence_level}置信</Tag>
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 12, lineHeight: 1.8, color: '#3A4760', marginBottom: 8 }}>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{s.summary || ''}</ReactMarkdown>
+                            </div>
+                            {s.suggested_action && (
+                              <div style={{ fontSize: 11.5, color: '#4F46E5', marginBottom: 8 }}>
+                                💡 建议：{s.suggested_action}
+                              </div>
+                            )}
+                            {/* 按 Skill 差异化呈现维度 */}
+                            {renderSkillDimensions(s.skill_used || '', dims)}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* ===== 基于洞察结论追问 ===== */}
+                    <div style={{ marginTop: 16, padding: 12, background: '#FAFBFD', border: '1px solid #EEF2F8', borderRadius: 10 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: '#334155', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <QuestionCircleOutlined style={{ color: '#4F46E5' }} /> 基于洞察结论追问
+                        <span style={{ fontWeight: 400, fontSize: 11, color: '#94A3B8' }}>自动联网搜索最新信息后回答</span>
+                      </div>
+                      {quickAskHistory.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10, maxHeight: 220, overflowY: 'auto' }}>
+                          {quickAskHistory.map((c, i) => (
+                            <div key={i} style={{ fontSize: 12, lineHeight: 1.7, color: '#3A4760' }}>
+                              <div style={{ fontWeight: 600, color: '#1E293B', marginBottom: 2 }}>Q：{c.q}</div>
+                              <div style={{ whiteSpace: 'pre-wrap', background: '#fff', border: '1px solid #EEF2F8', borderRadius: 6, padding: '6px 10px' }}>
+                                {c.a}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <Input
+                          placeholder="追问，如：上游碳酸锂价格波动对电池成本影响有多大？"
+                          value={quickAskInput}
+                          onChange={e => setQuickAskInput(e.target.value)}
+                          onPressEnter={quickAsk}
+                          style={{ borderRadius: 8 }}
+                          disabled={quickAskLoading}
+                        />
+                        <Button type="primary" icon={<SendOutlined />} onClick={quickAsk} loading={quickAskLoading} style={{ borderRadius: 8 }}>
+                          追问
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </Modal>
+
         {/* 查询预览确认弹窗 */}
-        <Modal title="🔍 确认发送洞察查询" open={previewModalOpen}
+        <Modal title={<Space size={6}><SearchOutlined />确认发送洞察查询</Space>} open={previewModalOpen}
           onCancel={() => { setPreviewModalOpen(false); setPreviewTargetNode(null); }}
-          onOk={confirmInsightRequest} okText="确认发送" cancelText="取消" width={480}>
+          onOk={confirmInsightRequest} okText="确认发送" cancelText="取消" width={560}>
           <div style={{ padding: '8px 0' }}>
             <p>即将发送以下查询关键词至外部搜索和LLM服务：</p>
             <div style={{ padding: '12px 16px', background: 'var(--main-bg)', borderRadius: 8, marginBottom: 16, fontSize: 16, fontWeight: 600 }}>
-              🔎 {previewTargetNode?.component_name || ''}
+              <SearchOutlined style={{ marginRight: 8 }} />{previewTargetNode?.component_name || ''}
+            </div>
+            {/* 本次洞察使用的 Skill 多选 */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>本次洞察使用分析框架（可多选）</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {allSkills.map(s => {
+                    const sel = previewSkills.includes(s.id);
+                    return (
+                      <div key={s.id} style={{
+                        display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px',
+                        background: sel ? '#eff6ff' : '#f9fafb',
+                        border: '1px solid' + (sel ? '#bfdbfe' : '#e5e7eb'),
+                        borderRadius: 8, cursor: 'pointer'
+                      }}
+                        onClick={() => {
+                          const next = sel
+                            ? previewSkills.filter(x => x !== s.id)
+                            : [...previewSkills, s.id];
+                          setPreviewSkills(next);
+                        }}
+                      >
+                        <span style={{ fontSize: 16 }}>{s.icon}</span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600 }}>{s.name}</div>
+                          <div style={{ fontSize: 10.5, color: '#9ca3af', lineHeight: 1.4 }}>{s.description}</div>
+                        </div>
+                        {/* 纯视觉勾选（点击由卡片 onClick 控制，避免 Checkbox.Group 全选问题） */}
+                        <span style={{
+                          width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+                          border: '1.5px solid' + (sel ? '#6366F1' : '#D1D5DB'),
+                          background: sel ? '#6366F1' : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          {sel && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 6 }}>
+                已选 {previewSkills.length} 个框架 · 多框架并行分析，结果分别存档可对比
+              </div>
             </div>
             <Alert type="info" showIcon icon={<SafetyCertificateOutlined />}
               message="仅发送物料/原材料的通用名称，不会发送任何本地成本数据。" style={{ fontSize: 12 }} />
@@ -2346,7 +3041,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                 style={{ marginBottom: 12 }} />
             ) : (
               <Alert type="success" showIcon
-                message={`成本占比总和为 ${totalRatio.toFixed(1)}%，符合要求 ✓`}
+                message={`成本占比总和为 ${totalRatio.toFixed(1)}%，符合要求`}
                 style={{ marginBottom: 12 }} />
             );
           })()}
@@ -2435,7 +3130,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
             <Form.Item label="AI原始方向"><Tag>{feedbackData.direction}</Tag></Form.Item>
             <Form.Item label="AI原始置信度"><Tag>{feedbackData.confidence}</Tag></Form.Item>
             <Form.Item label="修正后方向"><Radio.Group value={feedbackData.direction} onChange={e => setFeedbackData({ ...feedbackData, direction: e.target.value })}>
-              <Radio.Button value="上涨">🔺上涨</Radio.Button><Radio.Button value="下降">🔻下降</Radio.Button><Radio.Button value="震荡">▬震荡</Radio.Button><Radio.Button value="信号不明确">？不明</Radio.Button>
+              <Radio.Button value="上涨"><RiseOutlined style={{ marginRight: 4 }} />上涨</Radio.Button><Radio.Button value="下降"><FallOutlined style={{ marginRight: 4 }} />下降</Radio.Button><Radio.Button value="震荡"><MinusOutlined style={{ marginRight: 4 }} />震荡</Radio.Button><Radio.Button value="信号不明确"><QuestionCircleOutlined style={{ marginRight: 4 }} />不明</Radio.Button>
             </Radio.Group></Form.Item>
             <Form.Item label="修正后置信度"><Radio.Group value={feedbackData.confidence} onChange={e => setFeedbackData({ ...feedbackData, confidence: e.target.value })}>
               <Radio.Button value="高">高</Radio.Button><Radio.Button value="中">中</Radio.Button><Radio.Button value="低">低</Radio.Button>
@@ -2585,12 +3280,12 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                     loading={convLoading}
                     style={{ height: 40, borderRadius: 12, paddingLeft: 20, paddingRight: 20 }}
                   >
-                    🔍 搜索并回答
+                    搜索并回答
                   </Button>
                 </Tooltip>
               </div>
               <div style={{ marginTop: 8, fontSize: 11, color: '#6B7280' }}>
-                💡 追问会自动联网搜索最新信息，并结合历史对话上下文回答
+                <BulbOutlined style={{ marginRight: 4 }} /> 追问会自动联网搜索最新信息，并结合历史对话上下文回答
               </div>
             </div>
           </div>

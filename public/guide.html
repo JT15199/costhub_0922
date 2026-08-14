@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CostHub 使用说明</title>
+<style>
+  :root{
+    --navy:#12203B; --navy2:#1E3A6E; --navy3:#2C4A80;
+    --gold:#B8860B; --gold2:#D4A017; --gold3:#F0C75E;
+    --ink:#1A2332; --sub:#5A6B85; --bg:#F7F9FC; --card:#FFFFFF;
+    --line:#E4E9F1; --green:#2E7D5B; --red:#B03A2E;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.75;font-size:13.5px}
+  .wrap{max-width:860px;margin:0 auto;padding:28px 24px 60px}
+
+  /* 头部 */
+  .header{display:flex;align-items:center;gap:14px;padding-bottom:20px;border-bottom:2px solid var(--navy);margin-bottom:24px}
+  .header .logo{width:44px;height:44px;border-radius:10px;background:linear-gradient(152deg,#1E3A6E,#0C1830);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .header h1{font-size:20px;font-weight:800;color:var(--navy)}
+  .header .sub{font-size:12px;color:var(--sub);margin-top:2px}
+
+  /* 章节 */
+  .sec{margin-bottom:26px}
+  .sec-title{font-size:15px;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  .sec-title .n{width:22px;height:22px;border-radius:6px;background:var(--navy);color:var(--gold3);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+
+  /* 模块卡片 */
+  .mod{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:10px}
+  .mod .t{font-size:13.5px;font-weight:700;color:var(--navy);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+  .mod .t .ic{font-size:15px}
+  .mod ul{list-style:none;padding:0}
+  .mod li{font-size:12.5px;color:#3A4760;padding:3px 0 3px 16px;position:relative}
+  .mod li::before{content:"▸";position:absolute;left:0;color:var(--gold2);font-weight:700}
+  .mod li b{color:var(--navy)}
+  .mod .tip{font-size:11.5px;color:var(--sub);background:var(--bg);border-radius:6px;padding:6px 10px;margin-top:6px}
+
+  /* 快捷键 */
+  .keys{display:flex;flex-wrap:wrap;gap:8px}
+  .key{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:12px;color:#3A4760}
+  .key b{color:var(--navy)}
+  .key .kbd{display:inline-block;background:var(--bg);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;font-size:11px;color:var(--navy);margin:0 2px}
+
+  /* 流程 */
+  .flow{display:flex;flex-direction:column;gap:0}
+  .flow-step{display:flex;gap:10px;align-items:flex-start;position:relative;padding-bottom:14px}
+  .flow-step::before{content:"";position:absolute;left:11px;top:26px;bottom:0;width:2px;background:var(--line)}
+  .flow-step:last-child::before{display:none}
+  .flow-step .dot{width:22px;height:22px;border-radius:50%;background:var(--navy);color:var(--gold3);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;z-index:1}
+  .flow-step .body{flex:1;font-size:12.5px;color:#3A4760}
+  .flow-step .body b{color:var(--navy)}
+  .flow-step .body .d{font-size:11.5px;color:var(--sub)}
+
+  /* 安全 */
+  .safe{background:linear-gradient(135deg,#F0F6FF,#EEF2F8);border:1px solid #D5E0FF;border-radius:10px;padding:14px 16px}
+  .safe .t{font-size:13px;font-weight:700;color:var(--navy);margin-bottom:6px}
+  .safe ul{list-style:none;padding:0}
+  .safe li{font-size:12.5px;color:#3A4760;padding:3px 0 3px 16px;position:relative}
+  .safe li::before{content:"🔒";position:absolute;left:0;font-size:10px;top:5px}
+  .foot{text-align:center;font-size:11px;color:#8A96AC;margin-top:30px;padding-top:16px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 头部 -->
+  <div class="header">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" width="26" height="26">
+        <path d="M4.5 10.5 h3 l2 3 h3 l2 3 h3" stroke="#F5CF5E" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        <path d="M17.6 17.4 l1.8 1.8" stroke="#F5CF5E" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M17 20.2 h2.6 v-2.6" stroke="#F5CF5E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+    </div>
+    <div>
+      <h1>CostHub 使用说明</h1>
+      <div class="sub">成本管理平台 · 版本 v2.3.18 · 面向 ODM 成本管理场景</div>
+    </div>
+  </div>
+
+  <!-- 一、核心概念 -->
+  <div class="sec">
+    <div class="sec-title"><span class="n">1</span>核心概念：一库两看三管理</div>
+    <div class="mod">
+      <div class="t"><span class="ic">📚</span>器件库 = 价格数据底座</div>
+      <ul>
+        <li>供应商报价器件入库，同一器件可挂<b>多家供应商报价</b>（价格 + 份额）</li>
+        <li>自动计算<b>加权成本</b>：Σ(供应商价格 × 份额比例)，最低价自动标绿</li>
+        <li>改价必填原因，<b>价格历史全程可追溯</b>（供应商 → 器件 → 项目链路）</li>
+      </ul>
+    </div>
+    <div class="mod">
+      <div class="t"><span class="ic">📁</span>项目 = 成本决策单元</div>
+      <ul>
+        <li>项目 BOM 管理：模块化组织、引用复制、软删除</li>
+        <li>成本评审、目标成本、降本措施全程跟踪</li>
+        <li>ODM 整机供应商：多家工厂报价对比 + 份额加权</li>
+      </ul>
+    </div>
+    <div class="mod">
+      <div class="t"><span class="ic">📝</span>工作手账 = 过程沉淀</div>
+      <ul>
+        <li>便签/待办打<b>项目标签</b>（手写笔/鼠标/公共…），AI 按项目串成年度总结</li>
+        <li>四维度输出：项目维度 → 公共事务 → 能力建设 → 协作互助</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 二、功能速览 -->
+  <div class="sec">
+    <div class="sec-title"><span class="n">2</span>功能速览</div>
+    <div class="mod"><div class="t"><span class="ic">📊</span>仪表盘</div><ul><li>成本全景：总器件/项目/竞品、平均 BOM 成本、分类分布、趋势图表</li></ul></div>
+    <div class="mod"><div class="t"><span class="ic">⚖️</span>对比分析</div><ul><li>项目间/竞品间/供应商间对比，BOM 逐项映射，回答"凭什么贵"</li></ul></div>
+    <div class="mod"><div class="t"><span class="ic">🧭</span>物料趋势洞察</div><ul>
+      <li><b>快捷洞察</b>：无需分解树，直接查单个物料行情（如"锂电池"）</li>
+      <li><b>分解树</b>：AI 起草物料层级，逐层拆解 + 批量洞察</li>
+      <li><b>9 套分析框架</b>（Skill）：价格趋势/供应链/竞争格局/深度研究/SWOT/PEST/风险评估/TCO/韧性，洞察前可多选</li>
+      <li>结果含方向 + 置信度 + 幅度（近1-3月价格变化），可追问、可对比历史</li>
+    </ul></div>
+    <div class="mod"><div class="t"><span class="ic">🏭</span>供应商管理</div><ul>
+      <li><b>器件供应商</b>：按器件报价、份额、价格历史</li>
+      <li><b>整机供应商（ODM）</b>：在项目管理中添加，此处自动汇总</li>
+    </ul></div>
+    <div class="mod"><div class="t"><span class="ic">🤖</span>本地 AI 助手</div><ul><li>本地对话（Ollama），可结合本地数据分析，带记忆功能</li></ul></div>
+  </div>
+
+  <!-- 三、常用流程 -->
+  <div class="sec">
+    <div class="sec-title"><span class="n">3</span>常用流程</div>
+    <div class="mod">
+      <div class="t"><span class="ic">🔍</span>查询物料行情（快捷洞察）</div>
+      <div class="flow">
+        <div class="flow-step"><div class="dot">1</div><div class="body"><b>物料趋势洞察</b> → 顶部「快捷洞察」区 → 添加物料<div class="d">输入物料名，如"锂电池"，无需分解</div></div></div>
+        <div class="flow-step"><div class="dot">2</div><div class="body"><b>洞察行情</b> → 弹窗勾选分析框架 → 确认发送<div class="d">默认带出设置中激活的 Skill，可多选/取消</div></div></div>
+        <div class="flow-step"><div class="dot">3</div><div class="body"><b>查看结果</b>：卡片显示最近洞察时间 + 成本趋势<div class="d">方向/置信度/幅度，点开可看分维度分析、历史对比、追问</div></div></div>
+      </div>
+    </div>
+    <div class="mod">
+      <div class="t"><span class="ic">🏭</span>管理 ODM 整机供应商</div>
+      <div class="flow">
+        <div class="flow-step"><div class="dot">1</div><div class="body"><b>项目管理</b> → 选择项目 → 「🏭 整机供应商」标签页</div></div>
+        <div class="flow-step"><div class="dot">2</div><div class="body"><b>添加供应商</b>：名称 + 整机报价 + 份额<div class="d">多家 ODM 可并行对比，自动算加权报价</div></div></div>
+        <div class="flow-step"><div class="dot">3</div><div class="body"><b>供应商管理</b> → 整机供应商（ODM）：自动汇总展示<div class="d">含 ODM 统计：项目覆盖、加权报价</div></div></div>
+      </div>
+    </div>
+    <div class="mod">
+      <div class="t"><span class="ic">📝</span>生成工作总结</div>
+      <div class="flow">
+        <div class="flow-step"><div class="dot">1</div><div class="body"><b>工作手账</b>：日常写便签/待办，打项目标签</div></div>
+        <div class="flow-step"><div class="dot">2</div><div class="body"><b>AI 总结</b>：时间轴选月份 → 生成<div class="d">压缩提炼 → 按项目串成故事线，四维度输出</div></div></div>
+        <div class="flow-step"><div class="dot">3</div><div class="body"><b>保存/查看/复制</b>：可保存为工作总结</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 四、快捷键 -->
+  <div class="sec">
+    <div class="sec-title"><span class="n">4</span>快捷键</div>
+    <div class="keys">
+      <div class="key"><span class="kbd">Ctrl</span>+<span class="kbd">K</span> 全局搜索（器件/项目/竞品）</div>
+      <div class="key"><span class="kbd">F12</span> 开发者工具</div>
+      <div class="key"><span class="kbd">Ctrl</span>+<span class="kbd">Shift</span>+<span class="kbd">I</span> 开发者工具</div>
+    </div>
+  </div>
+
+  <!-- 五、安全与密码 -->
+  <div class="sec">
+    <div class="sec-title"><span class="n">5</span>安全与密码</div>
+    <div class="safe">
+      <div class="t">数据安全设计</div>
+      <ul>
+        <li>数据 100% 本地存储（costhub.db 单文件，随 exe 携带）</li>
+        <li>启动需登录：用户名 + 密码（初始 admin / 666666，可在设置中修改）</li>
+        <li>密码错误仍可进入，但所有数据隐藏（受限模式）</li>
+        <li>外部 AI 调用仅发送物料通用名称，本地成本数据不出库</li>
+        <li>AI 洞察请求前有预览确认，全程审计日志</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="foot">CostHub 成本管理平台 · 本地运行 · 数据自有 · AI 辅助 · 持续迭代</div>
+</div>
+</body>
+</html>

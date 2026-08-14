@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import {
   SearchOutlined, ReloadOutlined, QuestionCircleOutlined,
-  SettingOutlined, SendOutlined, DeleteOutlined, DownloadOutlined,
+  SettingOutlined, SendOutlined, DeleteOutlined,
   BookOutlined, LinkOutlined, CalendarOutlined, ClockCircleOutlined,
 } from '@ant-design/icons';
 import {
@@ -23,6 +23,20 @@ import { multiTurnAsk, supplementarySearch, agentSearchLoop, getActiveSkill, cre
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import ReactECharts from 'echarts-for-react';
+
+// 用默认浏览器打开链接
+async function openExternal(url: string) {
+  if (!url) return;
+  try {
+    // 直接导入 Tauri shell 插件
+    const { open } = await import('@tauri-apps/plugin-shell');
+    await open(url);
+  } catch (err) {
+    console.error('打开链接失败:', err);
+    // 降级：尝试用window.open
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
 
 const TREND_DIRECTIONS: Record<string, { icon: string; color: string; label: string }> = {
   '上涨': { icon: '🔺', color: '#EF4444', label: '上涨' },
@@ -138,13 +152,16 @@ export default function TrendInsight(_props: any) {
   useEffect(() => {
     if (selectedTrendId) {
       (async () => {
-        const item = await getTrendItem(selectedTrendId);
+        // 并行查询所有数据，显著提升性能
+        const [item, sources, convs, snaps] = await Promise.all([
+          getTrendItem(selectedTrendId),
+          getTrendSources(selectedTrendId),
+          getTrendConversations(selectedTrendId),
+          getTrendSnapshots(selectedTrendId),
+        ]);
         setSelectedTrend(item);
-        const sources = await getTrendSources(selectedTrendId);
         setTrendSources(sources);
-        const convs = await getTrendConversations(selectedTrendId);
         setConversations(convs);
-        const snaps = await getTrendSnapshots(selectedTrendId);
         setSnapshots(snaps);
         setSelectedSnapshotId(snaps.length ? snaps[snaps.length - 1].id : null);
       })();
@@ -555,28 +572,6 @@ export default function TrendInsight(_props: any) {
     loadData();
   };
 
-  // 导出摘要
-  const handleExportSummary = () => {
-    let text = 'CostHub 物料趋势摘要\n' + '='.repeat(40) + '\n\n';
-    text += `导出时间：${new Date().toLocaleString()}\n\n`;
-    for (const item of trendItems) {
-      const d = TREND_DIRECTIONS[item.trend_direction];
-      text += `【${item.query_category}】${d?.icon || '？'} ${item.trend_direction || '未查询'}\n`;
-      if (item.confidence_level) text += `  置信度：${item.confidence_level}\n`;
-      if (item.summary) text += `  判断依据：${item.summary.slice(0, 300)}...\n`;
-      if (item.suggested_action) text += `  建议动作：${item.suggested_action}\n`;
-      if (item.last_updated_at) text += `  更新时间：${item.last_updated_at}\n`;
-      if (item.mapped_parts?.length) text += `  关联器件：${item.mapped_parts.map((p: any) => p.name).join('、')}\n`;
-      text += '\n---\n\n';
-    }
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `CostHub_趋势摘要_${new Date().toISOString().slice(0, 10)}.txt`;
-    a.click(); URL.revokeObjectURL(url);
-    message.success('趋势摘要已导出');
-  };
-
   // ====== 分组趋势条目（按类别合并） ======
   const groupedTrendItems = () => {
     const groups: Record<string, any[]> = {};
@@ -605,11 +600,9 @@ export default function TrendInsight(_props: any) {
             onChange={setLeftTab}
             size="small"
             tabBarExtraContent={
-              <Space size={4}>
-                <Tooltip title="快速洞察"><Button size="small" type="primary" onClick={() => setQuickInsightModalOpen(true)}>+ 洞察</Button></Tooltip>
-                <Tooltip title="导出趋势摘要"><Button size="small" icon={<DownloadOutlined />} type="text" onClick={handleExportSummary} /></Tooltip>
-                <Button size="small" icon={<SettingOutlined />} type="text" onClick={() => setMaterialModalOpen(true)} />
-                <Button size="small" icon={<ReloadOutlined />} type="text" onClick={loadData} />
+              <Space size={6}>
+                <Button size="small" type="primary" onClick={() => setQuickInsightModalOpen(true)}>+ 洞察</Button>
+                <Button size="small" icon={<ReloadOutlined />} onClick={loadData} />
               </Space>
             }
             items={[
@@ -950,7 +943,14 @@ export default function TrendInsight(_props: any) {
                             </div>
                             <div style={{ lineHeight: 1.75 }}><ReactMarkdown remarkPlugins={[remarkGfm]}>{dimension.content}</ReactMarkdown></div>
                             {(dimension.source_url || dimension.source_title) && (
-                              <a href={dimension.source_url || undefined} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, marginTop: 6 }}>
+                              <a
+                                href="#"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  openExternal(dimension.source_url);
+                                }}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, marginTop: 6, cursor: 'pointer' }}
+                              >
                                 <LinkOutlined /> {dimension.source_title || '打开来源'}
                               </a>
                             )}
@@ -974,7 +974,14 @@ export default function TrendInsight(_props: any) {
                             {event.impact_direction && <Tag color={event.impact_direction === '利多上涨' ? 'red' : event.impact_direction === '利多下跌' ? 'green' : 'default'}>{event.impact_direction}</Tag>}
                             <span>{event.event_description}</span>
                           </Space>
-                          {(event.source_url || event.source_title) && <div><a href={event.source_url || undefined} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12 }}><LinkOutlined /> {event.source_title || '打开事件来源'}</a></div>}
+                          {(event.source_url || event.source_title) && <div><a
+                            href="#"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              openExternal(event.source_url);
+                            }}
+                            style={{ fontSize: 12, cursor: 'pointer' }}
+                          ><LinkOutlined /> {event.source_title || '打开事件来源'}</a></div>}
                         </div>
                       ))}
                     </div>
@@ -998,7 +1005,14 @@ export default function TrendInsight(_props: any) {
                   {trendSources.map((s: any, i: number) => (
                     <div key={s.id || i} style={{ padding: '8px 12px', background: 'var(--main-bg)', borderRadius: 8, marginBottom: 8 }}>
                       <div style={{ fontWeight: 600, fontSize: 13 }}>{s.source_title}</div>
-                      {s.source_url && <a href={s.source_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12 }}>{s.source_url}</a>}
+                      {s.source_url && <a
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          openExternal(s.source_url);
+                        }}
+                        style={{ fontSize: 12, cursor: 'pointer' }}
+                      >{s.source_url}</a>}
                       {s.excerpt && <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>{s.excerpt}</div>}
                     </div>
                   ))}

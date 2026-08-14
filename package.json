@@ -7,18 +7,26 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@ant-design/icons": "^6.2.5",
     "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-shell": "^2.2.0",
     "@tauri-apps/plugin-sql": "^2.4.0",
-    "antd": "^6.4.3",
+    "@xyflow/react": "^12.3.5",
+    "antd": "6.6.0",
     "echarts": "^6.1.0",
     "echarts-for-react": "^3.0.6",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "react-markdown": "^9.0.1",
     "react-router-dom": "^7.16.0",
+    "remark-gfm": "^4.0.0",
+    "pptxgenjs": "^4.0.1",
     "tslib": "^2.8.1",
     "xlsx": "^0.18.5"
   },

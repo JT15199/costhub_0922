@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Table, Button, Space, Modal, Form, Input, InputNumber, Select, Tag, message, Popconfirm, Tabs, Row, Col, Collapse, Checkbox, Tooltip, Upload } from 'antd';
+import { Button, Space, Modal, Form, Input, InputNumber, Select, Tag, message, Popconfirm, Tabs, Row, Col, Collapse, Checkbox, Tooltip, Upload } from 'antd';
 import type { TableRowSelection } from 'antd/es/table/interface';
-import { PlusOutlined, EditOutlined, DeleteOutlined, ImportOutlined, CheckOutlined, CloseOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, DownloadOutlined, UploadOutlined, ShopOutlined, InboxOutlined, ToolOutlined, FileTextOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import { getCompetitors, saveCompetitor, deleteCompetitor, getCompetitorBOMs, addCompetitorBOMItem, updateCompetitorBOMItem, deleteCompetitorBOMItem, getCompetitorParts, saveCompetitorPart, deleteCompetitorPart, getProjects, getModules, getModuleItems, getMainCategories } from '../db';
-import { TIERS, MAIN_CATEGORIES, SUB_CATEGORIES, CATEGORY_COLORS } from '../constants';
+import { TIERS, MAIN_CATEGORIES, SUB_CATEGORIES, getCategoryColor } from '../constants';
+import DataTable from '../components/DataTable';
 
 export default function Competitors() {
   const [comps, setComps] = useState<any[]>([]);
+  // 竞品品类筛选
+  const [compCategoryFilter, setCompCategoryFilter] = useState('');
+  const [productCategories, setProductCategories] = useState<any[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form] = Form.useForm();
@@ -32,6 +36,14 @@ export default function Competitors() {
   const [refProjectList, setRefProjectList] = useState<any[]>([]);
   const [mainCats, setMainCats] = useState(MAIN_CATEGORIES);
   useEffect(() => { (async () => { setComps(await getCompetitors()); try { setMainCats(await getMainCategories()); } catch(e) {} })(); }, []);
+  // 加载品类列表 + 按品类筛选竞品
+  useEffect(() => {
+    import('../db').then(async (m) => {
+      await m.ensureDefaultCategories();
+      setProductCategories(await m.getProductCategories());
+    });
+  }, []);
+  useEffect(() => { (async () => { setComps(await getCompetitors(compCategoryFilter)); })(); }, [compCategoryFilter]);
   const loadBOM = async (cid: number) => { setBoms(await getCompetitorBOMs(cid)); setBomSel([]); setEditMap({}); };
   const loadCParts = async () => { setCparts(await getCompetitorParts()); setCpartSel([]); };
   const selectComp = (cid: number) => { setSelectedCid(cid); loadBOM(cid); loadCParts(); };
@@ -85,18 +97,20 @@ export default function Competitors() {
 
   const compCols = [
     { title: '品牌', dataIndex: 'brand', width: 100, render: (v: string) => <b>{v}</b> },
-    { title: '型号', dataIndex: 'model' }, { title: '档位', dataIndex: 'tier', width: 80, render: (v: string) => <Tag>{v}</Tag> },
+    { title: '型号', dataIndex: 'model' },
+    { title: '品类', dataIndex: 'category', width: 80, render: (v: string) => <Tag color={v && v !== '显示器' ? 'purple' : 'default'}>{v || '显示器'}</Tag> },
+    { title: '档位', dataIndex: 'tier', width: 80, render: (v: string) => <Tag>{v}</Tag> },
     { title: '市场价(¥)', dataIndex: 'market_price', width: 110, align: 'right' as const, render: (v: number) => v?.toLocaleString() },
     { title: 'BOM成本(¥)', dataIndex: 'bom_cost', width: 110, align: 'right' as const, render: (v: number) => v?.toLocaleString() },
     { title: '平台费率', dataIndex: 'platform_fee_rate', width: 80, render: (v: number) => `${v}%` },
     { title: '操作', width: 120, render: (_: any, r: any) => (
-      <Space size="small"><Button type="link" size="small" icon={<EditOutlined />} onClick={() => { setEditing(r); form.setFieldsValue(r); setModalOpen(true); }} /><Popconfirm title="删除？" onConfirm={async () => { await deleteCompetitor(r.id); setComps(await getCompetitors()); }}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space>
+      <Space size="small"><Button type="link" size="small" icon={<EditOutlined />} onClick={() => { setEditing(r); form.setFieldsValue(r); setModalOpen(true); }} /><Popconfirm title="删除？" onConfirm={async () => { await deleteCompetitor(r.id); if (selectedCid === r.id) { setSelectedCid(null); setBoms([]); } setComps(await getCompetitors()); }}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space>
     )},
   ];
   const cpartCols = [
-    { title: '大类', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={CATEGORY_COLORS[v]}>{v}</Tag> },
+    { title: '大类', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={getCategoryColor(v)}>{v}</Tag> },
     { title: '子类', dataIndex: 'sub_category', width: 100, ellipsis: true }, { title: '名称', dataIndex: 'name' }, { title: '型号', dataIndex: 'model', width: 140, ellipsis: true },
-    { title: '成本', dataIndex: 'cost', width: 100, align: 'right' as const, render: (v: number) => v?.toFixed(4) },
+    { title: '成本', dataIndex: 'cost', width: 100, align: 'right' as const, render: (v: number) => v?.toFixed(2) },
     { title: '操作', width: 90, render: (_: any, r: any) => (
       <Space size="small"><Button type="link" size="small" onClick={() => { setCpartEdit(r); cpartForm.setFieldsValue(r); setCpartModal(true); }}>编辑</Button><Popconfirm title="删除？" onConfirm={async () => { await deleteCompetitorPart(r.id); loadCParts(); }}><Button type="link" size="small" danger>删除</Button></Popconfirm></Space>
     )},
@@ -104,21 +118,29 @@ export default function Competitors() {
 
   return (
     <div>
-      <div className="page-title">🏭 竞品管理</div>
+      <div className="page-title"><ShopOutlined /> 竞品管理</div>
       <div className="content-card">
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}><Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditing(null); form.resetFields(); setModalOpen(true); }}>新增竞品</Button></div>
-        <Table dataSource={comps} columns={compCols} rowKey="id" size="middle" onRow={(r) => ({ onClick: () => selectComp(r.id), style: { cursor: 'pointer', background: selectedCid === r.id ? '#FFF1F0' : undefined } })} pagination={{ pageSize: 10 }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, alignItems: 'center' }}>
+          <Select
+            size="small" allowClear placeholder="品类筛选" style={{ width: 140 }}
+            value={compCategoryFilter || undefined}
+            onChange={v => setCompCategoryFilter(v || '')}
+            options={productCategories.map((c: any) => ({ label: c.name, value: c.name }))}
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditing(null); form.resetFields(); setModalOpen(true); }}>新增竞品</Button>
+        </div>
+        <DataTable tableId="comp_list" dataSource={comps} columns={compCols} rowKey="id" size="middle" onRow={(r) => ({ onClick: () => selectComp(r.id), style: { cursor: 'pointer', background: selectedCid === r.id ? '#FFF1F0' : undefined } })} pagination={{ pageSize: 10 }} />
       </div>
 
       {selectedCid && (
         <div className="content-card" style={{ marginTop: 16 }}>
           <div style={{ marginBottom: 12, fontWeight: 600 }}>竞品BOM总计: <span style={{ color: '#CF0A2C', fontSize: 16 }}>¥{bomTotal.toFixed(2)}</span> / {boms.length} 件</div>
           <Tabs items={[{
-            key: 'bom', label: `📦 竞品BOM (${boms.length})`, children: (
+            key: 'bom', label: <span><InboxOutlined /> 竞品BOM ({boms.length})</span>, children: (
               <div>
                 <Space style={{ marginBottom: 12 }} wrap>
                   <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { bomForm.resetFields(); bomForm.setFieldsValue({ quantity: 1, estimated_cost: 0 }); setBomModal(true); }}>手动添加</Button>
-                  <Button size="small" icon={<ImportOutlined />} onClick={openFramework} style={{ borderColor: '#CF0A2C', color: '#CF0A2C' }}>📋 从框架导入</Button>
+                  <Button size="small" icon={<FileTextOutlined />} onClick={openFramework} style={{ borderColor: '#CF0A2C', color: '#CF0A2C' }}>从框架导入</Button>
                   <Upload beforeUpload={file => { const r = new FileReader(); r.onload = e => { const wb = XLSX.read(e.target?.result, { type: 'binary' }); const data = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]); (async () => { let n = 0; for (const d of data) { const name = d['器件名称'] || d['名称'] || d['name'] || d['part_name']; if (!name) continue; await addCompetitorBOMItem(selectedCid!, String(name).trim(), String(d['型号'] || d['model'] || d['part_model'] || '').trim(), parseFloat(d['单价'] || d['cost'] || d['estimated_cost'] || '0') || 0, parseInt(d['数量'] || d['quantity'] || '1') || 1, String(d['模块'] || d['module_name'] || '').trim(), String(d['我方名称'] || d['our_part_name'] || '').trim(), String(d['我方型号'] || d['our_part_model'] || '').trim(), parseFloat(d['我方成本'] || d['our_cost'] || '0') || 0, parseInt(d['我方数量'] || d['our_quantity'] || '0') || 0); n++; } message.success(`导入 ${n} 条`); loadBOM(selectedCid!); })(); }; r.readAsBinaryString(file); return false; }} showUploadList={false} accept=".xlsx,.xls">
                     <Button size="small" icon={<UploadOutlined />}>导入</Button>
                   </Upload>
@@ -150,7 +172,7 @@ export default function Competitors() {
                                 ) : <span style={{ color: '#CCC', fontSize: 10 }}>—</span>}
                               </div>
                               <div style={{ textAlign: 'center', fontSize: 10, color: '#2563EB' }}>{item.our_quantity || '—'}</div>
-                              <div style={{ textAlign: 'right', fontSize: 9, color: '#2563EB', fontFamily: 'monospace' }}>{item.our_cost ? `¥${Number(item.our_cost).toFixed(4)}` : '—'}</div>
+                              <div style={{ textAlign: 'right', fontSize: 9, color: '#2563EB', fontFamily: 'monospace' }}>{item.our_cost ? `¥${Number(item.our_cost).toFixed(2)}` : '—'}</div>
 
                               {/* Competitor cells: inline editable when editMap has this id */}
                               {isEditing ? (
@@ -172,7 +194,7 @@ export default function Competitors() {
                               {isEditing ? (
                                 <InputNumber size="small" value={ed.cost} min={0} precision={4} onChange={v => updateEdit(item.id, 'cost', v || 0)} style={{ width: '100%' }} prefix="¥" />
                               ) : (
-                                <div style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: '#CF0A2C', fontSize: 10 }}>¥{Number(item.estimated_cost).toFixed(4)}</div>
+                                <div style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: '#CF0A2C', fontSize: 10 }}>¥{Number(item.estimated_cost).toFixed(2)}</div>
                               )}
                               <div style={{ textAlign: 'center' }}>
                                 {isEditing ? (
@@ -196,13 +218,13 @@ export default function Competitors() {
               </div>
             ),
           }, {
-            key: 'cparts', label: '🔧 竞品器件库', children: (
+            key: 'cparts', label: <span><ToolOutlined /> 竞品器件库</span>, children: (
               <div>
                 <Space style={{ marginBottom: 12 }}>
                   <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { setCpartEdit(null); cpartForm.resetFields(); setCpartModal(true); }}>新增器件</Button>
                   {cpartSel.length > 0 && <Popconfirm title={`批量删除 ${cpartSel.length} 项？`} onConfirm={batchDeleteCParts}><Button size="small" danger icon={<DeleteOutlined />}>删除选中 ({cpartSel.length})</Button></Popconfirm>}
                 </Space>
-                <Table rowKey="id" dataSource={cparts} columns={cpartCols} size="small" pagination={false} rowSelection={cpartRowSel} />
+                <DataTable tableId="comp_boms" rowKey="id" dataSource={cparts} columns={cpartCols} size="small" pagination={false} rowSelection={cpartRowSel} />
               </div>
             ),
           }]} />
@@ -219,7 +241,7 @@ export default function Competitors() {
         {refProjectId && refModules.length > 0 && (
           <>
             <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 13, color: '#666' }}>按模块展开填写竞品数据。取消☑️跳过该项。</span>
+              <span style={{ fontSize: 13, color: '#666' }}>按模块展开填写竞品数据。取消勾选跳过该项。</span>
             </div>
             <Collapse accordion style={{ maxHeight: '50vh', overflowY: 'auto' }}>
               {refModules.map(mod => {
@@ -237,7 +259,7 @@ export default function Competitors() {
                           <Checkbox checked={entry.enabled} onChange={e => setCompEntries(p => ({ ...p, [key]: { ...p[key], enabled: e.target.checked } }))} />
                           <div><div style={{ fontSize: 12 }}>{item.part_name}</div><div style={{ fontSize: 10, color: '#999' }}>{item.part_model}</div></div>
                           <div style={{ textAlign: 'center', fontSize: 12 }}>{item.quantity}</div>
-                          <div style={{ textAlign: 'right', fontSize: 11, color: '#2563EB' }}>¥{Number(item.cost).toFixed(4)}</div>
+                          <div style={{ textAlign: 'right', fontSize: 11, color: '#2563EB' }}>¥{Number(item.cost).toFixed(2)}</div>
                           <div><InputNumber size="small" min={0} value={entry.qty} onChange={v => setCompEntries(p => ({ ...p, [key]: { ...p[key], qty: v || 0 } }))} style={{ width: '100%' }} /></div>
                           <div><InputNumber size="small" min={0} precision={4} value={entry.cost} onChange={v => setCompEntries(p => ({ ...p, [key]: { ...p[key], cost: v || 0 } }))} prefix="¥" style={{ width: '100%' }} /></div>
                         </div>
@@ -254,8 +276,9 @@ export default function Competitors() {
       <Modal title={editing?.id ? '编辑竞品' : '新增竞品'} open={modalOpen} onOk={async () => { const v = await form.validateFields(); await saveCompetitor({ ...editing, ...v }); setModalOpen(false); setEditing(null); form.resetFields(); setComps(await getCompetitors()); message.success('已保存'); }} onCancel={() => { setModalOpen(false); setEditing(null); }} width={500}>
         <Form form={form} layout="vertical" initialValues={{ tier: '主流级', market_price: 0, bom_cost: 0, platform_fee_rate: 0 }}>
           <Row gutter={16}><Col span={12}><Form.Item label="品牌 *" name="brand" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item label="型号 *" name="model" rules={[{ required: true }]}><Input /></Form.Item></Col></Row>
-          <Row gutter={16}><Col span={8}><Form.Item label="档位" name="tier"><Select options={TIERS.map(t => ({ label: t, value: t }))} /></Form.Item></Col><Col span={8}><Form.Item label="市场价(¥)" name="market_price"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col><Col span={8}><Form.Item label="平台费率(%)" name="platform_fee_rate"><InputNumber min={0} max={100} style={{ width: '100%' }} /></Form.Item></Col></Row>
-          <Form.Item label="BOM成本(¥)" name="bom_cost"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item><Form.Item label="备注" name="remark"><Input /></Form.Item>
+          <Row gutter={16}><Col span={8}><Form.Item label="档位" name="tier"><Select options={TIERS.map(t => ({ label: t, value: t }))} /></Form.Item></Col><Col span={8}><Form.Item label="品类" name="category"><Select options={productCategories.map((c: any) => ({ label: c.name, value: c.name }))} /></Form.Item></Col><Col span={8}><Form.Item label="市场价(¥)" name="market_price"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col></Row>
+          <Row gutter={16}><Col span={8}><Form.Item label="平台费率(%)" name="platform_fee_rate"><InputNumber min={0} max={100} style={{ width: '100%' }} /></Form.Item></Col><Col span={16}><Form.Item label="BOM成本(¥)" name="bom_cost"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col></Row>
+          <Form.Item label="备注" name="remark"><Input /></Form.Item>
         </Form>
       </Modal>
 

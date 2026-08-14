@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
+import DataTable from '../components/DataTable';
 import { Table, Select, Space, Button, Row, Col, Modal, Form, Input, InputNumber, Tag, Slider, message, Popconfirm, Tabs } from 'antd';
-import { EditOutlined, DeleteOutlined, SettingOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, SettingOutlined, LineChartOutlined, SearchOutlined, AimOutlined, DollarOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { getProjects, getProjectBOMs, getCompetitors, getCompetitorBOMs, getFeatures, saveFeature, deleteFeature, getScores, saveScore } from '../db';
+import { chartTooltip, chartAxisStyle, chartGrid, chartTextMuted, chartSplitLine, barGradient } from '../chartTheme';
+import CompetitivenessRadar from '../components/CompetitivenessRadar';
 
 export default function Compare() {
   const [projects, setProjects] = useState<any[]>([]);
@@ -22,10 +25,20 @@ export default function Compare() {
   const [scoreTarget, setScoreTarget] = useState<'a' | 'b'>('a');
   const [featForm] = Form.useForm();
 
-  useEffect(() => { (async () => { setProjects(await getProjects()); setCompetitors(await getCompetitors()); setFeatures(await getFeatures()); })(); }, []);
+  useEffect(() => { (async () => { setProjects(await getProjects()); setCompetitors(await getCompetitors()); setFeatures(await getFeatures('custom')); })(); }, []);
 
   const doCompare = async () => {
     if (!aId || !bId) return;
+    // 品类一致性校验：不同品类禁止对比
+    const aProj = projects.find(p => p.id === aId);
+    const aCat = aProj?.category || '未分类';
+    if (mode === 'pp') {
+      const bProj = projects.find(p => p.id === bId);
+      if ((bProj?.category || '未分类') !== aCat) { message.warning('不同品类的项目无法对比，请选择同品类'); return; }
+    } else {
+      const bComp = competitors.find(c => c.id === bId);
+      if ((bComp?.category || '未分类') !== aCat) { message.warning('项目与竞品品类不同，无法对比，请选择同品类竞品'); return; }
+    }
     // Load names & BOMs
     if (mode === 'pp') {
       const p1 = projects.find(p => p.id === aId); const p2 = projects.find(p => p.id === bId);
@@ -53,7 +66,7 @@ export default function Compare() {
   const handleSaveFeat = async () => {
     const v = await featForm.validateFields();
     await saveFeature({ ...editFeat, ...v });
-    setFeatModal(false); setEditFeat(null); setFeatures(await getFeatures());
+    setFeatModal(false); setEditFeat(null); setFeatures(await getFeatures('custom'));
     message.success('特性已保存');
   };
 
@@ -68,31 +81,35 @@ export default function Compare() {
 
   // Radar chart options
   const radarOption = {
-    tooltip: {},
-    legend: { data: [aName || 'A', bName || 'B'], bottom: 0 },
+    tooltip: chartTooltip('item'),
+    legend: { data: [aName || 'A', bName || 'B'], bottom: 0, textStyle: { color: chartTextMuted() } },
     radar: {
       center: ['50%', '50%'], radius: '65%',
       indicator: features.map(f => ({ name: f.name, max: 100 })),
+      axisName: { color: chartTextMuted(), fontSize: 11 },
+      splitLine: { lineStyle: { color: chartSplitLine() } },
+      splitArea: { areaStyle: { color: ['rgba(255,255,255,0.05)', 'rgba(255,255,255,0.02)'] } },
+      axisLine: { lineStyle: { color: chartSplitLine() } },
     },
     series: [{
       type: 'radar',
       data: [
-        { name: aName || 'A', value: features.map(f => aScoreMap[f.id] || 0), itemStyle: { color: '#CF0A2C' }, areaStyle: { color: 'rgba(207,10,44,0.15)' }, lineStyle: { width: 2 } },
-        { name: bName || 'B', value: features.map(f => bScoreMap[f.id] || 0), itemStyle: { color: '#2563EB' }, areaStyle: { color: 'rgba(37,99,235,0.15)' }, lineStyle: { width: 2 } },
+        { name: aName || 'A', value: features.map(f => aScoreMap[f.id] || 0), itemStyle: { color: '#0A84FF' }, areaStyle: { color: 'rgba(10,132,255,0.2)' }, lineStyle: { width: 2 } },
+        { name: bName || 'B', value: features.map(f => bScoreMap[f.id] || 0), itemStyle: { color: '#5E5CE6' }, areaStyle: { color: 'rgba(94,92,230,0.2)' }, lineStyle: { width: 2 } },
       ],
     }],
   };
 
   const barOption = {
-    tooltip: { trigger: 'axis' },
-    legend: { data: [aName, bName], bottom: 0 },
-    xAxis: { type: 'category', data: allCats, axisLabel: { rotate: 25, fontSize: 11 } },
-    yAxis: { type: 'value', name: '成本 (¥)' },
+    tooltip: chartTooltip('axis'),
+    legend: { data: [aName, bName], bottom: 0, textStyle: { color: chartTextMuted() } },
+    xAxis: { type: 'category', data: allCats, ...chartAxisStyle(11, { rotate: 25 }) },
+    yAxis: { type: 'value', name: '成本 (¥)', ...chartAxisStyle() },
     series: [
-      { name: aName, type: 'bar', barGap: '10%', data: allCats.map(c => aByCat[c] || 0), itemStyle: { color: '#CF0A2C', borderRadius: [6,6,0,0] } },
-      { name: bName, type: 'bar', data: allCats.map(c => bByCat[c] || 0), itemStyle: { color: '#2563EB', borderRadius: [6,6,0,0] } },
+      { name: aName, type: 'bar', barGap: '10%', data: allCats.map(c => aByCat[c] || 0), itemStyle: { color: barGradient('#0A84FF'), borderRadius: [8,8,0,0] } },
+      { name: bName, type: 'bar', data: allCats.map(c => bByCat[c] || 0), itemStyle: { color: barGradient('#5E5CE6'), borderRadius: [8,8,0,0] } },
     ],
-    grid: { top: 10, right: 20, bottom: 40, left: 60 },
+    grid: chartGrid({ bottom: 40 }),
   };
 
   const featCols = [
@@ -100,32 +117,40 @@ export default function Compare() {
     { title: '操作', width: 100, render: (_: any, r: any) => (
       <Space size="small">
         <Button type="link" size="small" icon={<EditOutlined />} onClick={() => { setEditFeat(r); featForm.setFieldsValue(r); setFeatModal(true); }} />
-        <Popconfirm title="删除？" onConfirm={async () => { await deleteFeature(r.id); setFeatures(await getFeatures()); }}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm>
+        <Popconfirm title="删除？" onConfirm={async () => { await deleteFeature(r.id); setFeatures(await getFeatures('custom')); }}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm>
       </Space>
     )},
   ];
 
   return (
     <div>
-      <div className="page-title">📈 对比分析</div>
+      <div className="page-title"><LineChartOutlined /> 对比分析</div>
+
+      {/* 竞争力雷达（六维：五特性评分 + 成本竞争力）——v2.3.19+ */}
+      <CompetitivenessRadar />
 
       <div className="content-card" style={{ marginBottom: 14 }}>
         <Space wrap>
           <Select value={mode} onChange={v => { setMode(v); setBId(null); }} style={{ width: 160 }} options={[{ label: '项目 vs 项目', value: 'pp' }, { label: '项目 vs 竞品', value: 'pc' }]} />
-          <Select placeholder="项目A" value={aId} onChange={v => setAId(v)} style={{ width: 260 }} options={projects.map(p => ({ label: `[${p.code}] ${p.name}`, value: p.id }))} />
+          <Select placeholder="项目A" value={aId} onChange={v => { setAId(v); setBId(null); }} style={{ width: 260 }} options={projects.map(p => ({ label: `[${p.code}] ${p.name}${p.category && p.category !== '显示器' ? ` (${p.category})` : ''}`, value: p.id }))} />
           {mode === 'pp' ? (
-            <Select placeholder="项目B" value={bId} onChange={v => setBId(v)} style={{ width: 260 }} options={projects.filter(p => p.id !== aId).map(p => ({ label: `[${p.code}] ${p.name}`, value: p.id }))} />
+            <Select placeholder="项目B（同品类）" value={bId} onChange={v => setBId(v)} style={{ width: 260 }} options={projects.filter(p => p.id !== aId && (!aId || p.category === projects.find(x => x.id === aId)?.category)).map(p => ({ label: `[${p.code}] ${p.name}${p.category && p.category !== '显示器' ? ` (${p.category})` : ''}`, value: p.id }))} />
           ) : (
-            <Select placeholder="竞品" value={bId} onChange={v => setBId(v)} style={{ width: 260 }} options={competitors.map(c => ({ label: `${c.brand} ${c.model}`, value: c.id }))} />
+            <Select placeholder="竞品（同品类）" value={bId} onChange={v => setBId(v)} style={{ width: 260 }} options={competitors.filter(c => !aId || c.category === projects.find(x => x.id === aId)?.category).map(c => ({ label: `${c.brand} ${c.model}${c.category && c.category !== '显示器' ? ` (${c.category})` : ''}`, value: c.id }))} />
           )}
-          <Button type="primary" onClick={doCompare} disabled={!aId || !bId}>🔍 开始对比</Button>
+          <Button type="primary" icon={<SearchOutlined />} onClick={doCompare} disabled={!aId || !bId}>开始对比</Button>
+          {aId && !bId && (
+            <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>
+              仅显示与所选项目同品类的对比对象
+            </span>
+          )}
         </Space>
       </div>
 
       {aBoms.length > 0 && bBoms.length > 0 && (
         <Tabs defaultActiveKey="radar" items={[
           {
-            key: 'radar', label: '🎯 雷达图对比', children: (
+            key: 'radar', label: <span><AimOutlined /> 雷达图对比</span>, children: (
               <div>
                 <div className="content-card" style={{ marginBottom: 12 }}>
                   <div className="card-header">
@@ -143,7 +168,7 @@ export default function Compare() {
                       )}
                     </Col>
                     <Col span={8}>
-                      <Table dataSource={features} columns={featCols} rowKey="id" size="small" pagination={false} title={() => <b>产品特性列表</b>} />
+                      <DataTable tableId="compare_features" dataSource={features} columns={featCols} rowKey="id" size="small" pagination={false} title={() => <b>产品特性列表</b>} />
                     </Col>
                   </Row>
                 </div>
@@ -165,7 +190,7 @@ export default function Compare() {
             ),
           },
           {
-            key: 'cost', label: '💰 成本对比', children: (
+            key: 'cost', label: <span><DollarOutlined /> 成本对比</span>, children: (
               <div>
                 <Row gutter={14}>
                   <Col span={14}><div className="content-card"><ReactECharts option={barOption} style={{ height: 380 }} /></div></Col>

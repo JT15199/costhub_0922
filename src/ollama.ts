@@ -1,0 +1,86 @@
+// 本地 Ollama 流式调用（从 LocalAIAssistant 抽出，供本地 AI 助手与演示生成器共用）
+// 纯搬移，行为不变
+import { invoke } from '@tauri-apps/api/core';
+
+export interface OllamaStreamOpts {
+  num_predict?: number;
+  temperature?: number;
+  think?: boolean;
+  endpoint?: 'v1' | 'native';
+  json?: boolean;
+}
+
+/**
+ * 流式调用 Ollama（经 Rust http_stream 代理，纯本地）
+ * - endpoint 'native'：/api/chat，format:'json' 强制输出合法 JSON（json:false 时跳过，用于文本类输出）
+ * - endpoint 'v1'：/v1/chat/completions
+ * 返回 cleanup 函数（取消监听）
+ */
+export async function startOllamaStream(
+  baseUrl: string, model: string,
+  messages: { role: string; content: string }[],
+  onToken: (t: string) => void,
+  onReasoning: (t: string) => void,
+  onDone: () => void,
+  onError: (e: string) => void,
+  opts?: OllamaStreamOpts,
+): Promise<() => void> {
+  const { listen: listenEvent } = await import('@tauri-apps/api/event');
+  const eventId = `ollama_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const base = baseUrl.replace(/\/$/, '');
+  // 原生 /api/chat 端点：think:false 确定生效（解决 qwen3 思考型模型复述规则的问题）
+  const url = opts?.endpoint === 'native' ? `${base}/api/chat` : `${base}/v1/chat/completions`;
+  const unlisteners: (() => void)[] = [];
+  const cleanup = () => { unlisteners.forEach(u => u()); };
+
+  const u1 = await listenEvent<string>(`llm-token-${eventId}`, ev => {
+    if (ev.payload) { console.log('[流式] token 事件, 长度:', ev.payload.length, 'eventId:', eventId.slice(0, 12)); onToken(ev.payload); }
+  });
+  const u2 = await listenEvent<string>(`llm-reasoning-${eventId}`, ev => {
+    if (ev.payload) onReasoning(ev.payload);
+  });
+  const u3 = await listenEvent<string>(`llm-done-${eventId}`, () => { console.log('[流式] done 事件, eventId:', eventId.slice(0, 12)); cleanup(); onDone(); });
+  const u4 = await listenEvent<string>(`llm-error-${eventId}`, ev => { console.log('[流式] error 事件:', ev.payload, 'eventId:', eventId.slice(0, 12)); cleanup(); onError(ev.payload); });
+  unlisteners.push(u1, u2, u3, u4);
+  let body: any;
+  if (opts?.endpoint === 'native') {
+    // Ollama 原生 /api/chat 格式
+    body = {
+      model, messages, stream: true,
+      // format:'json' 强制模型只能输出合法JSON——彻底阻止复述规则/散文（json:false 时跳过，用于文本总结等场景）
+      ...(opts?.json === false ? {} : { format: 'json' }),
+      options: {
+        temperature: opts?.temperature ?? 0.3,
+        num_predict: opts?.num_predict ?? 1200,
+      },
+      keep_alive: '30m',
+    };
+    if (opts?.think === false) {
+      body.think = false;
+      body.options.enable_thinking = false; // 双保险：Ollama 原生参数也关闭思考
+    }
+  } else {
+    body = {
+      model, messages, stream: true,
+      temperature: opts?.temperature ?? 0.3,
+      num_predict: opts?.num_predict ?? 1200,
+      max_tokens: opts?.num_predict ?? 1200, // /v1 端点认 max_tokens，双保险
+      keep_alive: '30m',
+    };
+    if (opts?.think === false) {
+      body.think = false;
+      body.enable_thinking = false;
+      body.reasoning_effort = 'none';
+      body.chat_template_kwargs = { enable_thinking: false };
+    }
+  }
+
+  console.log('[流式] 发起 http_stream:', url, 'model:', model, 'eventId:', eventId.slice(0, 12));
+  invoke('http_stream', {
+    url, eventId,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).catch(err => { console.log('[流式] invoke 失败:', err); cleanup(); onError(String(err)); });
+
+  return cleanup;
+}

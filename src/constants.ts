@@ -57,13 +57,43 @@ export const COLOR_TEMPS = [
   { id: 'sepia', name: '护眼', icon: '📖' },
 ];
 
-const EXTRA_COLORS = ['#6366F1', '#EC4899', '#14B8A6', '#F97316', '#8B5CF6', '#06B6D4', '#E11D48', '#CA8A04', '#7C3AED', '#0891B2'];
-let colorIdx = 0;
+// 24 色自由池（与 CATEGORY_COLORS 预设 8 色完全无重复，保证同屏分类尽量不撞色）
+const EXTRA_COLORS = ['#E11D48','#06B6D4','#F59E0B','#0EA5E9','#10B981','#7C3AED','#A855F7','#0891B2','#84CC16','#EF4444','#22C55E','#DB2777','#3B82F6','#F43F5E','#CA8A04','#9D174D','#0D9488','#B45309','#6D28D9','#0F766E','#BE185D','#4D7C0F','#C2410C','#0369A1'];
+
+/** FNV-1a + 雪崩混合哈希：稳定（同名分类永远同一颜色，与渲染顺序无关）+ 分布均匀 */
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+
+/**
+ * 分类自动配色：预设 8 类用固定色；其他分类用哈希起点线性探测分配未用色，
+ * 结果持久化到 localStorage（catColorMap）——同屏分类不撞色、跨渲染顺序/跨会话稳定。
+ */
 export function getCategoryColor(cat: string): string {
   if (CATEGORY_COLORS[cat]) return CATEGORY_COLORS[cat];
-  const c = EXTRA_COLORS[colorIdx % EXTRA_COLORS.length];
+  let map: Record<string, string> = {};
+  try { map = JSON.parse(localStorage.getItem('catColorMap') || '{}'); } catch { /* ignore */ }
+  if (map[cat]) return map[cat];
+  const used = new Set<string>([...Object.values(CATEGORY_COLORS), ...Object.values(map)]);
+  const start = hashStr(cat) % EXTRA_COLORS.length;
+  let c = EXTRA_COLORS[start];
+  if (used.has(c)) {
+    for (let i = 1; i < EXTRA_COLORS.length; i++) {
+      const cand = EXTRA_COLORS[(start + i) % EXTRA_COLORS.length];
+      if (!used.has(cand)) { c = cand; break; }
+    }
+  }
+  map[cat] = c;
+  try { localStorage.setItem('catColorMap', JSON.stringify(map)); } catch { /* ignore */ }
   CATEGORY_COLORS[cat] = c;
-  colorIdx++;
   return c;
 }
 

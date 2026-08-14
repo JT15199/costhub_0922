@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Table, Tag, Button, Space, Switch, message, Spin, Empty, Modal, Popconfirm, Descriptions, Typography, Card, Row, Col } from 'antd';
-import { DeleteOutlined, StopOutlined, CheckCircleOutlined, HistoryOutlined } from '@ant-design/icons';
+import { DeleteOutlined, StopOutlined, CheckCircleOutlined, HistoryOutlined, BulbOutlined, ThunderboltOutlined, BookOutlined } from '@ant-design/icons';
 import { getAllChecklistWithLogs, updateChecklistActive, deleteAnalysisChecklistItem } from '../db';
 
 const STRENGTH_COLORS: Record<string, string> = {
@@ -52,7 +52,7 @@ export default function AnalysisChecklist(_props: any) {
   return (
     <div style={{ maxWidth: 900, margin: '0 auto' }}>
       <div className="page-title" style={{ marginBottom: 20 }}>
-        <span className="emoji">🧠</span> 分析清单
+        <BulbOutlined /> 分析清单
       </div>
 
       <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
@@ -102,7 +102,7 @@ export default function AnalysisChecklist(_props: any) {
                       {item.first_triggered_at && <div>首次：{item.first_triggered_at.slice(0, 16)}</div>}
                       {item.last_triggered_at && <div>最近：{item.last_triggered_at.slice(0, 16)}</div>}
                       {!item.is_active && <Tag color="red" style={{ fontSize: 10 }}>已暂停</Tag>}
-                      {item.strength_level === 'stable' && <Tag color="purple" style={{ fontSize: 10 }}>⚡ 稳定记忆</Tag>}
+                      {item.strength_level === 'stable' && <Tag color="purple" style={{ fontSize: 10 }}><ThunderboltOutlined /> 稳定记忆</Tag>}
                     </div>
                   }
                 />
@@ -114,7 +114,7 @@ export default function AnalysisChecklist(_props: any) {
 
       {/* 强度说明 */}
       <Card size="small" style={{ marginTop: 20 }}>
-        <Descriptions column={1} size="small" title="📖 强度分级说明" style={{ fontSize: 12 }}>
+        <Descriptions column={1} size="small" title={<span><BookOutlined /> 强度分级说明</span>} style={{ fontSize: 12 }}>
           <Descriptions.Item label={<Tag color="#94A3B8">观察中</Tag>}>1-2次触发，记录但不影响分析</Descriptions.Item>
           <Descriptions.Item label={<Tag color="#3B82F6">已生效</Tag>}>3-4次触发，已自动纳入分析提示</Descriptions.Item>
           <Descriptions.Item label={<Tag color="#8B5CF6">稳定记忆</Tag>}>5次以上触发，权重较高的稳定模式</Descriptions.Item>

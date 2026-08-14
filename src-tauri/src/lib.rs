@@ -1,8 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
+use std::fs;
+use std::path::PathBuf;
 use std::time::Duration;
-use tauri_plugin_sql::{Migration, MigrationKind};
+use tauri::Manager;
+use tauri::Emitter;
+use tauri_plugin_sql;
+use futures_util::StreamExt;
 
 #[derive(Debug, Deserialize)]
 struct HttpRequest {
@@ -21,7 +26,7 @@ struct HttpResponse {
 fn get_db_url() -> String {
     let exe_path = env::current_exe().unwrap_or_default();
     let exe_dir = exe_path.parent().unwrap_or(std::path::Path::new("."));
-    let db_path = exe_dir.join("monitor_cost.db");
+    let db_path = exe_dir.join("costhub.db");
     format!("sqlite:{}", db_path.display())
 }
 
@@ -30,11 +35,330 @@ fn get_db_path() -> String {
     get_db_url()
 }
 
+// ========== 数据备份与恢复（exe 同目录 backups/ 文件夹） ==========
+fn db_dir() -> PathBuf {
+    let exe_path = env::current_exe().unwrap_or_default();
+    exe_path.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
+}
+
+fn backups_dir() -> PathBuf {
+    db_dir().join("backups")
+}
+
+/// 创建数据库备份（复制 costhub.db 及 WAL 文件到 backups/）
+#[tauri::command]
+fn backup_database() -> Result<String, String> {
+    let dir = backups_dir();
+    fs::create_dir_all(&dir).map_err(|e| format!("创建备份目录失败: {e}"))?;
+    let ts = chrono_now_compact();
+    let db_path = db_dir().join("costhub.db");
+    if !db_path.exists() {
+        return Err("数据库文件不存在".to_string());
+    }
+    let dest = dir.join(format!("costhub-backup-{ts}.db"));
+    fs::copy(&db_path, &dest).map_err(|e| format!("复制数据库失败: {e}"))?;
+    // 若存在 WAL 文件也一并备份（未 checkpoint 的数据）
+    let wal = db_dir().join("costhub.db-wal");
+    if wal.exists() {
+        let _ = fs::copy(&wal, dir.join(format!("costhub-backup-{ts}.db-wal")));
+    }
+    Ok(dest.file_name().unwrap_or_default().to_string_lossy().to_string())
+}
+
+/// 列出所有备份文件（按时间倒序）
+#[tauri::command]
+fn list_backups() -> Vec<serde_json::Value> {
+    let dir = backups_dir();
+    let mut out = Vec::new();
+    if let Ok(entries) = fs::read_dir(&dir) {
+        let mut files: Vec<(PathBuf, u64)> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().map(|x| x == "db").unwrap_or(false))
+            .filter_map(|p| {
+                fs::metadata(&p).ok().map(|m| (p, m.len()))
+            })
+            .collect();
+        files.sort_by(|a, b| b.0.file_name().cmp(&a.0.file_name()));
+        for (p, size) in files {
+            out.push(serde_json::json!({
+                "name": p.file_name().unwrap_or_default().to_string_lossy(),
+                "size": size,
+                "path": p.to_string_lossy(),
+            }));
+        }
+    }
+    out
+}
+
+/// 从备份恢复：先把当前库备份为 .pre-restore，再用备份文件替换当前库
+#[tauri::command]
+fn restore_database(backup_name: String) -> Result<String, String> {
+    // 防路径穿越
+    if backup_name.contains("..") || backup_name.contains('/') || backup_name.contains('\\') {
+        return Err("非法的备份文件名".to_string());
+    }
+    let src = backups_dir().join(&backup_name);
+    if !src.exists() {
+        return Err("备份文件不存在".to_string());
+    }
+    let db_path = db_dir().join("costhub.db");
+    // 先备份当前库（恢复前保护）
+    if db_path.exists() {
+        let ts = chrono_now_compact();
+        let _ = fs::copy(&db_path, db_dir().join(format!("costhub-pre-restore-{ts}.db")));
+    }
+    // 移除 WAL/SHM 避免残留数据干扰
+    let _ = fs::remove_file(db_dir().join("costhub.db-wal"));
+    let _ = fs::remove_file(db_dir().join("costhub.db-shm"));
+    fs::copy(&src, &db_path).map_err(|e| format!("恢复失败: {e}"))?;
+    Ok(format!("已从 {backup_name} 恢复，请重启应用生效"))
+}
+
+/// 删除指定备份
+#[tauri::command]
+fn delete_backup(backup_name: String) -> Result<(), String> {
+    if backup_name.contains("..") || backup_name.contains('/') || backup_name.contains('\\') {
+        return Err("非法的备份文件名".to_string());
+    }
+    let p = backups_dir().join(&backup_name);
+    fs::remove_file(&p).map_err(|e| format!("删除失败: {e}"))
+}
+
+// ========== Excel 导出文件保存（前端生成 xlsx → base64 → 存 exports/） ==========
+/// 保存前端生成的导出文件（base64）到 exe 同目录 exports/，返回实际文件名
+#[tauri::command]
+fn save_export_file(file_name: String, base64_data: String) -> Result<String, String> {
+    // 防路径穿越
+    if file_name.contains("..") || file_name.contains('/') || file_name.contains('\\') {
+        return Err("非法的文件名".to_string());
+    }
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&base64_data)
+        .map_err(|e| format!("解码失败: {e}"))?;
+    let dir = db_dir().join("exports");
+    fs::create_dir_all(&dir).map_err(|e| format!("创建导出目录失败: {e}"))?;
+    let dest = dir.join(&file_name);
+    fs::write(&dest, &bytes).map_err(|e| format!("写入文件失败: {e}"))?;
+    Ok(file_name)
+}
+
+/// 列出 exports/ 目录下的导出文件
+#[tauri::command]
+fn list_exports() -> Vec<serde_json::Value> {
+    let dir = db_dir().join("exports");
+    let mut out = Vec::new();
+    if let Ok(entries) = fs::read_dir(&dir) {
+        let mut files: Vec<(PathBuf, u64)> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter_map(|p| fs::metadata(&p).ok().map(|m| (p, m.len())))
+            .collect();
+        files.sort_by(|a, b| b.0.file_name().cmp(&a.0.file_name()));
+        for (p, size) in files {
+            out.push(serde_json::json!({
+                "name": p.file_name().unwrap_or_default().to_string_lossy(),
+                "size": size,
+            }));
+        }
+    }
+    out
+}
+
+/// 打开导出文件所在目录（资源管理器）
+#[tauri::command]
+fn open_exports_dir() -> Result<(), String> {
+    let dir = db_dir().join("exports");
+    fs::create_dir_all(&dir).map_err(|e| format!("创建导出目录失败: {e}"))?;
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&dir)
+            .spawn()
+            .map_err(|e| format!("打开目录失败: {e}"))?;
+    }
+    Ok(())
+}
+
+// 紧凑时间戳：YYYYMMDD-HHMMSS（不引入 chrono 依赖，用系统时间）
+fn chrono_now_compact() -> String {    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    // 转换为本地时间的近似（UTC+8）
+    let local = secs + 8 * 3600;
+    let days = local / 86400;
+    let rem = local % 86400;
+    let (y, m, d) = civil_from_days(days as i64);
+    let (hh, mm, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+    format!("{y:04}{m:02}{d:02}-{hh:02}{mm:02}{ss:02}")
+}
+
+fn civil_from_days(z: i64) -> (i64, i64, i64) {
+    let z = z + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as i64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+// ========== Ollama 联网隔离（防火墙规则管理） ==========
+const OLLAMA_BLOCK_RULE: &str = "CostHub_Block_Ollama_Outbound";
+
+// 查找 ollama.exe 的常见安装路径
+fn find_ollama_exe() -> Option<String> {
+    let candidates = [
+        format!("{}\\Programs\\Ollama\\ollama.exe", env::var("LOCALAPPDATA").unwrap_or_default()),
+        format!("{}\\Ollama\\ollama.exe", env::var("ProgramFiles").unwrap_or_default()),
+        format!("{}\\Ollama\\ollama.exe", env::var("ProgramFiles(x86)").unwrap_or_default()),
+        format!("{}\\Ollama\\ollama.exe", env::var("USERPROFILE").unwrap_or_default()),
+    ];
+    for c in candidates.iter() {
+        if std::path::Path::new(c).exists() {
+            return Some(c.clone());
+        }
+    }
+    None
+}
+
+// 以管理员权限(UAC)执行一段 PowerShell 脚本，脚本应把结果写入 result 文件
+// 返回 result 文件内容
+fn run_ps1_elevated(script: &str) -> Result<String, String> {
+    use std::io::Write;
+    let temp = env::var("TEMP").unwrap_or_else(|_| ".".to_string());
+    let ps_path = format!("{}\\costhub_netlock.ps1", temp);
+    let result_path = format!("{}\\costhub_netlock_result.txt", temp);
+    let _ = std::fs::remove_file(&result_path);
+
+    // 写脚本
+    let full_script = format!(
+        "{} \nSet-Content -Encoding UTF8 -Path '{}' -Value $LASTEXITCODE\n",
+        script, result_path
+    );
+    // 写入临时脚本文件
+    let mut f = std::fs::File::create(&ps_path).map_err(|e| format!("无法写入临时脚本: {e}"))?;
+    f.write_all(full_script.as_bytes()).map_err(|e| format!("写入脚本失败: {e}"))?;
+    drop(f);
+
+    // 通过 UAC 提权执行
+    let status = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile", "-Command",
+            &format!(
+                "Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','{}'",
+                ps_path
+            ),
+        ])
+        .status()
+        .map_err(|e| format!("无法启动提权进程: {e}"))?;
+
+    if !status.success() {
+        let _ = std::fs::remove_file(&ps_path);
+        return Err("需要管理员授权，或用户取消了授权窗口".to_string());
+    }
+
+    // 等待结果文件出现（最多 10 秒）
+    let mut content = String::new();
+    for _ in 0..40 {
+        if std::path::Path::new(&result_path).exists() {
+            if let Ok(s) = std::fs::read_to_string(&result_path) { content = s; }
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    let _ = std::fs::remove_file(&result_path);
+    let _ = std::fs::remove_file(&ps_path);
+    Ok(content.trim().to_string())
+}
+
+#[tauri::command]
+fn ollama_net_status() -> Result<serde_json::Value, String> {
+    let exe = find_ollama_exe();
+    // 用 netsh 查询规则，同时检查命令是否成功执行
+    let out = std::process::Command::new("netsh")
+        .args(["advfirewall", "firewall", "show", "rule", &format!("name={}", OLLAMA_BLOCK_RULE)])
+        .output()
+        .map_err(|e| format!("无法查询防火墙规则: {e}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    // 查询成功：stdout 包含规则名即为已封禁
+    let queryOk = out.status.success();
+    let blocked = if queryOk {
+        stdout.contains(OLLAMA_BLOCK_RULE) && stdout.contains("Block")
+    } else {
+        // 查询失败（多半是权限）：保守起见返回 true（假设已封禁），避免误导用户
+        true
+    };
+    Ok(serde_json::json!({
+        "ollama_found": exe.is_some(),
+        "ollama_path": exe.unwrap_or_default(),
+        "blocked": blocked,
+        "rule_name": OLLAMA_BLOCK_RULE,
+        "query_error": if queryOk { String::new() } else { stderr.clone() },
+    }))
+}
+
+#[tauri::command]
+async fn ollama_net_set_block(block: bool) -> Result<serde_json::Value, String> {
+    let exe = match find_ollama_exe() {
+        Some(e) => e,
+        None => return Err("未找到 ollama.exe，请先安装 Ollama".to_string()),
+    };
+    // 拼 PowerShell 脚本，用 UAC 提权执行 netsh（避免卡 UI，async 下在后台线程运行）
+    let script = if block {
+        format!(
+            "netsh advfirewall firewall delete rule name={0} 2>$null; netsh advfirewall firewall add rule name={0} dir=out action=block program=\"{1}\" profile=any enable=yes; exit $LASTEXITCODE",
+            OLLAMA_BLOCK_RULE, exe
+        )
+    } else {
+        format!(
+            "netsh advfirewall firewall delete rule name={0}; exit $LASTEXITCODE",
+            OLLAMA_BLOCK_RULE
+        )
+    };
+    let code = run_ps1_elevated(&script)?;
+    let blocked = block;
+    Ok(serde_json::json!({ "ok": true, "blocked": blocked, "detail": code }))
+}
+
+// 构建 HTTP 客户端（与老版本兼容：native-tls + 系统证书；仅附加环境变量代理支持）
+// 注意：不用 rustls（不走 Windows 系统证书库，公司网络 SSL 拦截环境下会 TLS 失败）
+fn build_http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder();
+    // 流式接口需要宽松的总超时（默认 30s 对慢速模型不够）；普通请求给足 20 分钟
+    if timeout_secs > 0 {
+        builder = builder.timeout(Duration::from_secs(timeout_secs));
+    }
+    // 依次尝试 HTTPS_PROXY / HTTP_PROXY / ALL_PROXY 环境变量
+    for key in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"] {
+        if let Ok(v) = env::var(key) {
+            let v = v.trim().to_string();
+            if !v.is_empty() {
+                if let Ok(proxy) = reqwest::Proxy::all(&v) {
+                    // 本地地址不走代理（否则 localhost Ollama 会被代理拦截）：
+                    // NO_PROXY 环境变量 + 强制排除 localhost/127.0.0.1/::1
+                    let no_proxy = env::var("NO_PROXY").or_else(|_| env::var("no_proxy")).unwrap_or_default();
+                    let combined = if no_proxy.trim().is_empty() {
+                        "localhost,127.0.0.1,::1".to_string()
+                    } else {
+                        format!("{no_proxy},localhost,127.0.0.1,::1")
+                    };
+                    let np = reqwest::NoProxy::from_string(&combined);
+                    builder = builder.proxy(proxy.no_proxy(np));
+                    break;
+                }
+            }
+        }
+    }
+    builder.build().map_err(|e| format!("HTTP client initialization failed: {e}"))
+}
+
 async fn send_http(method: &str, request: HttpRequest) -> Result<HttpResponse, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|e| format!("HTTP client initialization failed: {e}"))?;
+    let client = build_http_client(1200)?;
     let http_method = reqwest::Method::from_bytes(method.as_bytes())
         .map_err(|e| format!("Invalid HTTP method: {e}"))?;
     let mut builder = client.request(http_method, &request.url);
@@ -49,10 +373,23 @@ async fn send_http(method: &str, request: HttpRequest) -> Result<HttpResponse, S
         .await
         .map_err(|e| format!("Network request failed: {e}"))?;
     let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read response: {e}"))?;
+
+    // 改进错误处理：提供更详细的错误信息
+    let body = match response.text().await {
+        Ok(text) => text,
+        Err(e) => {
+            let error_detail = format!(
+                "Failed to read response body: {}. This may be caused by: \
+                1) Response timeout (current limit: 120s), \
+                2) Invalid response encoding, \
+                3) Network interruption. \
+                Please check if the API endpoint is correct and the response is not too large.",
+                e
+            );
+            return Err(error_detail);
+        }
+    };
+
     Ok(HttpResponse {
         status: status.as_u16(),
         body,
@@ -70,401 +407,120 @@ async fn http_post(request: HttpRequest) -> Result<HttpResponse, String> {
     send_http("POST", request).await
 }
 
+#[tauri::command]
+async fn http_stream(
+    app: tauri::AppHandle,
+    url: String,
+    headers: HashMap<String, String>,
+    body: String,
+    event_id: String,
+) -> Result<(), String> {
+    // 流式读取：不设总超时（模型持续吐 token 时不会误杀），与老版本 Client::new() 行为一致
+    let client = build_http_client(0)?;
+    let mut builder = client.post(&url);
+    for (k, v) in &headers { builder = builder.header(k, v); }
+    let response = builder.body(body).send().await
+        .map_err(|e| format!("Request failed: {e}"))?;
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let err_body = response.text().await.unwrap_or_default();
+        app.emit(&format!("llm-error-{}", event_id), err_body.clone()).ok();
+        return Err(format!("HTTP {}: {}", status, err_body));
+    }
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+    let mut emitted_any = false; // 是否发出过任何 token/reasoning
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(bytes) => {
+                buffer.push_str(&String::from_utf8_lossy(&bytes));
+                while let Some(pos) = buffer.find('\n') {
+                    let line = buffer[..pos].trim().to_string();
+                    buffer = buffer[pos + 1..].to_string();
+                    if line.is_empty() { continue; }
+                    // 兼容两种格式：
+                    //  1) OpenAI SSE: "data: {...}" 或 "data: [DONE]"
+                    //  2) Ollama 原生 NDJSON: {...} （无 data: 前缀）
+                    let data = if let Some(d) = line.strip_prefix("data: ") {
+                        let d = d.trim();
+                        if d == "[DONE]" {
+                            app.emit(&format!("llm-done-{}", event_id), "").ok();
+                            return Ok(());
+                        }
+                        d.to_string()
+                    } else {
+                        line.clone()
+                    };
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
+                        // 方案A：OpenAI 格式 choices[0].delta
+                        if let Some(delta) = v.get("choices")
+                            .and_then(|c| c.get(0))
+                            .and_then(|ch| ch.get("delta"))
+                        {
+                            if let Some(rc) = delta.get("reasoning_content").and_then(|x| x.as_str()) {
+                                if !rc.is_empty() {
+                                    emitted_any = true;
+                                    app.emit(&format!("llm-reasoning-{}", event_id), rc.to_string()).ok();
+                                }
+                            }
+                            if let Some(c) = delta.get("content").and_then(|x| x.as_str()) {
+                                if !c.is_empty() {
+                                    emitted_any = true;
+                                    app.emit(&format!("llm-token-{}", event_id), c.to_string()).ok();
+                                }
+                            }
+                        }
+                        // 方案B：Ollama 原生格式 message.content / message.thinking
+                        else if let Some(msg) = v.get("message") {
+                            if let Some(t) = msg.get("thinking").and_then(|x| x.as_str()) {
+                                if !t.is_empty() {
+                                    emitted_any = true;
+                                    app.emit(&format!("llm-reasoning-{}", event_id), t.to_string()).ok();
+                                }
+                            }
+                            if let Some(c) = msg.get("content").and_then(|x| x.as_str()) {
+                                if !c.is_empty() {
+                                    emitted_any = true;
+                                    app.emit(&format!("llm-token-{}", event_id), c.to_string()).ok();
+                                }
+                            }
+                            if v.get("done").and_then(|x| x.as_bool()).unwrap_or(false) {
+                                // 检测是否因长度截断（done_reason=length 或 finish_reason=length）
+                                let truncated = v.get("done_reason").and_then(|x| x.as_str()).map(|s| s == "length").unwrap_or(false)
+                                    || v.get("finish_reason").and_then(|x| x.as_str()).map(|s| s == "length").unwrap_or(false);
+                                if truncated {
+                                    app.emit(&format!("llm-truncated-{}", event_id), "").ok();
+                                }
+                                app.emit(&format!("llm-done-{}", event_id), "").ok();
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                app.emit(&format!("llm-error-{}", event_id), e.to_string()).ok();
+                return Err(e.to_string());
+            }
+        }
+    }
+    // 流结束但一个 token 都没发出 → 视为异常，emit 错误而不是静默 done
+    if !emitted_any {
+        app.emit(&format!("llm-error-{}", event_id), "模型未返回任何内容（空响应）").ok();
+        return Err("empty response".to_string());
+    }
+    app.emit(&format!("llm-done-{}", event_id), "").ok();
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let migrations = vec![
-        Migration {
-            version: 1,
-            description: "create all tables v2",
-            sql: "
-                CREATE TABLE IF NOT EXISTS parts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    main_category TEXT DEFAULT '硬件类',
-                    sub_category TEXT DEFAULT '',
-                    category TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    model TEXT NOT NULL,
-                    cost REAL NOT NULL DEFAULT 0,
-                    specs TEXT DEFAULT '',
-                    projects TEXT DEFAULT '',
-                    remark TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now','localtime')),
-                    updated_at TEXT DEFAULT (datetime('now','localtime'))
-                );
-                CREATE TABLE IF NOT EXISTS projects (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    code TEXT NOT NULL UNIQUE,
-                    name TEXT NOT NULL,
-                    project_type TEXT DEFAULT '在研',
-                    tier TEXT DEFAULT '主流级',
-                    status TEXT DEFAULT '进行中',
-                    screen_size TEXT DEFAULT '',
-                    resolution TEXT DEFAULT '',
-                    refresh_rate TEXT DEFAULT '',
-                    panel_type TEXT DEFAULT '',
-                    platform_fee_rate REAL DEFAULT 0,
-                    profit_rate REAL DEFAULT 0,
-                    image TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now','localtime'))
-                );
-                CREATE TABLE IF NOT EXISTS modules (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_id INTEGER NOT NULL,
-                    name TEXT NOT NULL,
-                    module_category TEXT DEFAULT '未分类',
-                    description TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now','localtime')),
-                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-                );
-                CREATE TABLE IF NOT EXISTS module_items (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    module_id INTEGER NOT NULL,
-                    part_id INTEGER,
-                    part_name TEXT NOT NULL,
-                    part_model TEXT DEFAULT '',
-                    main_category TEXT DEFAULT '硬件类',
-                    sub_category TEXT DEFAULT '',
-                    cost REAL DEFAULT 0,
-                    quantity INTEGER DEFAULT 1,
-                    remark TEXT DEFAULT '',
-                    FOREIGN KEY (module_id) REFERENCES modules(id) ON DELETE CASCADE
-                );
-                CREATE TABLE IF NOT EXISTS project_boms (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_id INTEGER NOT NULL,
-                    part_id INTEGER NOT NULL,
-                    module_name TEXT DEFAULT '',
-                    quantity INTEGER DEFAULT 1,
-                    remark TEXT DEFAULT '',
-                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-                    FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
-                );
-                CREATE TABLE IF NOT EXISTS part_price_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    part_id INTEGER NOT NULL,
-                    old_cost REAL NOT NULL,
-                    new_cost REAL NOT NULL,
-                    changed_at TEXT DEFAULT (datetime('now','localtime')),
-                    FOREIGN KEY (part_id) REFERENCES parts(id) ON DELETE CASCADE
-                );
-                CREATE TABLE IF NOT EXISTS competitors (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    brand TEXT NOT NULL,
-                    model TEXT NOT NULL,
-                    tier TEXT DEFAULT '主流级',
-                    market_price REAL DEFAULT 0,
-                    bom_cost REAL DEFAULT 0,
-                    platform_fee_rate REAL DEFAULT 0,
-                    remark TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now','localtime'))
-                );
-                CREATE TABLE IF NOT EXISTS competitor_boms (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    competitor_id INTEGER NOT NULL,
-                    part_id INTEGER,
-                    part_name TEXT NOT NULL,
-                    part_model TEXT DEFAULT '',
-                    module_name TEXT DEFAULT '',
-                    estimated_cost REAL DEFAULT 0,
-                    quantity INTEGER DEFAULT 1,
-                    is_mapped INTEGER DEFAULT 0,
-                    our_part_name TEXT DEFAULT '',
-                    our_part_model TEXT DEFAULT '',
-                    our_cost REAL DEFAULT 0,
-                    our_quantity INTEGER DEFAULT 0,
-                    FOREIGN KEY (competitor_id) REFERENCES competitors(id) ON DELETE CASCADE
-                );
-                CREATE TABLE IF NOT EXISTS competitor_parts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    main_category TEXT DEFAULT '硬件类',
-                    sub_category TEXT DEFAULT '',
-                    category TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    model TEXT NOT NULL,
-                    cost REAL DEFAULT 0,
-                    specs TEXT DEFAULT '',
-                    remark TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now','localtime')),
-                    updated_at TEXT DEFAULT (datetime('now','localtime'))
-                );
-                CREATE TABLE IF NOT EXISTS project_cost_reviews (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_id INTEGER NOT NULL,
-                    stage TEXT NOT NULL,
-                    reviewed_cost REAL NOT NULL,
-                    reviewer TEXT DEFAULT '',
-                    reviewed_at TEXT DEFAULT (datetime('now','localtime')),
-                    remark TEXT DEFAULT '',
-                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-                );
-                CREATE TABLE IF NOT EXISTS project_cost_snapshots (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_id INTEGER NOT NULL,
-                    snapshot_type TEXT DEFAULT 'bom_change',
-                    change_reason TEXT DEFAULT '',
-                    bom_cost REAL DEFAULT 0,
-                    total_cost REAL DEFAULT 0,
-                    platform_fee_rate REAL DEFAULT 0,
-                    profit_rate REAL DEFAULT 0,
-                    module_count INTEGER DEFAULT 0,
-                    item_count INTEGER DEFAULT 0,
-                    created_at TEXT DEFAULT (datetime('now','localtime'))
-                );
-                CREATE TABLE IF NOT EXISTS project_targets (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_id INTEGER NOT NULL,
-                    domain TEXT NOT NULL,
-                    target_cost REAL DEFAULT 0,
-                    remark TEXT DEFAULT '',
-                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-                );
-                CREATE TABLE IF NOT EXISTS project_measures (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_id INTEGER NOT NULL,
-                    main_category TEXT NOT NULL,
-                    measure TEXT NOT NULL,
-                    status TEXT DEFAULT '待执行',
-                    due_date TEXT DEFAULT '',
-                    owner TEXT DEFAULT '',
-                    remark TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now','localtime')),
-                    updated_at TEXT DEFAULT (datetime('now','localtime')),
-                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-                );
-                CREATE TABLE IF NOT EXISTS product_features (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    weight REAL DEFAULT 1.0,
-                    created_at TEXT DEFAULT (datetime('now','localtime'))
-                );
-                CREATE TABLE IF NOT EXISTS product_scores (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    ref_type TEXT NOT NULL,
-                    ref_id INTEGER NOT NULL,
-                    feature_id INTEGER NOT NULL,
-                    score REAL DEFAULT 0,
-                    FOREIGN KEY (feature_id) REFERENCES product_features(id) ON DELETE CASCADE
-                );
-                CREATE TABLE IF NOT EXISTS settings (
-                    key TEXT PRIMARY KEY,
-                    value TEXT DEFAULT ''
-                );
-            ",
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 2,
-            description: "add project_targets table",
-            sql: "CREATE TABLE IF NOT EXISTS project_targets (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, domain TEXT NOT NULL, target_cost REAL DEFAULT 0, remark TEXT DEFAULT '', FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE);",
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 3,
-            description: "add ref_project_id to project_boms",
-            sql: "ALTER TABLE project_boms ADD COLUMN ref_project_id INTEGER DEFAULT 0;",
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 4,
-            description: "add api_providers table",
-            sql: "CREATE TABLE IF NOT EXISTS api_providers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider_type TEXT NOT NULL,
-                provider_name TEXT NOT NULL,
-                api_key TEXT DEFAULT '',
-                base_url TEXT DEFAULT '',
-                model_name TEXT DEFAULT '',
-                is_active INTEGER DEFAULT 0,
-                priority INTEGER DEFAULT 0,
-                is_preset INTEGER DEFAULT 0,
-                monthly_quota_note TEXT DEFAULT '',
-                registration_url TEXT DEFAULT '',
-                created_at TEXT DEFAULT (datetime('now','localtime'))
-            );",
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 5,
-            description: "restore CostHub2 runtime tables",
-            sql: "
-                CREATE TABLE IF NOT EXISTS trend_items (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    query_category TEXT NOT NULL,
-                    category_type TEXT DEFAULT '直接查询',
-                    trend_direction TEXT DEFAULT '',
-                    confidence_level TEXT DEFAULT '',
-                    summary TEXT DEFAULT '',
-                    suggested_action TEXT DEFAULT '',
-                    raw_search_results TEXT DEFAULT '',
-                    last_updated_at TEXT DEFAULT '',
-                    magnitude_min REAL DEFAULT NULL,
-                    magnitude_max REAL DEFAULT NULL,
-                    magnitude_reference TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now','localtime'))
-                );
-                CREATE TABLE IF NOT EXISTS trend_part_mapping (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    trend_item_id INTEGER NOT NULL,
-                    part_id INTEGER NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS trend_sources (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    trend_item_id INTEGER NOT NULL,
-                    source_title TEXT DEFAULT '',
-                    source_url TEXT DEFAULT '',
-                    excerpt TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now','localtime'))
-                );
-                CREATE TABLE IF NOT EXISTS trend_conversations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    trend_item_id INTEGER NOT NULL,
-                    question TEXT DEFAULT '',
-                    answer TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now','localtime'))
-                );
-                CREATE TABLE IF NOT EXISTS trend_snapshots (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    trend_item_id INTEGER NOT NULL,
-                    query_time TEXT DEFAULT (datetime('now','localtime')),
-                    source_type TEXT DEFAULT 'direct_query',
-                    direction TEXT DEFAULT '',
-                    confidence TEXT DEFAULT '',
-                    confidence_level TEXT DEFAULT '',
-                    summary TEXT DEFAULT '',
-                    suggested_action TEXT DEFAULT '',
-                    skill_used TEXT DEFAULT '',
-                    magnitude_min REAL DEFAULT NULL,
-                    magnitude_max REAL DEFAULT NULL,
-                    magnitude_reference TEXT DEFAULT ''
-                );
-                CREATE TABLE IF NOT EXISTS trend_insight_dimensions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    trend_snapshot_id INTEGER NOT NULL,
-                    dimension_type TEXT DEFAULT '',
-                    dimension_order INTEGER DEFAULT 0,
-                    content TEXT DEFAULT '',
-                    evidence_strength TEXT DEFAULT '',
-                    data_points TEXT DEFAULT '',
-                    source_title TEXT DEFAULT '',
-                    source_url TEXT DEFAULT ''
-                );
-                CREATE TABLE IF NOT EXISTS trend_key_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    trend_snapshot_id INTEGER NOT NULL,
-                    event_date TEXT DEFAULT '',
-                    event_description TEXT DEFAULT '',
-                    impact_direction TEXT DEFAULT '',
-                    source_title TEXT DEFAULT '',
-                    source_url TEXT DEFAULT ''
-                );
-                CREATE TABLE IF NOT EXISTS material_categories (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    category_name TEXT NOT NULL UNIQUE
-                );
-                CREATE TABLE IF NOT EXISTS part_suppliers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    part_id INTEGER NOT NULL,
-                    supplier_name TEXT NOT NULL,
-                    unit_price REAL DEFAULT 0,
-                    price REAL DEFAULT 0,
-                    moq INTEGER DEFAULT 0,
-                    lead_time TEXT DEFAULT '',
-                    priority INTEGER DEFAULT 0,
-                    share_ratio REAL DEFAULT 0,
-                    is_active INTEGER DEFAULT 1,
-                    remark TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now','localtime'))
-                );
-                CREATE TABLE IF NOT EXISTS supplier_price_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    part_id INTEGER NOT NULL,
-                    supplier_name TEXT NOT NULL,
-                    old_price REAL DEFAULT 0,
-                    new_price REAL DEFAULT 0,
-                    change_reason TEXT DEFAULT '',
-                    changed_at TEXT DEFAULT (datetime('now','localtime'))
-                );
-                CREATE TABLE IF NOT EXISTS decomposition_tree (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    root_part_id INTEGER,
-                    parent_id INTEGER,
-                    component_name TEXT NOT NULL,
-                    cost_ratio_estimate REAL DEFAULT NULL,
-                    source_type TEXT DEFAULT 'user_confirmed',
-                    node_type TEXT DEFAULT 'structural',
-                    insight_status TEXT DEFAULT 'pending',
-                    trend_item_id INTEGER DEFAULT NULL,
-                    remark TEXT DEFAULT '',
-                    ai_insights TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now','localtime')),
-                    updated_at TEXT DEFAULT (datetime('now','localtime'))
-                );
-                CREATE TABLE IF NOT EXISTS decomposition_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    root_part_id INTEGER NOT NULL,
-                    timestamp TEXT DEFAULT (datetime('now','localtime')),
-                    summary TEXT DEFAULT ''
-                );
-                CREATE TABLE IF NOT EXISTS rollup_contributions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    parent_snapshot_id INTEGER NOT NULL,
-                    child_component_id INTEGER NOT NULL,
-                    cost_ratio_used REAL DEFAULT NULL,
-                    direction_used TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now','localtime'))
-                );
-                CREATE TABLE IF NOT EXISTS rollup_feedback (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    component_id INTEGER NOT NULL,
-                    component_name TEXT DEFAULT '',
-                    ai_direction TEXT DEFAULT '',
-                    ai_summary TEXT DEFAULT '',
-                    ai_confidence_level TEXT DEFAULT '',
-                    user_corrected_direction TEXT DEFAULT '',
-                    user_corrected_confidence_level TEXT DEFAULT '',
-                    correction_reason TEXT DEFAULT '',
-                    user_corrected_summary TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now','localtime'))
-                );
-                CREATE TABLE IF NOT EXISTS analysis_checklist (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    category TEXT DEFAULT '',
-                    check_order INTEGER DEFAULT 0,
-                    item_description TEXT NOT NULL,
-                    strength_level TEXT DEFAULT 'observing',
-                    trigger_count INTEGER DEFAULT 0,
-                    first_triggered_at TEXT DEFAULT '',
-                    last_triggered_at TEXT DEFAULT '',
-                    is_active INTEGER DEFAULT 1
-                );
-                CREATE TABLE IF NOT EXISTS checklist_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    checklist_id INTEGER NOT NULL,
-                    question_snippet TEXT DEFAULT '',
-                    created_at TEXT DEFAULT (datetime('now','localtime'))
-                );
-                CREATE TABLE IF NOT EXISTS outbound_request_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT DEFAULT (datetime('now','localtime')),
-                    method TEXT DEFAULT '',
-                    url TEXT DEFAULT '',
-                    status_code INTEGER DEFAULT 0,
-                    response_time_ms INTEGER DEFAULT 0,
-                    error_message TEXT DEFAULT ''
-                );
-            ",
-            kind: MigrationKind::Up,
-        },
-    ];
-
-    let db_url = get_db_url();
     tauri::Builder::default()
         .plugin(
-            tauri_plugin_sql::Builder::default()
-                .add_migrations(&db_url, migrations)
-                .build(),
+            tauri_plugin_sql::Builder::default().build(),
         )
-        .invoke_handler(tauri::generate_handler![get_db_path, http_get, http_post])
+        .plugin(tauri_plugin_shell::init())
+        .invoke_handler(tauri::generate_handler![get_db_path, http_get, http_post, http_stream, ollama_net_status, ollama_net_set_block, backup_database, list_backups, restore_database, delete_backup, save_export_file, list_exports, open_exports_dir])
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -473,6 +529,14 @@ pub fn run() {
                         .build(),
                 )?;
             }
+
+            // 启用开发者工具（包括生产环境，方便调试）
+            if let Some(_window) = app.get_webview_window("main") {
+                #[cfg(debug_assertions)]
+                _window.open_devtools();
+                // 在release模式下，用户可以通过右键菜单打开
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())

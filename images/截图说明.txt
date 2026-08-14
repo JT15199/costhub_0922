@@ -1,0 +1,16 @@
+截图替换说明
+============
+演示稿 CostHub演示稿.html 中的示意图会自动替换为真实截图。
+用 Win + Shift + S 截取应用界面，按下列文件名保存到本文件夹（images/），
+刷新演示稿页面即可看到真实截图。
+
+- shot-dashboard.png   → 仪表盘页面
+- shot-parts.png       → 器件库列表（或供应商管理抽屉）
+- shot-project.png     → 项目管理（BOM页 / 成本评审 / 目标成本 / 降本措施 / 整机供应商）
+- shot-compare.png     → 对比分析页面
+- shot-trend.png       → 物料趋势洞察页面（分解树 / 洞察卡片 / 历史记录）
+- shot-worklog.png     → 工作手账页面（便签墙 / AI总结弹窗）
+
+说明：项目管理模块包含多个子功能（BOM/评审/目标/降本/整机供应商），
+可多截几张，用 shot-project-2.png、shot-project-3.png 命名（演示稿当前只展示第1张，
+如需多图可告诉我继续加）。截图建议 16:9，页面会自动缩放。

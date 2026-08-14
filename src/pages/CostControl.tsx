@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Table, Button, Select, Space, Modal, Form, Input, InputNumber, Tag, message, Popconfirm, Card, Statistic, Row, Col } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import DataTable from '../components/DataTable';
+import { Button, Select, Space, Modal, Form, Input, InputNumber, Tag, message, Popconfirm, Card, Statistic, Row, Col } from 'antd';
+import { PlusOutlined, DollarOutlined, AimOutlined, BarChartOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { getProjects, getProjectBOMs, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure } from '../db';
 import { MAIN_CATEGORIES, MEASURE_STATUSES, CATEGORY_COLORS } from '../constants';
+import { chartTooltip, chartAxisStyle, chartGrid, chartBarSeries, chartLineSeries, chartTextMuted, barGradient } from '../chartTheme';
 
 export default function CostControl() {
   const [projects, setProjects] = useState<any[]>([]);
@@ -32,32 +34,31 @@ export default function CostControl() {
   boms.forEach(b => { byCategory[b.main_category] = (byCategory[b.main_category] || 0) + (b.part_cost || 0) * b.quantity; });
 
   const barOption = {
-    tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: Object.keys(byCategory), axisLabel: { rotate: 30, fontSize: 11 } },
-    yAxis: { type: 'value', name: '成本 (¥)' },
-    series: [{
-      type: 'bar', barWidth: '55%',
-      data: Object.entries(byCategory).map(([k, v]) => ({ value: v, itemStyle: { color: CATEGORY_COLORS[k] || '#64748B', borderRadius: [6, 6, 0, 0] } })),
-      label: { show: true, position: 'top', formatter: (p: any) => `¥${(p.value as number).toFixed(0)}`, fontSize: 10 },
-    }],
-    grid: { top: 20, right: 20, bottom: 60, left: 60 },
+    tooltip: chartTooltip('axis'),
+    xAxis: { type: 'category', data: Object.keys(byCategory), ...chartAxisStyle(11, { rotate: 30 }) },
+    yAxis: { type: 'value', name: '成本 (¥)', ...chartAxisStyle() },
+    series: [chartBarSeries({
+      data: Object.entries(byCategory).map(([k, v]) => ({ value: v, itemStyle: { color: barGradient(CATEGORY_COLORS[k] || '#64748B') } })),
+      label: { show: true, position: 'top', formatter: (p: any) => `¥${(p.value as number).toFixed(0)}`, fontSize: 10, color: chartTextMuted() },
+    })],
+    grid: chartGrid({ bottom: 60 }),
   };
 
   const trendOption = {
-    tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: [...reviews.map(r => r.reviewed_at?.slice(0, 10) || r.stage), '当前BOM'] },
-    yAxis: { type: 'value', name: '成本 (¥)' },
-    series: [{
-      type: 'line', smooth: true, symbol: 'circle', symbolSize: 8,
+    tooltip: chartTooltip('axis'),
+    xAxis: { type: 'category', data: [...reviews.map(r => r.reviewed_at?.slice(0, 10) || r.stage), '当前BOM'], ...chartAxisStyle() },
+    yAxis: { type: 'value', name: '成本 (¥)', ...chartAxisStyle() },
+    series: [chartLineSeries({
       data: [...reviews.map(r => r.reviewed_cost), bomTotal],
-      itemStyle: { color: '#CF0A2C' }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(207,10,44,0.2)' }, { offset: 1, color: 'rgba(207,10,44,0)' }] } },
-    }],
-    grid: { top: 10, right: 20, bottom: 40, left: 60 },
+      itemStyle: { color: '#0A84FF' },
+      areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(10,132,255,0.25)' }, { offset: 1, color: 'rgba(10,132,255,0)' }] } },
+    })],
+    grid: chartGrid({ bottom: 40 }),
   };
 
   return (
     <div>
-      <div className="page-title">💰 成本管控</div>
+      <div className="page-title"><DollarOutlined /> 成本管控</div>
 
       <div className="content-card" style={{ marginBottom: 16 }}>
         <Space>
@@ -87,8 +88,8 @@ export default function CostControl() {
           <Row gutter={16}>
             <Col span={12}>
               <div className="content-card">
-                <div className="card-header"><h3>🎯 降本措施</h3><Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setMeasureModal(true)}>添加</Button></div>
-                <Table dataSource={measures} rowKey="id" size="small" pagination={false} columns={[
+                <div className="card-header"><h3><AimOutlined /> 降本措施</h3><Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setMeasureModal(true)}>添加</Button></div>
+                <DataTable tableId="cc_measures" dataSource={measures} rowKey="id" size="small" pagination={false} columns={[
                   { title: '大类', dataIndex: 'main_category', width: 80 },
                   { title: '措施', dataIndex: 'measure' },
                   { title: '状态', dataIndex: 'status', width: 80, render: (v: string) => <Tag color={v === '已完成' ? 'green' : v === '执行中' ? 'blue' : 'default'}>{v}</Tag> },
@@ -99,8 +100,8 @@ export default function CostControl() {
             </Col>
             <Col span={12}>
               <div className="content-card">
-                <div className="card-header"><h3>📊 成本测算</h3><Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setReviewModal(true)}>添加</Button></div>
-                <Table dataSource={reviews} rowKey="id" size="small" pagination={false} columns={[
+                <div className="card-header"><h3><BarChartOutlined /> 成本测算</h3><Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => setReviewModal(true)}>添加</Button></div>
+                <DataTable tableId="cc_reviews" dataSource={reviews} rowKey="id" size="small" pagination={false} columns={[
                   { title: '阶段', dataIndex: 'stage' }, { title: '成本(¥)', dataIndex: 'reviewed_cost', render: (v: number) => v?.toFixed(2) },
                   { title: '测算人', dataIndex: 'reviewer' }, { title: '时间', dataIndex: 'reviewed_at', width: 140 },
                   { title: '操作', width: 60, render: (_: any, r: any) => <Popconfirm title="删除？" onConfirm={async () => { await deleteCostReview(r.id); setReviews(await getCostReviews(selectedPid!)); }}><Button type="link" size="small" danger>删除</Button></Popconfirm> },

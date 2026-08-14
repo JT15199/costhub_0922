@@ -56,9 +56,15 @@ export interface DashboardStats {
   recent_parts: Part[];
 }
 export interface PartSupplier {
-  id?: number; part_id: number; supplier_name: string; unit_price: number;
-  moq: number; lead_time: string; priority: number; remark: string;
-  price?: number; share_ratio?: number; is_active?: number;
+  id?: number;
+  part_id: number;
+  supplier_name: string;
+  price: number;
+  share_ratio: number;
+  is_active: number;
+  remark: string;
+  created_at?: string;
+  updated_at?: string;
 }
 export interface ProjectSupplier {
   id?: number;
