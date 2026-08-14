@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Spin, Tag, Button } from 'antd';
+import { Spin, Tag, Button, message } from 'antd';
 import { BarChartOutlined, ShopOutlined, AimOutlined, BulbOutlined, AlertOutlined, RobotOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
@@ -120,6 +120,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         setAuditFindings(await getAuditFindings());
         setRecentPriceChanges(await getRecentPartPriceChanges(8));
         setAuditLastAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
+        if ((r as any).aiSkipped) message.info('数据无变化，AI 未重复思考（规则检查已更新）');
       }
     } catch (e) { console.warn('巡检失败:', e); }
     setAuditRunning(false);

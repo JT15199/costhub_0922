@@ -67,3 +67,43 @@ describe('ruleFindings — 自主巡检规则层', () => {
     expect(f.some(x => x.type === 'rule_sku_deviation')).toBe(false);
   });
 });
+
+
+describe('computeAuditFingerprint — 防重复思考指纹', () => {
+  const projects = [{ id: 1, code: 'P1' }];
+  const boms = { 1: [{ part_cost: 100, quantity: 2 }] };
+  const sup = { 10: [{}] };
+  const skus: any[] = [];
+  const insights: any[] = [];
+
+  it('相同数据 → 指纹相同（AI 跳过依据）', () => {
+    const a = computeAuditFingerprint(projects, boms, sup, skus, insights, []);
+    const b = computeAuditFingerprint(projects, boms, sup, skus, insights, []);
+    expect(a).toBe(b);
+  });
+
+  it('改价后 → 指纹变化（触发重新思考）', () => {
+    const a = computeAuditFingerprint(projects, boms, sup, skus, insights, []);
+    const b = computeAuditFingerprint(projects, boms, sup, skus, insights, [{ id: 9, old_cost: 100, new_cost: 105 }]);
+    expect(a).not.toBe(b);
+  });
+
+  it('新增项目 → 指纹变化', () => {
+    const a = computeAuditFingerprint(projects, boms, sup, skus, insights, []);
+    const b = computeAuditFingerprint([...projects, { id: 2, code: 'P2' }], { ...boms, 2: [] }, sup, skus, insights, []);
+    expect(a).not.toBe(b);
+  });
+});
+
+describe('AUDIT_PERSPECTIVES — 思考角度池', () => {
+  it('5 个角度且不重复', () => {
+    expect(AUDIT_PERSPECTIVES.length).toBe(5);
+    const names = new Set(AUDIT_PERSPECTIVES.map(p => p.name));
+    expect(names.size).toBe(5);
+  });
+  it('每个角度有 focus 指引', () => {
+    AUDIT_PERSPECTIVES.forEach(p => {
+      expect(p.focus.length).toBeGreaterThan(10);
+    });
+  });
+});

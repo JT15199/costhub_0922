@@ -124,6 +124,49 @@ export function ruleFindings(ctx: RuleCtx): Omit<AuditFinding, 'id' | 'created_a
   return out;
 }
 
+
+// ============ 防重复思考（v2.3.19）：指纹驱动 + 已知反馈 + 角度轮换 ============
+
+// 思考角度池（轮换）：每次巡检换一个角度，避免固定套路
+export const AUDIT_PERSPECTIVES = [
+  { name: '成本机会点', focus: '寻找可执行的降本机会：模块占比过高的议价杠杆、同类物料跨项目价差、供应商集中度、目标达成差距' },
+  { name: '供应风险', focus: '识别供应风险：单一来源、供应商份额集中、连续涨价的物料、SKU 对关键器件的依赖' },
+  { name: '数据质量与一致性', focus: '发现数据矛盾与质量问题：同类项目成本差异不合理、规格与成本不匹配、缺失或可疑的数据关系' },
+  { name: '跨项目模式', focus: '跨项目对比找模式：同规格项目成本差异、模块成本结构差异、多个项目共性的问题' },
+  { name: '趋势与信号', focus: '从快照和价格历史找趋势信号：持续上涨/下降的物料、成本结构变化趋势、值得提前行动的信号' },
+];
+
+export interface AuditMeta { fingerprint: string; perspectiveIdx: number; }
+
+export async function getAuditMeta(): Promise<AuditMeta> {
+  try {
+    const { getSetting } = await import('./db');
+    const fp = await getSetting('audit_fingerprint', '');
+    const idx = parseInt(await getSetting('audit_perspective_idx', '0'), 10) || 0;
+    return { fingerprint: fp, perspectiveIdx: idx };
+  } catch { return { fingerprint: '', perspectiveIdx: 0 }; }
+}
+
+async function saveAuditMeta(fp: string, idx: number) {
+  try {
+    const { setSetting } = await import('./db');
+    await setSetting('audit_fingerprint', fp);
+    await setSetting('audit_perspective_idx', String(idx));
+  } catch { /* 忽略 */ }
+}
+
+// 数据指纹：核心规模 + 最近变动摘要（指纹不变 → AI 层跳过，避免重复思考）
+export function computeAuditFingerprint(
+  projects: any[], bomsByProject: Record<number, any[]>, suppliersByPart: Record<number, any[]>,
+  skus: any[], insights: any[], recentChanges: any[],
+): string {
+  const totalCost = projects.reduce((s, p) => s + (bomsByProject[p.id] || []).reduce((x, b) => x + (b.part_cost || 0) * (b.quantity || 1), 0), 0);
+  const bomCount = Object.values(bomsByProject).reduce((s, b) => s + b.length, 0);
+  const changes = (recentChanges || []).slice(0, 5).map((c: any) => c.id + ':' + (c.old_cost || 0) + '>' + (c.new_cost || 0)).join(',');
+  const insightsSig = (insights || []).slice(0, 5).map((i: any) => i.id + ':' + i.status).join(',');
+  return JSON.stringify([projects.length, Math.round(totalCost), bomCount, Object.keys(suppliersByPart).length, skus.length, insights.length, changes, insightsSig]);
+}
+
 // ============ 全库摘要（给本地模型的上下文） ============
 
 export async function buildAuditContext(
@@ -168,7 +211,7 @@ export async function buildAuditContext(
 
 // ============ 主流程 ============
 
-export interface AutoAuditResult { rules: number; ai: number; aiFailed: boolean; }
+export interface AutoAuditResult { rules: number; ai: number; aiFailed: boolean; aiSkipped: boolean; }
 
 export async function runAutoAudit(): Promise<AutoAuditResult | null> {
   const { getProjects, getProjectBOMs, getTargets, getProjectCostSnapshots, getInsights, getAllSkuDiffs } = await import('./db');
@@ -206,13 +249,34 @@ export async function runAutoAudit(): Promise<AutoAuditResult | null> {
     const findings: Omit<AuditFinding, 'id' | 'created_at'>[] = [...rules];
     let aiFindings: Omit<AuditFinding, 'id' | 'created_at'>[] = [];
     let aiFailed = false;
-    // AI 层（本地模型，失败不影响规则结果）
+    let aiSkipped = false;
+    // AI 层（本地模型，失败不影响规则结果；指纹不变不重跑——避免重复思考同一套话）
     try {
       const url = await getSetting('local_ai_base_url', 'http://localhost:11434');
       const model = await getSetting('local_ai_model', '');
       if (model) {
-        const ctxText = await buildAuditContext(projects, bByP, tByP, suppliersByPart, sByP, insights, skus2, skuCostBySku);
-        aiFindings = await aiAuditFindings(url, model, ctxText, rules);
+        const { getAuditFindings } = await import('./auditStore');
+        const recentChanges = await (await import('./auditStore')).getRecentPartPriceChanges(10);
+        const fp = computeAuditFingerprint(projects, bByP, suppliersByPart, skus2, insights, recentChanges);
+        const meta = await getAuditMeta();
+        const nextIdx = (meta.perspectiveIdx + 1) % AUDIT_PERSPECTIVES.length;
+        if (meta.fingerprint === fp && meta.fingerprint !== '') {
+          aiSkipped = true; // 数据无变化 → 不重复思考（规则层照跑，成本极低）
+        } else {
+          const ctxText = await buildAuditContext(projects, bByP, tByP, suppliersByPart, sByP, insights, skus2, skuCostBySku);
+          // 已知发现（未忽略的）→ 告诉 AI 不要重复
+          const existing = (await getAuditFindings()).filter((f: any) => f.source === 'ai' || f.source === 'rule');
+          const knownList = existing.slice(0, 12).map((f: any) => '- ' + f.title + '：' + (f.detail || '').slice(0, 60)).join('\n');
+          // 本次变化摘要（新改价/快照异动/新情报）
+          const changesSummary = [
+            recentChanges.length ? '最近改价：' + recentChanges.slice(0, 5).map((c: any) => c.name + ' ¥' + (c.old_cost || 0) + '→¥' + (c.new_cost || 0)).join('、') : '',
+            sByP && Object.values(sByP).filter((v: any) => v && v.length >= 2).length ? '存在快照异动项目' : '',
+            insights.filter((i: any) => i.status === 'unread').length ? '有 ' + insights.filter((i: any) => i.status === 'unread').length + ' 条未读报价情报' : '',
+          ].filter(Boolean).join('；') || '无明显变化';
+          const perspective = AUDIT_PERSPECTIVES[meta.perspectiveIdx];
+          aiFindings = await aiAuditFindings(url, model, ctxText, rules, knownList, changesSummary, perspective);
+          await saveAuditMeta(fp, nextIdx);
+        }
       }
     } catch (e) {
       console.warn('AI 巡检失败（规则层仍生效）:', e);
@@ -220,7 +284,7 @@ export async function runAutoAudit(): Promise<AutoAuditResult | null> {
     }
     findings.push(...aiFindings);
     await replaceAuditFindings(findings);
-    return { rules: rules.length, ai: aiFindings.length, aiFailed };
+    return { rules: rules.length, ai: aiFindings.length, aiFailed, aiSkipped };
   } catch (e) {
     console.warn('自主巡检失败:', e);
     return null;
@@ -228,10 +292,11 @@ export async function runAutoAudit(): Promise<AutoAuditResult | null> {
 }
 
 // AI 深度洞察：把全库摘要交给本地模型，找规则覆盖不到的"细枝末节"
-async function aiAuditFindings(url: string, model: string, ctxText: string, rules: Omit<AuditFinding, 'id' | 'created_at'>[]): Promise<Omit<AuditFinding, 'id' | 'created_at'>[]> {
+async function aiAuditFindings(url: string, model: string, ctxText: string, rules: Omit<AuditFinding, 'id' | 'created_at'>[], knownList: string, changesSummary: string, perspective: { name: string; focus: string }): Promise<Omit<AuditFinding, 'id' | 'created_at'>[]> {
   const ruleSummary = rules.map(r => `- ${r.title}：${r.detail}`).join('\n') || '（规则层未发现）';
-  const sysPrompt = '你是嵌入 CostHub 成本管理工具的资深成本分析师。系统已用规则检查了常见问题（见规则发现）。你的任务不是复述事实（物料涨跌是用户自己输入的，他都知道），而是输出有决策价值的洞察与建议：1) 成本机会点：哪里有降本空间（模块占比过高的议价杠杆、同类物料跨项目价差可统一采购、供应商集中可引入二供等），给出具体思路 2) 成本结构意见：成本占比明显偏高的模块/领域，对照目标/历史/同类给出判断和行动建议 3) 数据矛盾或可疑模式（用户可能注意不到的细枝末节）。只输出 JSON（不要任何其他文字）：{"findings":[{"title":"简短标题","detail":"具体说明（引用真实数据）","suggestion":"给用户的建议/思路（一句话，可执行）","level":"warn或info","objects":["涉及项目/器件"]}]}。规则：1) 必须基于提供的数据，不能编造数字 2) 最多 5 条 3) 宁缺毋滥，只报真正值得行动的 4) 不要重复规则已报的。';
-  const userPrompt = `全库数据摘要：\n${ctxText}\n\n规则层发现：\n${ruleSummary}`;
+  const perspectiveLine = '本次思考角度：【' + perspective.name + '】' + perspective.focus + '。请主要从这个角度挖掘，也可以补充其他角度的重大发现。';
+  const sysPrompt = '你是嵌入 CostHub 成本管理工具的资深成本分析师。系统已用规则检查了常见问题（见规则发现），你之前也做过几次巡检（见历史发现）。你的任务不是复述事实（物料涨跌是用户自己输入的，他都知道），也不是重复历史发现，而是输出有决策价值的、新鲜的洞察与建议：' + perspectiveLine + '。只输出 JSON（不要任何其他文字）：{"findings":[{"title":"简短标题","detail":"具体说明（引用真实数据）","suggestion":"给用户的建议/思路（一句话，可执行）","level":"warn或info","objects":["涉及项目/器件"]}]}。规则：1) 必须基于提供的数据，不能编造数字 2) 最多 4 条 3) 宁缺毋滥，只报真正值得行动的 4) 不要重复历史发现和规则已报的 5) 如果本次角度下确实没有新发现，输出 {"findings":[]}，不要硬凑。';
+  const userPrompt = '全库数据摘要：\n' + ctxText + '\n\n规则层发现：\n' + ruleSummary + '\n\n历史已发现（不要重复）：\n' + (knownList || '（无）') + '\n\n自上次以来的数据变化：\n' + changesSummary;
   let full = '';
   await new Promise<void>((resolve, reject) => {
     startOllamaStream(url, model,
