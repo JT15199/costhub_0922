@@ -3,7 +3,8 @@ import { Button, Input, Select, Space, Modal, Form, InputNumber, Tag, message, P
 import type { TableRowSelection } from 'antd/es/table/interface';
 import { PlusOutlined, EditOutlined, DeleteOutlined, DownloadOutlined, UploadOutlined, HistoryOutlined, SearchOutlined, ShopOutlined, ToolOutlined, CheckOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
-import { getParts, savePart, deletePart, getCategories, getPriceHistory, getMainCategories, getPartSuppliers, addPartSupplier, updatePartSupplier, deletePartSupplier } from '../db';
+import { getParts, savePart, deletePart, getCategories, getPriceHistory, getMainCategories, getPartSuppliers, addPartSupplier, updatePartSupplier, deletePartSupplier, getSupplierPriceHistory } from '../db';
+import { summarizeSupplierTrend, supplierTrendTag } from '../supplierTrend';
 import { MAIN_CATEGORIES, SUB_CATEGORIES, getCategoryColor } from '../constants';
 import DataTable from '../components/DataTable';
 
@@ -199,12 +200,22 @@ export default function PartsLibrary() {
   };
 
   // 供应商管理函数
+  // 供应商价格趋势（part_supplier_price_history → 一句话小结）
+  const [supplierTrends, setSupplierTrends] = useState<Record<number, any>>({});
+  const refreshSupplierTrends = async (list: any[], part?: any) => {
+    try {
+      const p = part || currentPart;
+      const entries = await Promise.all(list.map(async (s: any) => [s.id, summarizeSupplierTrend(await getSupplierPriceHistory(p.id, s.supplier_name))] as const));
+      setSupplierTrends(Object.fromEntries(entries));
+    } catch { /* 趋势失败不影响主列表 */ }
+  };
   const openSupplierModal = async (part: any) => {
     setCurrentPart(part);
     setSupplierLoading(true);
     try {
       const partSuppliers = await getPartSuppliers(part.id);
       setSuppliers(partSuppliers);
+      refreshSupplierTrends(partSuppliers, part);
     } catch (e) {
       console.error('Failed to load suppliers:', e);
       message.error('加载供应商失败');
@@ -234,6 +245,7 @@ export default function PartsLibrary() {
       // 刷新供应商列表和器件列表（因为成本可能变化）
       const partSuppliers = await getPartSuppliers(currentPart.id);
       setSuppliers(partSuppliers);
+      refreshSupplierTrends(partSuppliers);
       load(); // 刷新器件列表以显示更新后的成本
 
       supplierForm.resetFields();
@@ -252,6 +264,7 @@ export default function PartsLibrary() {
       // 刷新供应商列表和器件列表
       const partSuppliers = await getPartSuppliers(currentPart.id);
       setSuppliers(partSuppliers);
+      refreshSupplierTrends(partSuppliers);
       load();
     } catch (e) {
       console.error('Failed to delete supplier:', e);
@@ -476,6 +489,17 @@ export default function PartsLibrary() {
               width: 70,
               render: (v: number) => <Tag color={v ? 'green' : 'default'}>{v ? '启用' : '停用'}</Tag>
             },
+            {
+              title: '价格趋势',
+              key: 'trend',
+              width: 130,
+              render: (_: any, record: any) => {
+                const t = supplierTrends[record.id];
+                if (!t || t.direction === 'none') return <span style={{ color: '#C0C8D0', fontSize: 12 }}>暂无记录</span>;
+                const tag = supplierTrendTag(t);
+                return <Tag color={tag.color} style={{ fontSize: 11.5 }}>{tag.text}</Tag>;
+              }
+            },
             { title: '备注', dataIndex: 'remark', ellipsis: true, width: 120 },
             {
               title: '操作',
@@ -527,6 +551,23 @@ export default function PartsLibrary() {
 
             return (
               <div style={{ padding: '12px 0' }}>
+                {/* 供应商价格趋势小结（规则驱动，自动生成） */}
+                {suppliers.filter(s => supplierTrends[s.id] && supplierTrends[s.id].direction !== 'none').length > 0 && (
+                  <div style={{ marginBottom: 12, padding: '8px 12px', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, fontSize: 12, color: '#475569', lineHeight: 1.7 }}>
+                    <b style={{ color: '#0A84FF', marginRight: 6 }}>📈 供应商价格趋势</b>
+                    {suppliers.filter(s => supplierTrends[s.id] && supplierTrends[s.id].direction !== 'none').map(s => {
+                      const t = supplierTrends[s.id];
+                      const first = t.direction === 'up' ? '持续上涨' : t.direction === 'down' ? '持续下降' : t.direction === 'mixed' ? '价格波动' : t.direction === 'flat' ? '基本平稳' : '仅一次变动';
+                      const pct = t.totalPct ?? 0;
+                      const reason = t.lastReason ? '，最近原因：' + t.lastReason : '';
+                      return (
+                        <div key={s.id} style={{ marginTop: 2 }}>
+                          <b>{s.supplier_name}</b>：{first}（累计 {pct > 0 ? '+' : ''}{pct.toFixed(1)}%）{reason}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
                   <div>
                     <span style={{ color: '#64748B', marginRight: 8 }}>供应商数量:</span>
