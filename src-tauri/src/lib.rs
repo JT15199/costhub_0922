@@ -392,7 +392,7 @@ async fn send_http(method: &str, request: HttpRequest) -> Result<HttpResponse, S
     // 本地回环（Ollama）→ 无代理直连，根治公司代理导致 localhost 请求被转发 → 504
     let client = if is_local_url(&request.url) {
         http_log(&format!("local direct-connect (proxy bypassed): {}", request.url));
-        reqwest::Client::builder().build().map_err(|e| format!("HTTP client initialization failed: {e}"))?
+        reqwest::Client::builder().no_proxy().build().map_err(|e| format!("HTTP client initialization failed: {e}"))?
     } else {
         build_http_client(1200)?
     };
@@ -474,7 +474,7 @@ async fn http_stream(
     // 本地回环（Ollama）→ 无代理直连（公司代理会导致 localhost 被转发 → 504/假失败）
     let client = if is_local_url(&url) {
         http_log(&format!("local direct-connect (proxy bypassed): {}", url));
-        reqwest::Client::builder().build().map_err(|e| format!("HTTP client initialization failed: {e}"))?
+        reqwest::Client::builder().no_proxy().build().map_err(|e| format!("HTTP client initialization failed: {e}"))?
     } else {
         build_http_client(0)?
     };
