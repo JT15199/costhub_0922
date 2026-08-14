@@ -1362,9 +1362,22 @@ export default function Projects() {
                                       }
                                     });
 
-                                    // 构建对比内容
-                                    const content = (
+                                    // 构建对比内容（含 AI 变化解释，本地模型可选）
+                                    let aiText = '';
+                                    let aiLoading = false;
+                                    const renderContent = () => (
                                       <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+                                        {/* AI 变化解释 */}
+                                        <div style={{ marginBottom: 14, padding: '10px 12px', background: '#F0F7FF', border: '1px solid #BFDBFE', borderRadius: 8 }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                            <RobotOutlined style={{ color: '#0A84FF' }} />
+                                            <b style={{ fontSize: 12.5 }}>AI 变化解释</b>
+                                            <Button size="small" loading={aiLoading} onClick={runExplain} style={{ marginLeft: 'auto' }}>{aiText ? '重新生成' : '生成解释'}</Button>
+                                          </div>
+                                          {aiText
+                                            ? <div style={{ fontSize: 12.5, color: '#1E40AF', lineHeight: 1.7 }}>{aiText}</div>
+                                            : <div style={{ fontSize: 11.5, color: '#94A3B8' }}>由本地模型分析下方 BOM 差异（全程本地无云端调用）；未配置 Ollama 可跳过，规则对比已完整展示</div>}
+                                        </div>
                                         <div style={{ marginBottom: 16 }}>
                                           <div><b>快照1:</b> {snap1.created_at}</div>
                                           <div><b>快照2:</b> {snap2.created_at}</div>
@@ -1444,11 +1457,44 @@ export default function Projects() {
                                       </div>
                                     );
 
-                                    Modal.info({
+                                    const modal = Modal.info({
                                       title: 'BOM详细对比',
                                       width: 700,
-                                      content,
+                                      content: renderContent(),
                                     });
+                                    // AI 解释：把差异清单发给本地模型，流式更新弹窗
+                                    const runExplain = async () => {
+                                      if (aiLoading) return;
+                                      aiLoading = true;
+                                      aiText = '';
+                                      modal.update({ content: renderContent() });
+                                      try {
+                                        const url = await getSetting('local_ai_base_url', 'http://localhost:11434');
+                                        const model = await getSetting('local_ai_model', '');
+                                        if (!model) throw new Error('未配置本地模型');
+                                        const lines: string[] = [];
+                                        [...changes].sort((a: any, b: any) => Math.abs(b.totalDiff ?? b.total1 ?? -(b.total2 || 0)) - Math.abs(a.totalDiff ?? a.total1 ?? -(a.total2 || 0))).slice(0, 8).forEach((c: any) => {
+                                          if (c.type === 'added') lines.push(`新增 ${c.name}(${c.model}) ${c.module}：¥${c.cost1}×${c.qty1}=¥${c.total1.toFixed(2)}`);
+                                          else if (c.type === 'removed') lines.push(`删除 ${c.name}(${c.model}) ${c.module}：减少 ¥${c.total2.toFixed(2)}`);
+                                          else lines.push(`变化 ${c.name}(${c.model}) ${c.module}：小计 ¥${c.total2.toFixed(2)}→¥${c.total1.toFixed(2)}（${c.totalDiff > 0 ? '+' : ''}¥${c.totalDiff.toFixed(2)}）`);
+                                        });
+                                        const userPrompt = `项目 ${selectedProject?.code || ''} 成本快照对比（${snap2.created_at} → ${snap1.created_at}）：BOM ¥${Number(snap2.bom_cost || 0).toFixed(2)} → ¥${Number(snap1.bom_cost || 0).toFixed(2)}\n主要变化清单：\n${lines.join('\n')}`;
+                                        let full = '';
+                                        await new Promise<void>((resolve, reject) => {
+                                          startOllamaStream(url, model,
+                                            [{ role: 'system', content: '你是成本管理助手。根据 BOM 快照对比的变化清单，用 2-3 句话说明这次成本变化的主要原因（哪些器件/模块驱动了变化、金额多少），语气客观，不要列举。' },
+                                             { role: 'user', content: userPrompt }],
+                                            t => { full += t; aiText = full; modal.update({ content: renderContent() }); },
+                                            () => {}, () => resolve(), e => reject(new Error(e)),
+                                            { endpoint: 'native', json: false, think: false, num_predict: 300, temperature: 0.3 },
+                                          );
+                                        });
+                                      } catch (e: any) {
+                                        aiText = '本地模型不可用，无法生成解释（规则对比已完整展示上方）。';
+                                      }
+                                      aiLoading = false;
+                                      modal.update({ content: renderContent() });
+                                    };
                                   } else {
                                     // 3个快照简单对比
                                     let compareText = '快照对比:\n\n';
