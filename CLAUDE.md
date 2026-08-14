@@ -5,6 +5,7 @@
 - **全局 AI 问询**（src/components/GlobalAI.tsx）：侧边栏入口，上下文=localStorage costhub-ctx（Projects 选中项目写 BOM 摘要/目标），回答一键 saveWorkLog 记入工作手账（work_project=项目代号）；⚠️ 数据安全：只有本地模型可读项目数据（云端不接）
 - **首次 AI 引导**（src/components/AIGuide.tsx）：解锁后 localStorage costhub-ai-guide-seen 控制一次，展示 5 项能力+配置就绪度
 - **器件供应商价格趋势小结**（同日追加）：器件库供应商抽屉自动加载各供应商价格历史，规则生成一句话趋势（持续上涨/下降/波动/基本平稳/仅一次变动 + 复合累计幅度 + 最近原因），表格「价格趋势」列 Tag + footer 小结条；纯函数 src/supplierTrend.ts（vitest 覆盖，复合口径 100-110-121 = +21%）
+- **界面轻量化第一步**（同日追加）：导航收敛为四区（驾驶舱置顶 + 项目中心/数据资产/AI 趋势三组，页面零改动仅 App.tsx）；项目列表「状态点」列（● 目标超支红 / 报价情报与快照异动橙，Tooltip 显示原因）——纯逻辑 src/projectStatus.ts（vitest 覆盖，复用 computeTargetStatuses/detectSnapshotChanges）
 - ⚠️ 铁律：项目目标成本数据依赖用户设定（生产库仅 2 条），驾驶舱预警以目标设定为前提
 
 # CostHub - 成本管理平台 v2.3.19
