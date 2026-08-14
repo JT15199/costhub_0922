@@ -5,7 +5,8 @@
 import { useEffect, useState } from 'react';
 import { Select, Button, Space, Modal, Slider, Tag, Input, Checkbox, message, Empty, Radio, Table, Row, Col } from 'antd';
 import { RadarChartOutlined, LinkOutlined, EditOutlined, SearchOutlined, AimOutlined } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from 'echarts-for-react/lib/core';
+import echarts from '../echartsSetup';
 import { getProjects, getCompetitors, getFeatures, getAllScoresForRefs, saveScore, getProjectBOMs, getCompetitorBOMs, getModuleNames, getModuleFeatureLinks, setModuleFeatureLinks } from '../db';
 import { chartTooltip, chartTextMuted, chartSplitLine } from '../chartTheme';
 
@@ -349,7 +350,7 @@ export default function CompetitivenessRadar() {
         <>
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 520px', minWidth: 380 }}>
-              {radarOption ? <ReactECharts option={radarOption} style={{ height: 400 }} /> : null}
+              {radarOption ? <ReactECharts echarts={echarts} option={radarOption} style={{ height: 400 }} /> : null}
             </div>
             <div style={{ flex: '0 1 320px', minWidth: 260 }}>
               <div style={{ fontSize: 12, color: chartTextMuted(), marginBottom: 8 }}>评分概览（与雷达图数值一致 · 成本分=同特性内成本越低越高）</div>
@@ -416,7 +417,7 @@ export default function CompetitivenessRadar() {
             </div>
             <Row gutter={14}>
               <Col span={10}>
-                {perCostOption ? <ReactECharts option={perCostOption} style={{ height: 260 }} /> : (
+                {perCostOption ? <ReactECharts echarts={echarts} option={perCostOption} style={{ height: 260 }} /> : (
                   <div style={{ textAlign: 'center', padding: '70px 20px', color: '#94A3B8', fontSize: 12, border: '1px dashed #E2E8F0', borderRadius: 8 }}>
                     配置模块-特性关联并完成评分后，这里显示各特性的每分成本对比（越低越强）
                   </div>
@@ -468,7 +469,7 @@ export default function CompetitivenessRadar() {
               <span style={{ fontSize: 11, color: '#94A3B8', marginLeft: 8 }}>柱 = 我方规格评分 − 竞品（正=规格更强）；曲线 = 我方特性成本 − 竞品（负=成本更低）</span>
             </div>
             {wallOption ? (
-              <ReactECharts option={wallOption} style={{ height: 400 }} />
+              <ReactECharts echarts={echarts} option={wallOption} style={{ height: 400 }} />
             ) : (
               <div style={{ textAlign: 'center', padding: '70px 20px', color: '#94A3B8', fontSize: 12, border: '1px dashed #E2E8F0', borderRadius: 8 }}>
                 成本长城图需要至少 1 个竞品参与对比——生成雷达后切换到此视图

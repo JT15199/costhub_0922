@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import DataTable from '../components/DataTable';
 import { Table, Select, Space, Button, Row, Col, Modal, Form, Input, InputNumber, Tag, Slider, message, Popconfirm, Tabs } from 'antd';
 import { EditOutlined, DeleteOutlined, SettingOutlined, LineChartOutlined, SearchOutlined, AimOutlined, DollarOutlined } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from 'echarts-for-react/lib/core';
+import echarts from '../echartsSetup';
 import { getProjects, getProjectBOMs, getCompetitors, getCompetitorBOMs, getFeatures, saveFeature, deleteFeature, getScores, saveScore } from '../db';
 import { chartTooltip, chartAxisStyle, chartGrid, chartTextMuted, chartSplitLine, barGradient } from '../chartTheme';
 import CompetitivenessRadar from '../components/CompetitivenessRadar';
@@ -163,7 +164,7 @@ export default function Compare() {
                   </div>
                   <Row gutter={14}>
                     <Col span={16}>
-                      {features.length > 0 ? <ReactECharts option={radarOption} style={{ height: 420 }} /> : (
+                      {features.length > 0 ? <ReactECharts echarts={echarts} option={radarOption} style={{ height: 420 }} /> : (
                         <div style={{ textAlign: 'center', padding: 80, color: '#999' }}>请先添加产品特性（点击"添加特性"按钮）</div>
                       )}
                     </Col>
@@ -193,7 +194,7 @@ export default function Compare() {
             key: 'cost', label: <span><DollarOutlined /> 成本对比</span>, children: (
               <div>
                 <Row gutter={14}>
-                  <Col span={14}><div className="content-card"><ReactECharts option={barOption} style={{ height: 380 }} /></div></Col>
+                  <Col span={14}><div className="content-card"><ReactECharts echarts={echarts} option={barOption} style={{ height: 380 }} /></div></Col>
                   <Col span={10}>
                     <div className="content-card">
                       <Table dataSource={[

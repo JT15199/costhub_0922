@@ -1,21 +1,22 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { message, Dropdown, Modal, Badge } from 'antd';
 import { runAutoCompare } from './autoCompare';
 import { getInsights } from './db';
 import defaultLogo from './assets/costhub-logo.png';
-import Dashboard from './pages/Dashboard';
-import PartsLibrary from './pages/PartsLibrary';
-import ModuleLibrary from './pages/ModuleLibrary';
-import Projects from './pages/Projects';
-import Competitors from './pages/Competitors';
-import Compare from './pages/Compare';
-import Reports from './pages/Reports';
-import Decomposition from './pages/Decomposition';
-import SupplierManagement from './pages/SupplierManagement';
-import Settings from './pages/Settings';
-import LocalAIAssistant from './pages/LocalAIAssistant';
-import WorkLog from './pages/WorkLog';
-import LoginScreen from './pages/LoginScreen';
+// 页面级懒加载（v2.3.19 性能优化）：按页分包，首次进入才加载对应 chunk
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const PartsLibrary = lazy(() => import('./pages/PartsLibrary'));
+const ModuleLibrary = lazy(() => import('./pages/ModuleLibrary'));
+const Projects = lazy(() => import('./pages/Projects'));
+const Competitors = lazy(() => import('./pages/Competitors'));
+const Compare = lazy(() => import('./pages/Compare'));
+const Reports = lazy(() => import('./pages/Reports'));
+const Decomposition = lazy(() => import('./pages/Decomposition'));
+const SupplierManagement = lazy(() => import('./pages/SupplierManagement'));
+const Settings = lazy(() => import('./pages/Settings'));
+const LocalAIAssistant = lazy(() => import('./pages/LocalAIAssistant'));
+const WorkLog = lazy(() => import('./pages/WorkLog'));
+const LoginScreen = lazy(() => import('./pages/LoginScreen'));
 import { ThemeProvider } from './theme/ThemeContext';
 import { ThemeSwitcher } from './theme/ThemeSwitcher';
 import {
@@ -200,7 +201,9 @@ export default function App() {
           className={key === active ? 'page-enter' : ''}
           style={{ display: key === active ? 'block' : 'none', height: '100%' }}
         >
-          {renderPage(key)}
+          <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>加载中…</div>}>
+            {renderPage(key)}
+          </Suspense>
         </div>
       ))}
     </>

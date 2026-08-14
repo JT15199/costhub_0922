@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Spin } from 'antd';
 import { BarChartOutlined, ShopOutlined } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from 'echarts-for-react/lib/core';
+import echarts from '../echartsSetup';
 import { getDashboardStats, getProjects, getProjectBOMs, getCompetitors, getCompetitorBOMs } from '../db';
 import { getCategoryColor } from '../constants';
 import DataTable from '../components/DataTable';
@@ -110,11 +111,11 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         <div className="content-card">
           <div className="card-header"><h3><BarChartOutlined /> 各项目BOM成本</h3></div>
-          <ReactECharts option={projBarOption} style={{ height: 320 }} />
+          <ReactECharts echarts={echarts} option={projBarOption} style={{ height: 320 }} />
         </div>
         <div className="content-card">
           <div className="card-header"><h3><ShopOutlined /> 竞品BOM成本</h3></div>
-          <ReactECharts option={compBarOption} style={{ height: 320 }} />
+          <ReactECharts echarts={echarts} option={compBarOption} style={{ height: 320 }} />
         </div>
       </div>
 

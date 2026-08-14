@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Table, Button, Select, Space, Modal, Form, Input, InputNumber, Tag, message, Popconfirm, Tooltip, AutoComplete, Checkbox } from 'antd';
 import { PlusOutlined, CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, AppstoreOutlined, TagOutlined, InboxOutlined, BarChartOutlined, CheckSquareOutlined, SortAscendingOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from 'echarts-for-react/lib/core';
+import echarts from '../echartsSetup';
 import { getProjects, getLibraryModules, getLibraryModuleItems, updateLibraryModuleItem, deleteLibraryModule, renameLibraryModule, saveModule, deleteBOMItem, addBOMItem, getParts, getMainCategories, getModuleCategories, recordProjectCostSnapshot } from '../db';
 import { MAIN_CATEGORIES, SUB_CATEGORIES, getCategoryColor } from '../constants';
 import DataTable from '../components/DataTable';
@@ -591,7 +592,7 @@ export default function ModuleLibrary() {
                 {subNames.length > 0 && (
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ textAlign: 'center', marginBottom: 4 }}><b style={{ fontSize: 12, color: '#64748B' }}>子类成本分布对比</b></div>
-                    <ReactECharts option={cmpBarOption} style={{ height: Math.max(180, subNames.length * 40 + 40) }} />
+                    <ReactECharts echarts={echarts} option={cmpBarOption} style={{ height: Math.max(180, subNames.length * 40 + 40) }} />
                   </div>
                 )}
                 <DataTable tableId="mod_item_cmp" dataSource={rows} rowKey="key" size="small" pagination={false} scroll={{ x: 1200 }}
@@ -627,7 +628,7 @@ export default function ModuleLibrary() {
               {barData.length > 0 && (
                 <div style={{ maxWidth: 600, margin: '16px auto 0' }}>
                   <div style={{ textAlign: 'center', marginBottom: 6 }}><b style={{ fontSize: 13 }}><BarChartOutlined /> 子类成本分布</b></div>
-                  <ReactECharts option={barOption} style={{ height: Math.max(160, barData.length * 34 + 30) }} />
+                  <ReactECharts echarts={echarts} option={barOption} style={{ height: Math.max(160, barData.length * 34 + 30) }} />
                 </div>
               )}
             </div>

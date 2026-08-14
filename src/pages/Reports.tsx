@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Select, Button, Space, Row, Col, message, Card, Statistic, Tag } from 'antd';
 import { DownloadOutlined, FileOutlined, SearchOutlined } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from 'echarts-for-react/lib/core';
+import echarts from '../echartsSetup';
 import * as XLSX from 'xlsx';
 import { getProjects, getProject, getProjectBOMs } from '../db';
 import { CATEGORY_COLORS, getCategoryColor } from '../constants';
@@ -125,8 +126,8 @@ export default function Reports() {
           </div>
 
           <Row gutter={16} style={{ marginBottom: 16 }}>
-            <Col span={12}><div className="content-card"><div className="card-header"><h3>成本结构</h3></div><ReactECharts option={pieOption} style={{ height: 320 }} /></div></Col>
-            <Col span={12}><div className="content-card"><div className="card-header"><h3>大类成本</h3></div><ReactECharts option={barOption} style={{ height: 320 }} /></div></Col>
+            <Col span={12}><div className="content-card"><div className="card-header"><h3>成本结构</h3></div><ReactECharts echarts={echarts} option={pieOption} style={{ height: 320 }} /></div></Col>
+            <Col span={12}><div className="content-card"><div className="card-header"><h3>大类成本</h3></div><ReactECharts echarts={echarts} option={barOption} style={{ height: 320 }} /></div></Col>
           </Row>
 
           <div className="content-card">
@@ -148,7 +149,7 @@ export default function Reports() {
           </div>
           <div className="content-card">
             <div className="card-header"><h3>成本对比</h3></div>
-            <ReactECharts option={compareBarOption} style={{ height: 350 }} />
+            <ReactECharts echarts={echarts} option={compareBarOption} style={{ height: 350 }} />
           </div>
         </>
       )}

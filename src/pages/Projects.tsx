@@ -2,7 +2,8 @@ import { useEffect, useState, useMemo, useRef } from 'react';
 import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Tag, message, Popconfirm, Tabs, Row, Col, Tooltip, Card, Statistic, Upload, Alert, DatePicker, Checkbox, AutoComplete, Radio, Tree, Badge } from 'antd';
 import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined, InboxOutlined, DollarOutlined, TagOutlined, LineChartOutlined, BarChartOutlined, ToolOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, AimOutlined, BuildOutlined, HistoryOutlined, EyeOutlined, CheckOutlined, CloseOutlined, RobotOutlined, BulbOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from 'echarts-for-react/lib/core';
+import echarts from '../echartsSetup';
 import { getProjects, saveProject, deleteProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, syncProjectModulesToLibrary, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, deleteSku, saveSkuDiff, deleteSkuDiff, getAllSkuDiffs, getAllSkus, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead } from '../db';
 import { TIERS, PROJECT_STATUSES, PROJECT_TYPES, SCREEN_SIZES, RESOLUTIONS, REFRESH_RATES, PANEL_TYPES, MAIN_CATEGORIES, SUB_CATEGORIES, MEASURE_STATUSES, getCategoryColor } from '../constants';
 import { getMainCategories } from '../db';
@@ -1173,8 +1174,8 @@ export default function Projects() {
                 return (
                   <div>
                     <Row gutter={14} style={{ marginBottom: 14 }}>
-                      <Col span={12}><div className="content-card" style={{ margin: 0, padding: 12 }}><div className="card-header"><h3>模块成本分布</h3></div><ReactECharts option={modBarOption} style={{ height: 280, maxHeight: 400 }} /></div></Col>
-                      <Col span={12}><div className="content-card" style={{ margin: 0, padding: 12 }}><div className="card-header"><h3>领域成本 vs 目标</h3></div><ReactECharts option={domainBarOption} style={{ height: 280 }} /></div></Col>
+                      <Col span={12}><div className="content-card" style={{ margin: 0, padding: 12 }}><div className="card-header"><h3>模块成本分布</h3></div><ReactECharts echarts={echarts} option={modBarOption} style={{ height: 280, maxHeight: 400 }} /></div></Col>
+                      <Col span={12}><div className="content-card" style={{ margin: 0, padding: 12 }}><div className="card-header"><h3>领域成本 vs 目标</h3></div><ReactECharts echarts={echarts} option={domainBarOption} style={{ height: 280 }} /></div></Col>
                     </Row>
                     {/* Target setting table */}
                     <div className="content-card" style={{ margin: 0, padding: 12 }}>
@@ -1556,7 +1557,7 @@ export default function Projects() {
                       yAxis: { type: 'value', name: '¥', ...chartAxisStyle() },
                       series: [{ type: 'line', smooth: true, symbol: 'circle', symbolSize: 8, data: sorted.map((r: any) => r.reviewed_cost), itemStyle: { color: '#0A84FF' }, lineStyle: { width: 2.5 }, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(10,132,255,0.25)' }, { offset: 1, color: 'rgba(10,132,255,0)' }] } }, label: { show: true, formatter: (p: any) => `¥${p.value.toFixed(0)}`, fontSize: 11, color: chartTextMuted() } }],
                     };
-                    return <div className="content-card" style={{ margin: '0 0 12px 0', padding: 12 }}><div className="card-header"><h3>成本趋势</h3></div><ReactECharts option={trendOption} style={{ height: 250 }} /></div>;
+                    return <div className="content-card" style={{ margin: '0 0 12px 0', padding: 12 }}><div className="card-header"><h3>成本趋势</h3></div><ReactECharts echarts={echarts} option={trendOption} style={{ height: 250 }} /></div>;
                   })()}
                   <DataTable tableId="proj_reviews" dataSource={reviews} rowKey="id" size="small" pagination={false}
                     columns={[
@@ -1686,7 +1687,7 @@ export default function Projects() {
                         </span>
                       </Space>
                     </div>
-                    {skuOption && <div style={{ marginBottom: 10 }}><ReactECharts option={skuOption} style={{ height: 180 }} /></div>}
+                    {skuOption && <div style={{ marginBottom: 10 }}><ReactECharts echarts={echarts} option={skuOption} style={{ height: 180 }} /></div>}
                     {skus.length > 0 ? (
                       <div style={{ overflowX: 'auto', border: '1px solid #E8ECF1', borderRadius: 8 }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
