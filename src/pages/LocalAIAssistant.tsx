@@ -472,7 +472,7 @@ async function learnRulesFromDB(
         error_message: learnErr || '',
         model_name: model,
       });
-      if (learnErr) continue;
+      if (learnErr) { console.warn('[模块学习] 失败（不影响对话）:', learnErr); continue; }
       const text = learnText.trim();
       // 解析关键词：优先提取 JSON 数组，失败则按行解析兜底
       let keywords: string[] = [];
@@ -650,6 +650,17 @@ async function classifyBOMWithAI(
   onProgress?: (done: number, total: number, summary: string) => void,
 ): Promise<any[]> {
   const db = await getDb();
+  // ===== 连接预检：Ollama 不可达立即失败，不假装分析 =====
+  {
+    let reachable = false;
+    for (const u of [ollamaUrl.replace(/\/$/, ''), 'http://127.0.0.1:11434']) {
+      try {
+        const rr = await invoke<{ success: boolean }>('http_get', { request: { url: u + '/api/tags', headers: {}, body: null } });
+        if (rr?.success) { reachable = true; break; }
+      } catch { /* 试下一个 */ }
+    }
+    if (!reachable) throw new Error('无法连接 Ollama（' + ollamaUrl + ' 与 127.0.0.1 均不通），请先确认服务已启动并测试连接');
+  }
   // 加载用户自定义规则（数据库），分类时优先使用
   const dbRules = await getModuleRules().catch(() => []);
   const knowledge = await buildExistingPartKnowledge();
@@ -803,8 +814,8 @@ ${itemList}` },
             (e) => { streamErr = e; finish(); }, // error
             { num_predict: 1500, temperature: 0.2, think: false, endpoint: 'native' }, // 原生端点，think:false 确定生效
           ).then(cleanup => { setTimeout(cleanup, 30000); }); // 完成后30秒清理监听器
-          // 超时保护：3分钟仍无完成则视为失败，跳过该批
-          setTimeout(() => finish(), 180000);
+          // 超时保护：3分钟仍无任何响应则明确失败（不能假装完成/走兜底）
+          setTimeout(() => { if (!streamDone) { streamErr = streamErr || 'Ollama 无响应（超过 180 秒未返回任何内容），请确认服务正常'; finish(); } }, 180000);
         });
         // 审计日志：智能导入分类（本地模型）
         logLocalAICall({
@@ -904,7 +915,8 @@ ${itemList}` },
         } // else: 有JSON数组的分支结束
       } catch (e) {
         console.error('分类批次失败:', e);
-        aiCount += toAsk.length; // 失败的器件标记为未分类，避免进度卡住
+        // 该批失败 → 这些器件会走规则/历史兜底（调用方会提示兜底数量），不静默假装成功
+        aiCount += toAsk.length;
       }
     }
     onProgress?.(Math.min(i + BATCH, rows.length), rows.length, `本批 ${existingCount} 个沿用历史，${aiCount} 个AI分析`);
@@ -1919,7 +1931,9 @@ export default function LocalAIAssistant() {
                     });
                     setImportRows(classified);
                     setImportClassifying(false);
-                    message.success('AI分类完成，请核对');
+                    const fb = classified.filter((x: any) => x.source === 'rule' || x.source === 'fallback').length;
+                    if (fb > 0) message.warning(`分类完成，但 ${fb} 项未能由 AI 解析（已用规则/历史经验兜底），请核对`);
+                    else message.success('AI分类完成，请核对');
                   } catch (e: any) {
                     message.error(`分类失败：${e?.message || e}`);
                   } finally { setImportClassifying(false); }

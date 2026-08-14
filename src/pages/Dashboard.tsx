@@ -121,6 +121,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         setRecentPriceChanges(await getRecentPartPriceChanges(8));
         setAuditLastAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
         if ((r as any).aiSkipped) message.info('数据无变化，AI 未重复思考（规则检查已更新）');
+        else if ((r as any).aiFailed) message.warning('规则发现已更新；AI 深度洞察暂不可用（本地模型未连接或失败），可修复连接后重试');
       }
     } catch (e) { console.warn('巡检失败:', e); }
     setAuditRunning(false);

@@ -556,7 +556,7 @@ export default function Projects() {
         model_name: model,
       });
     } catch (e: any) {
-      setHealthAiSummary(''); // 本地模型不可用时静默（规则条已足够）
+      setHealthAiSummary('AI 小结不可用：' + String(e?.message || e).slice(0, 120) + '（规则检查结果仍准确）');
     }
     setHealthAiLoading(false);
   };
