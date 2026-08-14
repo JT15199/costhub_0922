@@ -170,6 +170,63 @@ def main():
     print('ODM 供应商：4 条（含报价历史）')
 
     conn.commit()
+    # ===== 7) 竞争力雷达数据修复与补齐（v2.3.19）=====
+    # 7.1 清理重复五维（历史残留两套：迁移引用到 id 最小的一套，删除重复）
+    radar_names = ['性能', '规格', '显示', '外观', '可靠性']
+    feat_id = {}
+    for nm in radar_names:
+        rows = cur.execute("SELECT id FROM product_features WHERE name=? AND type='radar' ORDER BY id", (nm,)).fetchall()
+        if len(rows) > 1:
+            for dup in rows[1:]:
+                # 直接删重复特性的引用（后续重建标准关联+重插评分，无需迁移；迁移会撞 UNIQUE 约束）
+                cur.execute('DELETE FROM product_scores WHERE feature_id=?', (dup[0],))
+                cur.execute('DELETE FROM module_feature_links WHERE feature_id=?', (dup[0],))
+                cur.execute('DELETE FROM product_features WHERE id=?', (dup[0],))
+        feat_id[nm] = rows[0][0]
+    # 7.2 标准模块-特性关联（清空重建：M270 系标准模块名）
+    cur.execute("DELETE FROM module_feature_links")
+    link_plan = {
+        '面板模块': ['显示', '规格'],
+        '驱动板模块': ['性能'],
+        '电源模块': ['可靠性'],
+        '结构件': ['外观', '可靠性'],
+        '包装材料': ['外观'],
+    }
+    for mod, fnames in link_plan.items():
+        for fn in fnames:
+            cur.execute("INSERT OR IGNORE INTO module_feature_links (module_name, feature_id) VALUES (?,?)", (mod, feat_id[fn]))
+    # 7.3 竞品 1-5 补齐标准 BOM + bom_cost（6/7 已完整）
+    comp_plan = {
+        1: ('Dell P2419H', [('面板模块', '面板 23.8 FHD', 200, 1), ('驱动板模块', '驱动板', 40, 1), ('电源模块', '内置电源', 25, 1), ('结构件', '外壳', 45, 1), ('包装材料', '包装', 10, 1)], 320),
+        2: ('AOC 24G2', [('面板模块', '面板 23.8 144Hz', 260, 1), ('驱动板模块', '驱动板', 55, 1), ('电源模块', '内置电源', 28, 1), ('结构件', '外壳', 48, 1), ('包装材料', '包装', 10, 1)], 401),
+        3: ('LG 27UK850', [('面板模块', '面板 27 4K', 480, 1), ('驱动板模块', '驱动板', 70, 1), ('电源模块', '内置电源', 40, 1), ('结构件', '外壳', 60, 1), ('包装材料', '包装', 14, 1)], 664),
+        4: ('ASUS VG27AQ', [('面板模块', '面板 27 2K 144', 420, 1), ('驱动板模块', '驱动板', 65, 1), ('电源模块', '内置电源', 38, 1), ('结构件', '外壳', 55, 1), ('包装材料', '包装', 12, 1)], 590),
+        5: ('BenQ EW3270U', [('面板模块', '面板 32 4K', 520, 1), ('驱动板模块', '驱动板', 75, 1), ('电源模块', '内置电源', 45, 1), ('结构件', '外壳', 70, 1), ('包装材料', '包装', 16, 1)], 726),
+    }
+    for cid, (cname, items, bc) in comp_plan.items():
+        cur.execute('DELETE FROM competitor_boms WHERE competitor_id=?', (cid,))
+        for (mod, pname, cost, qty) in items:
+            cur.execute('INSERT INTO competitor_boms (competitor_id, part_name, part_model, module_name, estimated_cost, quantity) VALUES (?,?,?,?,?,?)', (cid, pname, mod, mod, cost, qty))
+        cur.execute('UPDATE competitors SET bom_cost=? WHERE id=?', (bc, cid))
+    # 7.4 五维评分补齐（差异化：我方 M270/M280/M300 + 全部竞品）
+    score_plan = {
+        ('project', 9):  [8.0, 8.0, 8.5, 7.5, 8.0],   # M270 27寸主流
+        ('project', 10): [8.5, 8.5, 9.0, 8.0, 8.0],   # M280 2K电竞
+        ('project', 11): [7.5, 9.0, 9.5, 7.0, 8.5],   # M300 4K专业
+        ('competitor', 1): [6.0, 6.5, 6.0, 7.0, 8.0], # Dell 入门
+        ('competitor', 2): [8.0, 7.5, 7.0, 7.5, 7.5], # AOC 电竞入门
+        ('competitor', 3): [7.0, 8.5, 8.5, 7.5, 8.0], # LG 4K专业
+        ('competitor', 4): [8.5, 8.0, 8.0, 7.0, 7.5], # ASUS 2K电竞
+        ('competitor', 5): [7.0, 8.0, 8.0, 7.5, 8.5], # BenQ 32 4K
+        ('competitor', 6): [7.5, 8.0, 8.0, 8.0, 8.5], # 三星
+        ('competitor', 7): [7.5, 8.5, 8.5, 7.5, 8.0], # LG UP850
+    }
+    for (rtype, rid), scores in score_plan.items():
+        for (nm, sc) in zip(radar_names, scores):
+            cur.execute('DELETE FROM product_scores WHERE ref_type=? AND ref_id=? AND feature_id=?', (rtype, rid, feat_id[nm]))
+            cur.execute('INSERT INTO product_scores (ref_type, ref_id, feature_id, score) VALUES (?,?,?,?)', (rtype, rid, feat_id[nm], sc))
+
+    conn.commit()
     # ===== 验证 ======
     print('=== 验证 ===')
     print('目标成本：', cur.execute("SELECT COUNT(*) FROM project_targets WHERE remark='__seed_demo__'").fetchone()[0] + cur.execute("SELECT COUNT(*) FROM project_targets WHERE remark != '__seed_demo__'").fetchone()[0], '条（全部）')

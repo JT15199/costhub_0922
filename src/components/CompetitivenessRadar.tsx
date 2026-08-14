@@ -184,6 +184,7 @@ export default function CompetitivenessRadar() {
       type: 'radar' as const,
       data: radarProducts.map((p, idx) => {
         const c = RADAR_COLORS[idx % RADAR_COLORS.length];
+        const isMine = idx === 0; // 我方：加粗描边 + 数据点强调；竞品：弱化便于对比
         return {
           name: p.name,
           // 未评分特性 / 缺失成本 → null（不画该顶点），多边形对应边断开
@@ -192,8 +193,10 @@ export default function CompetitivenessRadar() {
             featureCostAvg(p), // 成本竞争力 = 特性成本分均值（同特性内成本越低分越高）
           ],
           itemStyle: { color: c },
-          areaStyle: { color: c + '26' },
-          lineStyle: { width: 2 },
+          areaStyle: { color: c + (isMine ? '33' : '1F') },
+          lineStyle: { width: isMine ? 3 : 1.5 },
+          symbol: isMine ? 'circle' : 'none',
+          symbolSize: 6,
         };
       }),
     }],
@@ -303,6 +306,12 @@ export default function CompetitivenessRadar() {
             name: `${r.name} 规格差`, type: 'bar' as const, yAxisIndex: 0, barGap: '10%',
             itemStyle: { color: c, borderRadius: [3, 3, 0, 0] },
             label: { show: true, position: 'top', formatter: (p: any) => (p.value === null || p.value === undefined ? '' : (p.value > 0 ? '+' : '') + p.value), fontSize: 9.5, color: chartTextMuted() },
+            markLine: {
+              silent: true, symbol: 'none',
+              lineStyle: { color: 'rgba(148,163,184,0.55)', type: 'dashed', width: 1 },
+              label: { show: false },
+              data: [{ yAxis: 0 }],
+            },
             data: features.map(f => scoreDiff(r, f.id)),
           },
           {
@@ -346,6 +355,18 @@ export default function CompetitivenessRadar() {
         <Button type="primary" size="small" icon={<AimOutlined />} onClick={buildRadar} disabled={!selPid || selCids.length === 0}>生成雷达</Button>
       </div>
 
+      {radarProducts.length > 0 && (() => {
+        const noCost = radarProducts.filter(p => p.bomCost === null);
+        const noScore = radarProducts.filter(p => Object.keys(p.scoreMap).length === 0);
+        const noLink = !anyCostLinked;
+        return (noCost.length > 0 || noScore.length > 0 || noLink) ? (
+          <div style={{ marginBottom: 10, padding: '6px 10px', background: '#FFF7E6', border: '1px solid #FFE7BA', borderRadius: 8, fontSize: 11.5, color: '#B45309', display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+            {noCost.length > 0 && <span>⚠️ {noCost.map(p => p.name).join('、')} 无成本数据（成本竞争力/长城图成本差不完整）</span>}
+            {noScore.length > 0 && <span>⚠️ {noScore.map(p => p.name).join('、')} 未评分（雷达特性维度空白）</span>}
+            {noLink && <span>⚠️ 模块-特性关联未配置——先点「模块-特性关联」</span>}
+          </div>
+        ) : null;
+      })()}
       {radarProducts.length > 0 && (viewMode === 'radar' ? (
         <>
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
