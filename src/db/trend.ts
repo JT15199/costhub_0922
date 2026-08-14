@@ -305,7 +305,7 @@ export async function searchDecompositionNodes(query: string) {
 export async function saveRollupContribution(data: any) {
   const d = await getDb();
   const r = await d.execute(
-    'INSERT INTO rollup_contributions (parent_snapshot_id, child_component_id, cost_ratio_used, direction_used, created_at) VALUES (?,?,?,?,datetime(\'now\',\'localtime\'))',
+    'INSERT INTO rollup_contributions (parent_snapshot_id, child_component_id, cost_ratio_used, direction_used) VALUES (?,?,?,?)',
     [data.parent_snapshot_id, data.child_component_id, data.cost_ratio_used ?? null, data.direction_used || '']
   );
   return r.lastInsertId;

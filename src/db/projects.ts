@@ -87,7 +87,7 @@ export async function copyProject(id: number, newCode: string, newName: string) 
   const boms = await d.select<any[]>('SELECT * FROM project_boms WHERE project_id = ? AND COALESCE(is_deleted, 0) = 0', [id]);
   for (const b of boms) {
     // 复制完整快照列（名称/型号/单价/分类/标记），保证复制项目与源项目显示一致
-    await d.execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, part_name, part_model, part_cost, main_category, sub_category, is_module_item, ref_project_id, is_reference, reference_remark, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime(\'now\',\'localtime\'))',
+    await d.execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, part_name, part_model, part_cost, main_category, sub_category, is_module_item, ref_project_id, is_reference, reference_remark) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [r.lastInsertId, b.part_id, b.module_name, b.quantity, b.remark || '', b.part_name || '', b.part_model || '', b.part_cost || 0, b.main_category || '', b.sub_category || '', b.is_module_item || 0, b.ref_project_id || 0, b.is_reference || 0, b.reference_remark || '']);
   }
   const mods = await d.select<any[]>('SELECT * FROM modules WHERE project_id = ?', [id]);
@@ -227,7 +227,7 @@ export async function addBOMItem(projectId: number, partId: number, quantity = 1
   } else {
     part = await d.select<any[]>('SELECT name, model, cost, main_category, sub_category FROM parts WHERE id = ?', [partId]).then(r => r[0]);
   }
-  await d.execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, ref_project_id, part_name, part_model, part_cost, main_category, sub_category, is_module_item, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime(\'now\',\'localtime\'))',
+  await d.execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, ref_project_id, part_name, part_model, part_cost, main_category, sub_category, is_module_item) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
     [projectId, partId, moduleName, quantity, remark, refProjectId, part?.name || '', part?.model || '', part?.cost || 0, part?.main_category || '', part?.sub_category || '', 0]);
   if (autoSnapshot) await recordProjectCostSnapshot(projectId, 'part_added', `新增器件到${moduleName || '未归类'}`);
 }
@@ -240,7 +240,7 @@ export async function addBOMItem(projectId: number, partId: number, quantity = 1
  */
 export async function addVirtualBOMItem(projectId: number, data: { name: string; model?: string; cost?: number; quantity?: number; moduleName?: string; mainCategory?: string; subCategory?: string; remark?: string }) {
   await (await getDb()).execute(
-    'INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, part_name, part_model, part_cost, main_category, sub_category, is_module_item, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime(\'now\',\'localtime\'))',
+    'INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, part_name, part_model, part_cost, main_category, sub_category, is_module_item) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
     [projectId, 0, data.moduleName || '未归类', data.quantity ?? 1, data.remark || '', data.name || '虚拟器件', data.model || '', data.cost ?? 0, data.mainCategory || '硬件类', data.subCategory || '', 1]
   );
   await recordProjectCostSnapshot(projectId, 'part_added', `新增虚拟器件：${data.name || ''}（${data.moduleName || '未归类'}）`);
