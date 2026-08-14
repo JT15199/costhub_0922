@@ -7,7 +7,7 @@ import { Button, Input, Space, Modal, Tag, Checkbox, Radio, message, Upload, Ale
 import { UploadOutlined, DeleteOutlined, EditOutlined, PlusOutlined, FolderOpenOutlined, ThunderboltOutlined, InboxOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { getSetting, loadContextEntries, saveContextEntry, deleteContextEntry } from '../db';
-import { startOllamaStream } from '../ollama';
+import { startOllamaStream, logLocalAICall } from '../ollama';
 import { extractPptxOutline } from '../pptxExtract';
 import pptxgen from 'pptxgenjs';
 
@@ -194,8 +194,27 @@ JSON 格式（必须严格符合）：
       }
       await invoke('save_export_file', { fileName: name, base64Data: b64 });
       setLastFile(name);
+      logLocalAICall({
+        request_type: 'demo_generate',
+        material_name: material.slice(0, 80),
+        system_prompt: sysPrompt.slice(0, 1500),
+        user_prompt: userPrompt.slice(0, 1500),
+        response_summary: '生成 ' + genType + '：' + title,
+        success: true,
+        model_name: model,
+      });
       message.success(`已生成 ${name}`);
     } catch (e: any) {
+      logLocalAICall({
+        request_type: 'demo_generate',
+        material_name: (material || '').slice(0, 80),
+        system_prompt: sysPrompt.slice(0, 1500),
+        user_prompt: userPrompt.slice(0, 1500),
+        response_summary: '',
+        success: false,
+        error_message: String(e?.message || e).slice(0, 300),
+        model_name: model,
+      });
       setErrorMsg(String(e?.message || e));
       message.error(`生成失败：${String(e?.message || e).slice(0, 120)}`);
     } finally {

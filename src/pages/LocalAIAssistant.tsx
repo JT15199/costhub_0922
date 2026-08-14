@@ -13,7 +13,7 @@ import { invoke } from '@tauri-apps/api/core';
 import * as XLSX from 'xlsx';
 import { getDb, saveProject, getModuleRules, saveModuleRule, deleteModuleRule, clearModuleRules, loadContextEntries, saveContextEntry, deleteContextEntry, getSetting, setSetting, saveAIRequestLog } from '../db';
 import { MAIN_CATEGORIES } from '../constants';
-import { startOllamaStream } from '../ollama';
+import { startOllamaStream, logLocalAICall } from '../ollama';
 import DemoGenerator from '../components/DemoGenerator';
 
 // ===== Types =====
@@ -462,6 +462,16 @@ async function learnRulesFromDB(
         ).then(cleanup => { setTimeout(cleanup, 20000); });
         setTimeout(() => finish(), 60000);
       });
+      logLocalAICall({
+        request_type: 'module_learn',
+        material_name: module || '',
+        system_prompt: systemPrompt.slice(0, 1000),
+        user_prompt: (sampleList || '').slice(0, 1000),
+        response_summary: (learnText || '').slice(0, 200),
+        success: !learnErr,
+        error_message: learnErr || '',
+        model_name: model,
+      });
       if (learnErr) continue;
       const text = learnText.trim();
       // 解析关键词：优先提取 JSON 数组，失败则按行解析兜底
@@ -795,6 +805,17 @@ ${itemList}` },
           ).then(cleanup => { setTimeout(cleanup, 30000); }); // 完成后30秒清理监听器
           // 超时保护：3分钟仍无完成则视为失败，跳过该批
           setTimeout(() => finish(), 180000);
+        });
+        // 审计日志：智能导入分类（本地模型）
+        logLocalAICall({
+          request_type: 'bom_classify',
+          material_name: (itemList || '').slice(0, 100),
+          system_prompt: systemPrompt.slice(0, 1500),
+          user_prompt: (itemList || '').slice(0, 1500),
+          response_summary: (fullText || '').slice(0, 200),
+          success: !streamErr,
+          error_message: streamErr || '',
+          model_name: model,
         });
         if (streamErr) throw new Error(streamErr);
         let text = fullText.trim() || reasoningText.trim();
