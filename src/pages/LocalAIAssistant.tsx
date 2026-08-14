@@ -988,6 +988,7 @@ export default function LocalAIAssistant() {
   const [advisorLastRun, setAdvisorLastRun] = useState('');
   const [advisorProgress, setAdvisorProgress] = useState('');
   const [advisorInsightBusy, setAdvisorInsightBusy] = useState<number | null>(null);
+  const [advisorShowPrompt, setAdvisorShowPrompt] = useState<number | null>(null); // 展开提示词的卡片 id
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [elapsed, setElapsed] = useState(0); // 生成过程计时（秒）
@@ -1558,15 +1559,18 @@ export default function LocalAIAssistant() {
     } catch { message.warning('复制失败，请手动选择复制'); }
   };
   const setAdvisorStatus = async (id: number, status: string) => {
+    // 乐观移除：点击立即消失
+    setAdvisorList(prev => prev.filter(x => x.id !== id));
     try {
       await updateAdvisorStatus(id, status);
       await loadAdvisor();
-      message.success(status === 'done' ? '已标记处理 ✓' : '已忽略（数据变化后会重新提醒）');
-    } catch (e: any) { message.error('操作失败：' + (e?.message || e)); }
+      message.success(status === 'done' ? '已标记处理 ✓' : '已忽略（该建议数据不变将不再提醒）');
+    } catch (e: any) { message.error('操作失败：' + (e?.message || e)); await loadAdvisor(); }
   };
   const insightForAdvisor = async (ins: any) => {
     setAdvisorInsightBusy(ins.id);
     setAdvisorProgress('');
+    message.info('行业洞察进行中（搜索+分析，约 1-3 分钟），完成自动回填结论');
     try {
       const { agentSearchLoop } = await import('../trendService');
       const r = await agentSearchLoop(ins.ref_name, '', 'price-trend', m => setAdvisorProgress(m));
@@ -1643,13 +1647,20 @@ return (
                     </div>
                     <div style={{ fontSize: 12, color: '#475569', marginTop: 4, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{ins.detail}</div>
                     {ins.prompt && (
-                      <div style={{ marginTop: 6, background: '#F5F7FF', border: '1px dashed #C7D2FE', borderRadius: 6, padding: '6px 8px', fontSize: 11.5, color: '#4F46E5', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-                        💬 提示词：{ins.prompt}
-                      </div>
+                      advisorShowPrompt === ins.id ? (
+                        <div style={{ marginTop: 6, background: '#F5F7FF', border: '1px dashed #C7D2FE', borderRadius: 6, padding: '6px 8px', fontSize: 11.5, color: '#4F46E5', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                          💬 提示词：{ins.prompt}
+                          <div style={{ marginTop: 4 }}><Button size="small" type="text" onClick={() => setAdvisorShowPrompt(null)}>收起 ▲</Button></div>
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 6 }}>
+                          <Button size="small" type="text" onClick={() => setAdvisorShowPrompt(ins.id)} style={{ color: '#4F46E5', padding: 0, fontSize: 11.5 }}>💬 查看可执行提示词 ▾</Button>
+                        </div>
+                      )
                     )}
                     <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       <Button size="small" onClick={() => copyPrompt(ins.prompt)}>📋 复制提示词</Button>
-                      {ins.status === 'open' && <Button size="small" loading={advisorInsightBusy === ins.id} onClick={() => insightForAdvisor(ins)}>🔍 生成行业洞察</Button>}
+                      {ins.status === 'open' && <Button size="small" loading={advisorInsightBusy === ins.id} onClick={() => insightForAdvisor(ins)}>{advisorInsightBusy === ins.id ? '洞察中…' : '🔍 生成行业洞察'}</Button>}
                       {ins.status === 'open' && <Button size="small" type="primary" onClick={() => setAdvisorStatus(ins.id, 'done')}>✓ 已处理</Button>}
                       {ins.status === 'open' && <Button size="small" onClick={() => setAdvisorStatus(ins.id, 'dismissed')}>忽略</Button>}
                     </div>

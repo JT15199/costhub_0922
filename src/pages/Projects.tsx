@@ -322,6 +322,7 @@ export default function Projects() {
   const [insightModal, setInsightModal] = useState(false);
   const [insights, setInsights] = useState<any[]>([]);
   const [insightPendingOnly, setInsightPendingOnly] = useState(true); // 待处理/全部
+  const [insightBusyKey, setInsightBusyKey] = useState<string | null>(null); // 正在处理的 模块id|组index
   const [unreadMods, setUnreadMods] = useState<Set<string>>(new Set());
   const loadInsights = async () => {
     const list = await getInsights();
@@ -373,7 +374,21 @@ export default function Projects() {
     await loadInsights();
   };
   // 情报操作：确认同一 / 标记不同（沉淀别名，作用域=情报所属模块；处理后该组从情报消失）
-  const confirmInsightGroup = async (ins: any, g: any) => {
+  // 乐观移除指定模块的指定组（立即反馈，不等后台）
+  const optimisticRemoveGroup = (insId: number, gi: number) => {
+    setInsights(prev => prev.map(x => {
+      if (x.id !== insId) return x;
+      let d: any[] = [];
+      try { d = JSON.parse(x.insight_json); } catch { d = []; }
+      d = d.filter((_: any, idx: number) => idx !== gi);
+      return { ...x, insight_json: JSON.stringify(d) };
+    }));
+  };
+  // 确认同一：乐观移除（立即消失）→ 后台沉淀别名/重算 → 校正
+  const confirmInsightGroup = async (ins: any, g: any, gi: number) => {
+    const key = ins.id + '|' + gi;
+    setInsightBusyKey(key);
+    optimisticRemoveGroup(ins.id, gi);
     try {
       for (const r of g.rows) {
         await savePartAlias({ module_name: ins.module_name, alias_name: r.name, alias_model: r.model, canonical_name: g.name, canonical_model: '', source: 'user_confirmed' });
@@ -385,27 +400,46 @@ export default function Projects() {
       const prices = g.rows.map((r: any) => r.cost || 0);
       const maxP = Math.max(...prices), minP = Math.min(...prices);
       const save = (maxP - minP) * Math.max(...g.rows.map((r: any) => r.quantity || 1));
-      await loadInsights(); // 立即刷新弹窗：已处理的组消失
+      await loadInsights(); // 后台校正
       message.success(save > 0.01
         ? '已确认「' + g.name + '」为同一物料（别名已沉淀，下次自动归组）。若按最低价 ¥' + minP.toFixed(2) + ' 谈，每台最多可省 ¥' + save.toFixed(2) + '，建议找对应采购议价'
         : '已确认「' + g.name + '」为同一物料，别名已沉淀，下次自动归组');
     } catch (e: any) {
       console.error('确认同一失败:', e);
       message.error('确认失败：' + (e?.message || e));
+      await loadInsights(); // 失败恢复真实状态
     }
+    setInsightBusyKey(null);
   };
-  const rejectInsightGroup = async (ins: any, g: any) => {
+  const rejectInsightGroup = async (ins: any, g: any, gi: number) => {
+    const key = ins.id + '|' + gi;
+    setInsightBusyKey(key);
+    optimisticRemoveGroup(ins.id, gi); // 立即消失
     try {
       const keys = g.rows.map((r: any) => partKey(r)).sort().join(';');
       await savePartAlias({ module_name: ins.module_name, alias_name: `#NEG#${keys}`, alias_model: '', canonical_name: '', canonical_model: '', source: 'marked_different' });
       await rebuildModuleInsight(ins);
       await markInsightRead(ins.category, ins.module_name); // 保持已读，红点不闪
       window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
-      await loadInsights(); // 立即刷新弹窗：该组消失，AI 永不再建议
+      await loadInsights(); // 后台校正
       message.success('已标记不同，AI 不再建议该组合（该组已从情报中消除）');
     } catch (e: any) {
       console.error('标记不同失败:', e);
       message.error('操作失败：' + (e?.message || e));
+      await loadInsights();
+    }
+    setInsightBusyKey(null);
+  };
+  // 知道了 = 归档：立即从当前视图消失 + 已读（不重算；数据变化后新情报会自动重新出现）
+  const markKnownInsight = async (ins: any) => {
+    setInsights(prev => prev.filter(x => x.id !== ins.id));
+    try {
+      await markInsightRead(ins.category, ins.module_name);
+      window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
+      message.success('已标记已读，该模块情报已归档');
+    } catch (e: any) {
+      console.error('标记已读失败:', e);
+      await loadInsights();
     }
   };
   // 新增差异器件（add 到指定 SKU，弹窗保留作批量/复杂场景）
@@ -2888,6 +2922,16 @@ export default function Projects() {
                     <Tag color="red" style={{ margin: 0 }}>价差 ¥{(g.diff || 0).toFixed(2)}</Tag>
                   </div>
                   {g.reason && <div style={{ fontSize: 11.5, color: '#64748B', marginBottom: 4 }}>{g.reason}</div>}
+                  {(() => {
+                    const prices = g.rows.map((r: any) => r.cost || 0);
+                    const maxP = Math.max(...prices), minP = Math.min(...prices);
+                    const save = (maxP - minP) * Math.max(...g.rows.map((r: any) => r.quantity || 1));
+                    return save > 0.01 ? (
+                      <div style={{ fontSize: 11.5, marginBottom: 4, color: '#16A34A', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 6, padding: '3px 8px' }}>
+                        💰 若按最低价 ¥{minP.toFixed(2)} 谈，每台最多可省 <b>¥{save.toFixed(2)}</b>
+                      </div>
+                    ) : null;
+                  })()}
                   {g.rows.map((r: any, ri: number) => (
                     <div key={ri} style={{ fontSize: 12, display: 'flex', gap: 10, padding: '1px 0' }}>
                       <b style={{ width: 70 }}>{r.project}</b>
@@ -2896,9 +2940,9 @@ export default function Projects() {
                     </div>
                   ))}
                   <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
-                    <Button size="small" type="primary" onClick={() => confirmInsightGroup(ins, g)}>✓ 确认同一器件</Button>
-                    <Button size="small" onClick={() => rejectInsightGroup(ins, g)}>标记不同</Button>
-                    <Button size="small" onClick={async () => { await markInsightRead(ins.category, ins.module_name); await loadInsights(); }}>知道了（已读）</Button>
+                    <Button size="small" type="primary" loading={insightBusyKey === (ins.id + '|' + gi)} onClick={() => confirmInsightGroup(ins, g, gi)}>✓ 确认同一器件</Button>
+                    <Button size="small" loading={insightBusyKey === (ins.id + '|' + gi)} onClick={() => rejectInsightGroup(ins, g, gi)}>标记不同</Button>
+                    <Button size="small" onClick={() => markKnownInsight(ins)}>知道了（归档）</Button>
                   </div>
                 </div>
               ))}
