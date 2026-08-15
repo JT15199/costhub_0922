@@ -2371,7 +2371,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                         </span>
                       ))
                     : <span style={{ color: '#C7C7CC' }}>悬停节点看血缘链 · 双击聚焦</span>}
-                  {focusNodeId != null && <span style={{ color: '#FF9500', flexShrink: 0, marginLeft: 4 }}>聚焦中 <CloseOutlined style={{ fontSize: 10 }} /></span>}
+                  {focusNodeId != null && <span style={{ color: '#FF9500', flexShrink: 0, marginLeft: 4, cursor: 'pointer' }} onClick={() => { setFocusNodeId(null); setChainPath([]); clearChainHighlight(); }}>聚焦中 <CloseOutlined style={{ fontSize: 10 }} /> 取消</span>}
                 </Panel>
 <Panel position="top-left">
                   <div style={{ padding: '8px 10px', borderRadius: 10, background: 'color-mix(in srgb, var(--card-bg, #fff) 92%, transparent)', border: '1px solid var(--card-border, #E2E8F0)', boxShadow: '0 4px 12px rgba(15,23,42,0.08)', fontSize: 11, color: 'var(--text-secondary, #475569)' }}>
