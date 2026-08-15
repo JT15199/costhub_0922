@@ -98,6 +98,27 @@ export default function AIGuide({ open, onClose, onOpenSettings }: Props) {
         readyText='已启用'
         warnText='需本地模型'
       />
+      <Cap
+        title='自主建议（后台分析）'
+        desc='空闲自动扫描：项目成本久未变动 / 大额物料久未调价 / 超目标 / 单一供应商——以成本经理视角找机会与风险，处理后可撤销'
+        ready={true}
+        readyText='已启用（驾驶舱可见待处理数；忽略过的建议数据不变不再重提）'
+        warnText=''
+      />
+      <Cap
+        title='双向 AI 洞察（本地↔云端桥）'
+        desc='本地判断意图 → 脱敏审计 → 云端查实时行情 → 本地结合数据出建议；发送前自动拦截敏感信息（型号/金额/供应商），全程留痕可查，每日调用有阈值管控'
+        ready={llmReady && !!localModel}
+        readyText='云端 + 本地均已就绪（可在「本地 AI」设置调整预览/阈值）'
+        warnText={!llmReady ? '未配置云端模型——在「系统设置 → AI 服务」配置后可用' : '未配置本地模型——在「本地 AI 助手」页配置'}
+      />
+      <Cap
+        title='物料洞察树（升级）'
+        desc='洞察覆盖度一眼可见（已洞察/待洞察/大头优先），悬停看上游传导血缘链，面包屑 + 聚焦模式不迷路'
+        ready={!!localModel}
+        readyText='已启用（规则部分不依赖模型）'
+        warnText='规则可用；配置本地模型后可完整使用'
+      />
     </Modal>
   );
 }
