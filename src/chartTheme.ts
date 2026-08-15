@@ -6,20 +6,31 @@
 export const CHART_COLORS = ['#0A84FF', '#5E5CE6', '#BF5AF2', '#FF9F0A', '#34C759', '#FF375F', '#64D2FF', '#98989D'];
 
 // 读取当前主题，动态适配
+function currentTheme(): string {
+  return typeof document !== 'undefined' ? document.documentElement.getAttribute('data-theme') || '' : '';
+}
 function isMacos(): boolean {
-  return typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'macos';
+  return currentTheme() === 'macos';
+}
+// 深色主题（dark/glass 深色底）——图表文字/网格需浅色，否则看不清
+function isDark(): boolean {
+  const t = currentTheme();
+  return t === 'dark' || t === 'glass';
 }
 
 // 统一的文本颜色（适配主题）
 export function chartTextColor(): string {
+  if (isDark()) return '#E2E8F0';
   return isMacos() ? '#1D1D1F' : '#334155';
 }
 
 export function chartTextMuted(): string {
+  if (isDark()) return '#94A3B8';
   return isMacos() ? '#6E6E73' : '#64748B';
 }
 
 export function chartSplitLine(): string {
+  if (isDark()) return 'rgba(255,255,255,0.10)';
   return isMacos() ? 'rgba(0,0,0,0.08)' : 'rgba(0,0,0,0.06)';
 }
 
@@ -27,7 +38,7 @@ export function chartSplitLine(): string {
 export function chartTooltip(trigger: 'axis' | 'item' = 'axis') {
   return {
     trigger,
-    backgroundColor: isMacos() ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.96)',
+    backgroundColor: isDark() ? 'rgba(30,32,38,0.94)' : (isMacos() ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.96)'),
     borderColor: 'rgba(0,0,0,0.08)',
     borderWidth: 1,
     padding: [10, 14],
