@@ -87,8 +87,7 @@ async function callLLMWithFallback(
     }
     // 当前供应商失败，尝试下一个
     if (llmProviders.indexOf(provider) < llmProviders.length - 1) {
-      console.log(`供应商 ${provider.provider_name} 失败，降级到下一个...`);
-    }
+          }
   }
   throw new Error(`所有 LLM 供应商均调用失败${lastError ? `。最后一个错误: ${(lastError as any).message || lastError}` : '（无具体错误）'}`);
 }
@@ -294,11 +293,7 @@ async function searchSerper(query: string, apiKey: string, baseUrl = 'https://go
     finalUrl = 'https://google.serper.dev/search';
   }
 
-  console.log('Serper搜索 - 原始URL:', baseUrl);
-  console.log('Serper搜索 - 最终URL:', finalUrl);
-  console.log('Serper搜索 - 查询:', query);
-  console.log('Serper搜索 - API Key长度:', apiKey?.length);
-
+        
   const res = await rustPost(
     finalUrl,
     { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
@@ -306,10 +301,7 @@ async function searchSerper(query: string, apiKey: string, baseUrl = 'https://go
     JSON.stringify({ q: query, num: 8, gl: 'cn', hl: 'zh-CN', tbs: 'qdr:m3' })
   );
 
-  console.log('Serper响应 - status:', res.status);
-  console.log('Serper响应 - success:', res.success);
-  console.log('Serper响应 - body:', res.body.slice(0, 500));
-
+      
   if (!res.success) throw new Error(`Serper API 返回错误 (HTTP ${res.status}): ${res.body.slice(0, 300)}`);
   const data = JSON.parse(res.body);
   return (data.organic || []).map((r: any) => ({
@@ -1997,8 +1989,7 @@ export async function testLLMConnection(): Promise<TestResult> {
       32,
     );
 
-    console.log('LLM响应:', response);
-
+    
     const trimmed = response.trim();
     // 检查是否包含OK（不使用isReadableText，因为"OK"只有2个字符）
     if (!trimmed || !/\bOK\b/i.test(trimmed)) {

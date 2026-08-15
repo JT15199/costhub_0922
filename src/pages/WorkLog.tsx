@@ -272,15 +272,15 @@ export default function WorkLog() {
       const condenseUser = `请压缩这些工作记录：\n${logText}`;
       await new Promise<void>((resolve) => {
         startSummaryStream(baseUrl, model, condensePrompt, condenseUser,
-          (t) => { condensedAcc += t; setCondenseChars(condensedAcc.length); setCondensedText(condensedAcc); if (condensedAcc.length % 200 < 5) console.log('[AI总结] 压缩中，已收到:', condensedAcc.length); },
+          (t) => { condensedAcc += t; setCondenseChars(condensedAcc.length); setCondensedText(condensedAcc); },
           () => { /* 压缩阶段不显示思考 */ },
-          () => { console.log('[AI总结] 压缩完成，压缩后长度:', condensedAcc.length); resolve(); },
-          (msg) => { console.log('[AI总结] 压缩出错:', msg); resolve(); },
-          () => { console.log('[AI总结] 压缩超时'); resolve(); });
+          () => { resolve(); },
+          () => { resolve(); },
+          () => { resolve(); });
       });
       // 如果压缩失败或为空，退回原始文本
       let condensedText = condensedAcc;
-      if (condensedText.trim().length < 20) { console.log('[AI总结] 压缩结果过短，退回原始文本'); condensedText = logText; }
+      if (condensedText.trim().length < 20) { condensedText = logText; }
 
       // ===== 第二步：正式总结（流式，实时反馈） =====
       const systemPrompt = `你是员工的绩效总结助手。把下面的工作要点写成一份有层次、有逻辑、能体现真实贡献的年中/年终总结。
@@ -331,9 +331,9 @@ export default function WorkLog() {
           baseUrl, model,
           [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
           (t) => { fullText += t; setSummaryChars(fullText.length); setSummaryResult(fullText); },
-          (t) => { summaryReasoning += t; if (summaryReasoning.length % 500 < 5) console.log('[AI总结] 思考中，已收到:', summaryReasoning.length); }, // 思考单独收集，不混入正文
-          () => { console.log('[AI总结] 第二步 done，正文长度:', fullText.length, '思考长度:', summaryReasoning.length); resolve(); },
-          (e) => { console.log('[AI总结] 第二步 error:', e); step2Error = e; resolve(); },
+          (t) => { summaryReasoning += t; }, // 思考单独收集，不混入正文
+          () => { resolve(); },
+          (e) => { step2Error = e; resolve(); },
           { num_predict: 4000, temperature: 0.3, think: false, endpoint: 'native', json: false },
         );
       });

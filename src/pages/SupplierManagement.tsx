@@ -81,13 +81,10 @@ export default function SupplierManagement() {
     try {
       if (supplierType === 'part') {
         // 加载器件供应商数据
-        console.log('Loading part suppliers...');
-        const suppliers = await getAllPartSuppliers();
-        console.log('Suppliers loaded:', suppliers);
-
+                const suppliers = await getAllPartSuppliers();
+        
         const parts = await getParts('', '', '');
-        console.log('Parts loaded:', parts);
-
+        
         setAllSuppliers(suppliers);
         setAllParts(parts);
 
@@ -115,10 +112,8 @@ export default function SupplierManagement() {
         } catch (e) { console.error('加载供应商档案失败:', e); }
       } else {
         // 加载整机供应商数据
-        console.log('Loading project suppliers...');
-        const projects = await getProjects();
-        console.log('Projects loaded:', projects);
-        setAllProjects(projects);
+                const projects = await getProjects();
+                setAllProjects(projects);
 
         // 获取所有整机供应商
         const allProjectSuppliers: ProjectSupplier[] = [];
@@ -126,8 +121,7 @@ export default function SupplierManagement() {
           const suppliers = await getProjectSuppliers(project.id!);
           allProjectSuppliers.push(...suppliers);
         }
-        console.log('Project suppliers loaded:', allProjectSuppliers);
-        setProjectSuppliers(allProjectSuppliers);
+                setProjectSuppliers(allProjectSuppliers);
       }
     } catch (e) {
       console.error('Error loading supplier data:', e);

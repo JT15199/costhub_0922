@@ -767,8 +767,7 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
   const handleNodeInsight = async (node: any, skillIds?: string[]) => {
     setInsightLoading(true);
     try {
-      console.log('开始洞察节点:', node);
-      const hasLLM = await hasLLMConfig();
+            const hasLLM = await hasLLMConfig();
       if (!hasLLM) {
         message.warning('未配置 LLM API Key，请先在「设置」中完成供应商配置');
         setInsightLoading(false);
@@ -776,15 +775,12 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
       }
 
       let workingNode = { ...node };
-      console.log('工作节点:', workingNode);
-
+      
       if (!workingNode.trend_item_id) {
-        console.log('创建 trend_item...');
-        const catType = workingNode.component_name?.includes('合金') || workingNode.component_name?.includes('树脂') || workingNode.component_name?.includes('钢') || workingNode.component_name?.includes('铝') ? '原材料映射' : '直接查询';
+                const catType = workingNode.component_name?.includes('合金') || workingNode.component_name?.includes('树脂') || workingNode.component_name?.includes('钢') || workingNode.component_name?.includes('铝') ? '原材料映射' : '直接查询';
         workingNode.trend_item_id = await ensureTrendItem(workingNode.component_name, catType);
         await saveDecompositionNode({ ...workingNode, trend_item_id: workingNode.trend_item_id });
-        console.log('trend_item_id:', workingNode.trend_item_id);
-      }
+              }
       if (!workingNode.trend_item_id) {
         message.warning('无法创建趋势条目');
         setInsightLoading(false);
@@ -792,15 +788,13 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
       }
 
       // 获取本次洞察使用的Skill列表（弹窗选择优先，未选择则用设置中激活的）
-      console.log('获取 Skill 列表...');
-      let skills: any[];
+            let skills: any[];
       if (skillIds && skillIds.length > 0) {
         skills = skillIds.map(id => getSkill(id)).filter(Boolean);
       } else {
         skills = getActiveSkills();
       }
-      console.log('使用的 Skills:', skills.map((s: any) => s.name));
-
+      
       if (skills.length === 0) {
         message.warning('未选择任何Skill，请在设置中选择');
         setInsightLoading(false);
@@ -808,19 +802,15 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
       }
 
       // 先搜索一次，然后用多个Skill分析
-      console.log('开始搜索:', workingNode.component_name);
-      message.loading({ content: `正在为「${workingNode.component_name}」搜索信息...`, key: 'insight', duration: 0 });
+            message.loading({ content: `正在为「${workingNode.component_name}」搜索信息...`, key: 'insight', duration: 0 });
       const result = await agentSearchLoop(workingNode.component_name, '直接查询', undefined,
         (progress: string) => message.loading({ content: progress, key: 'insight', duration: 0 }));
-      console.log('搜索结果:', result);
-
+      
       // 对每个激活的Skill生成洞察（并行执行：各Skill独立LLM调用，可同时进行）
       const structuredResults = await Promise.all(skills.map(async (skill, i) => {
-        console.log(`生成洞察 ${i + 1}/${skills.length}:`, skill.name);
-        message.loading({ content: `正在按「${skill.name}」生成采购结论 (${i + 1}/${skills.length})...`, key: 'insight', duration: 0 });
+                message.loading({ content: `正在按「${skill.name}」生成采购结论 (${i + 1}/${skills.length})...`, key: 'insight', duration: 0 });
         const structured = await createStructuredInsight(workingNode.component_name, skill, result.allSources, result.summary);
-        console.log('结构化洞察结果:', skill.name, structured);
-        return { skill, structured };
+                return { skill, structured };
       }));
 
       // 并行落库
@@ -832,8 +822,7 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
           magnitude_reference: structured.magnitude_reference, summary: structured.summary,
           suggested_action: structured.suggested_action, raw_search_results: JSON.stringify(result.allSources),
         });
-        console.log('保存快照ID:', snapshotId);
-
+        
         await saveTrendInsightDimensions(snapshotId!, structured.dimensions || []);
         for (const event of structured.key_events || []) {
           if (event.event_description) await saveTrendKeyEvent({ ...event, trend_snapshot_id: snapshotId! });
@@ -1275,8 +1264,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
       // 如果是顶层起草（parent_id == null），先创建根节点
       let rootId = aiDraftParentId;
       if (rootId === null && aiDraftName.trim()) {
-        console.log('创建顶层节点:', aiDraftName.trim());
-        rootId = await saveDecompositionNode({
+                rootId = await saveDecompositionNode({
           parent_id: null,
           component_name: aiDraftName.trim(),
           cost_ratio_estimate: null,
@@ -1285,13 +1273,11 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
           insight_status: 'pending',
           trend_item_id: null,
         });
-        console.log('顶层节点ID:', rootId);
-        count++;
+                count++;
       }
       for (const item of aiDraftResult) {
         if (!item.component_name) continue;
-        console.log('保存子节点:', item.component_name, 'parent_id:', rootId);
-        await saveDecompositionNode({
+                await saveDecompositionNode({
           parent_id: rootId, component_name: item.component_name,
           cost_ratio_estimate: item.cost_ratio_estimate ?? null,
           source_type: 'ai_draft', node_type: item.node_type || 'structural',
