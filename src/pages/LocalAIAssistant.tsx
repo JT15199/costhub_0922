@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button, Input, InputNumber, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Switch, Segmented } from 'antd';
+import { CopyOutlined, RadarChartOutlined } from '@ant-design/icons';
 import {
   SendOutlined, RobotOutlined, PlusOutlined, HistoryOutlined,
   ThunderboltOutlined, TeamOutlined, ClearOutlined,
@@ -18,6 +19,7 @@ import { getAdvisorInsights, updateAdvisorStatus, getRecentBridgeLog, materialKe
 import { getDailyCloudUsage } from '../db/settings';
 import { runAutoAdvisor } from '../autoAdvisor';
 import { isProjectInsight } from '../aiBridge';
+import { EmojiIcon } from '../iconMap';
 import DemoGenerator from '../components/DemoGenerator';
 
 // ===== Types =====
@@ -1894,7 +1896,7 @@ return (
               return (
                 <div key={ins.id} style={{ border: '1px solid ' + meta.color + '33', borderLeft: '3px solid ' + meta.color, borderRadius: 10, padding: '12px 14px', marginBottom: 10, background: ins.status === 'open' ? 'var(--color-surface)' : '#F8FAFC', opacity: ins.status === 'open' ? 1 : 0.75 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 16 }}>{meta.icon}</span>
+                    <span style={{ fontSize: 16, display: 'inline-flex' }}><EmojiIcon e={meta.icon} /></span>
                     <b style={{ fontSize: 14 }}>{ins.title}</b>
                     <Tag color={meta.color} style={{ margin: 0 }}>{meta.label}</Tag>
                     {ins.source === 'ai' && <Tag color="purple" style={{ margin: 0 }}>AI 润色</Tag>}
@@ -1910,14 +1912,14 @@ return (
                       </div>
                     ) : (
                       <div style={{ marginTop: 8 }}>
-                        <Button size="small" type="text" onClick={() => setAdvisorShowPrompt(ins.id)} style={{ color: '#4F46E5', padding: 0, fontSize: 12 }}>💬 查看可执行提示词 ▾</Button>
+                        <Button size="small" type="text" onClick={() => setAdvisorShowPrompt(ins.id)} style={{ color: '#4F46E5', padding: 0, fontSize: 12 }}>查看可执行提示词 ▾</Button>
                       </div>
                     )
                   )}
                   <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <Button size="small" onClick={() => copyPrompt(ins.prompt)}>📋 复制提示词</Button>
-                    {ins.status === 'open' && !isProjectInsight(ins) && <Button size="small" loading={advisorInsightBusy === ins.id} onClick={() => insightForAdvisor(ins)}>{advisorInsightBusy === ins.id ? '洞察中…' : '🔍 生成行业洞察'}</Button>}
-                    {ins.status === 'open' && <Button size="small" type="primary" onClick={() => setAdvisorStatus(ins.id, 'done')}>✓ 已处理</Button>}
+                    <Button size="small" onClick={() => copyPrompt(ins.prompt)} icon={<CopyOutlined />}>复制提示词</Button>
+                    {ins.status === 'open' && !isProjectInsight(ins) && <Button size="small" loading={advisorInsightBusy === ins.id} onClick={() => insightForAdvisor(ins)} icon={advisorInsightBusy === ins.id ? undefined : <RadarChartOutlined />}>{advisorInsightBusy === ins.id ? '洞察中…' : '生成行业洞察'}</Button>}
+                    {ins.status === 'open' && <Button size="small" type="primary" onClick={() => setAdvisorStatus(ins.id, 'done')} icon={<CheckOutlined />}>已处理</Button>}
                     {ins.status === 'open' && <Button size="small" onClick={() => setAdvisorStatus(ins.id, 'dismissed')}>忽略</Button>}
                   </div>
                 </div>

@@ -125,4 +125,42 @@ export function replaceEmoji(text: string): React.ReactNode {
 }
 
 // 补充导入（上面引用了但未列出）
-import { EditOutlined, PushpinOutlined, BuildOutlined, DeleteOutlined, CompassOutlined } from '@ant-design/icons';
+import { EditOutlined, PushpinOutlined, BuildOutlined, DeleteOutlined, CompassOutlined, CloudOutlined, StopOutlined } from '@ant-design/icons';
+
+// ===== 补充映射（UI 常用） =====
+EMOJI_ICONS['🎯'] = <AimOutlined />;
+EMOJI_ICONS['🤖'] = <RobotOutlined />;
+EMOJI_ICONS['📈'] = <FundOutlined />;
+EMOJI_ICONS['🛡'] = <SafetyOutlined />;
+EMOJI_ICONS['☁'] = <CloudOutlined />;
+EMOJI_ICONS['💡'] = <BulbOutlined />;
+EMOJI_ICONS['♻'] = <ReloadOutlined />;
+EMOJI_ICONS['🧠'] = <ExperimentOutlined />;
+EMOJI_ICONS['🕐'] = <ClockCircleOutlined />;
+EMOJI_ICONS['💰'] = <DollarOutlined />;
+EMOJI_ICONS['📦'] = <AppstoreOutlined />;
+EMOJI_ICONS['❓'] = <QuestionCircleOutlined />;
+EMOJI_ICONS['✗'] = <CloseCircleOutlined />;
+EMOJI_ICONS['📌'] = <PushpinOutlined />;
+EMOJI_ICONS['🏭'] = <ShopOutlined />;
+EMOJI_ICONS['📋'] = <ProfileOutlined />;
+EMOJI_ICONS['✅'] = <CheckCircleOutlined />;
+EMOJI_ICONS['❌'] = <CloseCircleOutlined />;
+EMOJI_ICONS['💬'] = <MessageOutlined />;
+EMOJI_ICONS['⚡'] = <ThunderboltOutlined />;
+EMOJI_ICONS['🔒'] = <LockOutlined />;
+EMOJI_ICONS['📊'] = <BarChartOutlined />;
+EMOJI_ICONS['📄'] = <FileTextOutlined />;
+EMOJI_ICONS['📝'] = <EditOutlined />;
+EMOJI_ICONS['📔'] = <BookOutlined />;
+EMOJI_ICONS['📅'] = <CalendarOutlined />;
+EMOJI_ICONS['🔍'] = <SearchOutlined />;
+EMOJI_ICONS['🚫'] = <StopOutlined />;
+EMOJI_ICONS['🗑'] = <DeleteOutlined />;
+EMOJI_ICONS['🔥'] = <FireOutlined />;
+
+// ===== EmojiIcon 组件：JSX 中直接替换 emoji 为 AntD 图标 =====
+export function EmojiIcon({ e, style }: { e: string; style?: React.CSSProperties }) {
+  const icon = EMOJI_ICONS[e] || EMOJI_ICONS[e + '️'];
+  return icon ? <span style={{ display: 'inline-flex', alignItems: 'center', ...style }}>{icon}</span> : <span style={style}>{e}</span>;
+}

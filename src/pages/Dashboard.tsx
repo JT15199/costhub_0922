@@ -5,6 +5,7 @@ import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
 import { getDashboardStats, getProjects, getProjectBOMs, getCompetitors, getCompetitorBOMs, getTargets, getProjectCostSnapshots, getInsights, getSetting } from '../db';
 import { getCategoryColor } from '../constants';
+import { EmojiIcon } from '../iconMap';
 import DataTable from '../components/DataTable';
 import type { DashboardStats } from '../types';
 import { CHART_COLORS, chartTooltip, chartAxisStyle, chartGrid, chartTextMuted, barGradient } from '../chartTheme';
@@ -207,27 +208,27 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             {/* ===== 状态仪表：一眼扫出哪里需要我 ===== */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 14 }}>
         <div onClick={() => onNavigate?.('projects')} style={{ background: '#fff', border: '1px solid #E8ECF1', borderRadius: 12, padding: '12px 14px', cursor: onNavigate ? 'pointer' : 'default', transition: 'box-shadow 150ms ease-out, transform 150ms ease-out' }}>
-          <div style={{ fontSize: 11, color: '#94A3B8' }}>🎯 目标预警</div>
+          <div style={{ fontSize: 11, color: '#94A3B8', display: 'flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="🎯" /> 目标预警</div>
           <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: missedSorted.length > 0 ? '#DC2626' : '#16A34A' }}>{missedSorted.length}</div>
           <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>{missedSorted.length > 0 ? '个领域未达标' : '全部达标'}</div>
         </div>
         <div onClick={() => onNavigate?.('localAI')} style={{ background: '#fff', border: '1px solid #E8ECF1', borderRadius: 12, padding: '12px 14px', cursor: onNavigate ? 'pointer' : 'default', transition: 'box-shadow 150ms ease-out, transform 150ms ease-out' }}>
-          <div style={{ fontSize: 11, color: '#94A3B8' }}>🤖 AI 建议</div>
+          <div style={{ fontSize: 11, color: '#94A3B8', display: 'flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="🤖" /> AI 建议</div>
           <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: advisorInsights.length > 0 ? '#D97706' : '#16A34A' }}>{advisorInsights.length}</div>
           <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>待处理{advisorInsights.length > 0 ? ' · 见本地 AI 页' : ' · 无'}</div>
         </div>
         <div style={{ background: '#fff', border: '1px solid #E8ECF1', borderRadius: 12, padding: '12px 14px' }}>
-          <div style={{ fontSize: 11, color: '#94A3B8' }}>📈 成本变动</div>
+          <div style={{ fontSize: 11, color: '#94A3B8', display: 'flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="📈" /> 成本变动</div>
           <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: (snapshotChanges.length + recentPriceChanges.length) > 0 ? '#2563EB' : '#16A34A' }}>{snapshotChanges.length + recentPriceChanges.length}</div>
           <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>项近期变动</div>
         </div>
         <div style={{ background: '#fff', border: '1px solid #E8ECF1', borderRadius: 12, padding: '12px 14px' }}>
-          <div style={{ fontSize: 11, color: '#94A3B8' }}>🛡 安全状态</div>
-          <div style={{ fontSize: 16, fontWeight: 800, marginTop: 6, color: '#16A34A' }}>✓ 受控</div>
+          <div style={{ fontSize: 11, color: '#94A3B8', display: 'flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="🛡" /> 安全状态</div>
+          <div style={{ fontSize: 16, fontWeight: 800, marginTop: 6, color: '#16A34A', display: 'flex', alignItems: 'center', gap: 5 }}><EmojiIcon e="✓" /> 受控</div>
           <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>审计留痕 · 永不外传敏感</div>
         </div>
         <div style={{ background: '#fff', border: '1px solid ' + (cloudUsage.count >= cloudLimit ? '#FECACA' : '#E8ECF1'), borderRadius: 12, padding: '12px 14px' }}>
-          <div style={{ fontSize: 11, color: '#94A3B8' }}>☁️ 云端用量</div>
+          <div style={{ fontSize: 11, color: '#94A3B8', display: 'flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="☁" /> 云端用量</div>
           <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: cloudUsage.count >= cloudLimit ? '#DC2626' : '#16A34A' }}>{cloudUsage.count}<span style={{ fontSize: 12, color: '#94A3B8' }}>/{cloudLimit}</span></div>
           <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>{cloudUsage.count >= cloudLimit ? '已达今日上限' : (cloudUsage.tokens > 0 ? cloudUsage.tokens.toLocaleString() + ' token' : '今日未调用')}</div>
         </div>
@@ -297,7 +298,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           <div style={{ border: '1px solid #E8ECF1', borderRadius: 10, padding: '10px 12px', background: '#FAFBFC' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
               <RobotOutlined style={{ color: '#0A84FF' }} />
-              <b style={{ fontSize: 13 }}>🤖 自主建议</b>
+              <b style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="🤖" /> 自主建议</b>
               {advisorInsights.length > 0 && <Tag color="purple" style={{ margin: 0 }}>{advisorInsights.length} 条待处理</Tag>}
             </div>
             {advisorInsights.length === 0 ? (
@@ -341,7 +342,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                   <div style={{ fontSize: 12, color: '#4B5563', lineHeight: 1.7 }}>{f.detail}</div>
                   {f.suggestion && (
                     <div style={{ marginTop: 6, padding: '6px 10px', background: '#EEF2FF', border: '1px solid #C7D2FE', borderRadius: 8, fontSize: 12, color: '#3730A3', lineHeight: 1.6 }}>
-                      <b>💡 建议：</b>{f.suggestion}
+                      <b style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="💡" /> 建议：</b>{f.suggestion}
                     </div>
                   )}
                 </div>

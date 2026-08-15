@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
+import { EmojiIcon } from '../iconMap';
 import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Segmented, Tag, message, Popconfirm, Tabs, Row, Col, Tooltip, Card, Statistic, Upload, Alert, DatePicker, Checkbox, AutoComplete, Radio, Tree, Badge } from 'antd';
 import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined, InboxOutlined, DollarOutlined, TagOutlined, LineChartOutlined, BarChartOutlined, ToolOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, AimOutlined, BuildOutlined, HistoryOutlined, EyeOutlined, CheckOutlined, CloseOutlined, RobotOutlined, BulbOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
@@ -2006,7 +2007,7 @@ export default function Projects() {
                       )},
                     ]} />
                   <div style={{ marginTop: 8, fontSize: 11, color: '#94A3B8' }}>
-                    💡 ODM 供应商报价在「供应商管理 → 整机供应商（ODM）」中自动汇总展示；修改报价会记录变动原因与历史
+                    <EmojiIcon e="💡" /> ODM 供应商报价在「供应商管理 → 整机供应商（ODM）」中自动汇总展示；修改报价会记录变动原因与历史
                   </div>
                 </div>
               ),
@@ -2341,7 +2342,7 @@ export default function Projects() {
                   合计 {importPreview.length} 条 · {Object.keys(byModule).length} 个模块
                   {issueCount > 0 && (
                     <div style={{ color: '#B45309', fontWeight: 700, marginTop: 2 }}>
-                      ⚠️ {issueCount} 条数据异常（见下方红色标注），建议核对后再导入
+                      <EmojiIcon e="⚠" /> {issueCount} 条数据异常（见下方红色标注），建议核对后再导入
                     </div>
                   )}
                   {warnCount > 0 && (
@@ -2382,7 +2383,7 @@ export default function Projects() {
                 if (issues.length === 0 && warns.length === 0) return <span style={{ color: '#94A3B8', fontSize: 11 }}>正常</span>;
                 return (
                   <span style={{ fontSize: 10.5, lineHeight: 1.5, display: 'block' }}>
-                    {issues.map((s: string, i: number) => <div key={`e${i}`} style={{ color: '#DC2626' }}>⚠️ {s}</div>)}
+                    {issues.map((s: string, i: number) => <div key={`e${i}`} style={{ color: '#DC2626', display: 'inline-flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="⚠" /> {s}</div>)}
                     {warns.map((s: string, i: number) => <div key={`w${i}`} style={{ color: '#D97706' }}>⚠️ {s}</div>)}
                   </span>
                 );
@@ -2764,7 +2765,7 @@ export default function Projects() {
                 {Object.entries(bom.byMod).map(([mod, m]: any) => (
                   <div key={mod} style={{ marginBottom: 8, border: '1px solid #E8ECF1', borderRadius: 8, overflow: 'hidden' }}>
                     <div style={{ background: '#F8FAFC', padding: '5px 10px', display: 'flex', justifyContent: 'space-between' }}>
-                      <b style={{ fontSize: 12 }}>📦 {mod}</b>
+                      <b style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="📦" /> {mod}</b>
                       <span style={{ fontSize: 12, fontWeight: 600, color: '#CF0A2C', fontVariantNumeric: 'tabular-nums' }}>¥{m.subtotal.toFixed(4)}</span>
                     </div>
                     <Table size="small" pagination={false} rowKey={(r: any) => String(r.id)} dataSource={m.items} columns={[
@@ -3039,7 +3040,7 @@ export default function Projects() {
                   {handled.map((h: any, hi: number) => (
                     <div key={hi} style={{ border: '1px solid #E8ECF1', borderRadius: 8, marginBottom: 6, padding: '8px 12px', background: '#FAFBFC' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-                        <b style={{ fontSize: 12.5, color: h.action === 'confirmed' ? '#16A34A' : '#DC2626' }}>{h.action === 'confirmed' ? '✓' : '✗'} {h.name}</b>
+                        <b style={{ fontSize: 12.5, color: h.action === 'confirmed' ? '#16A34A' : '#DC2626' }}><EmojiIcon e={h.action === 'confirmed' ? '✓' : '✗'} /> {h.name}</b>
                         <Tag color={h.action === 'confirmed' ? 'green' : 'red'} style={{ margin: 0 }}>{h.action === 'confirmed' ? '已确认同一' : '已标记不同'}</Tag>
                         <span style={{ fontSize: 10.5, color: '#94A3B8' }}>{h.handled_at}</span>
                       </div>
@@ -3080,7 +3081,7 @@ export default function Projects() {
               {data.map((g: any, gi: number) => (
                 <div key={gi} style={{ border: g.type === 'ai' ? '1px dashed #C7D2FE' : '1px solid #E8ECF1', borderRadius: 8, marginBottom: 6, padding: '8px 12px', background: g.type === 'ai' ? '#F5F7FF' : '#FAFBFC' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-                    <b style={{ fontSize: 12.5, color: g.type === 'ai' ? '#4F46E5' : '#334155' }}>{g.type === 'ai' ? '❓' : '📌'} {g.name}</b>
+                    <b style={{ fontSize: 12.5, color: g.type === 'ai' ? '#4F46E5' : '#334155' }}><EmojiIcon e={g.type === 'ai' ? '❓' : '📌'} /> {g.name}</b>
                     <Tag color={g.type === 'ai' ? 'purple' : 'orange'} style={{ margin: 0 }}>{g.type === 'ai' ? '疑似同一物料' : '报价差异明显'}</Tag>
                     <Tag color="red" style={{ margin: 0 }}>价差 ¥{(g.diff || 0).toFixed(2)}</Tag>
                   </div>
@@ -3091,7 +3092,7 @@ export default function Projects() {
                     const save = (maxP - minP) * Math.max(...g.rows.map((r: any) => r.quantity || 1));
                     return save > 0.01 ? (
                       <div style={{ fontSize: 11.5, marginBottom: 4, color: '#16A34A', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 6, padding: '3px 8px' }}>
-                        💰 若按最低价 ¥{minP.toFixed(2)} 谈，每台最多可省 <b>¥{save.toFixed(2)}</b>
+                        <EmojiIcon e="💰" /> 若按最低价 ¥{minP.toFixed(2)} 谈，每台最多可省 <b>¥{save.toFixed(2)}</b>
                       </div>
                     ) : null;
                   })()}
