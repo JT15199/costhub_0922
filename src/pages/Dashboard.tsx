@@ -10,6 +10,7 @@ import type { DashboardStats } from '../types';
 import { CHART_COLORS, chartTooltip, chartAxisStyle, chartGrid, chartTextMuted, barGradient } from '../chartTheme';
 import { computeTargetStatuses, summarizeTargets, detectSnapshotChanges, type TargetStatus } from '../targetInsight';
 import { getAuditFindings, markAuditRead, dismissAuditFinding, getRecentPartPriceChanges } from '../auditStore';
+import { getAdvisorInsights } from '../db/advisor';
 import { runAutoAudit } from '../autoAudit';
 
 interface DashboardProps {
@@ -38,6 +39,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [auditRunning, setAuditRunning] = useState(false);
   const [auditLastAt, setAuditLastAt] = useState('');
   const [recentPriceChanges, setRecentPriceChanges] = useState<any[]>([]);
+  // 自主建议（autoAdvisor）
+  const [advisorInsights, setAdvisorInsights] = useState<any[]>([]);
   // 折叠控制
   const [costOpen, setCostOpen] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
@@ -101,6 +104,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           setAuditFindings(fs2);
           if (fs2.length === 0) refreshAudit();
         } catch { /* 忽略 */ }
+        // 自主建议（AI 助理后台分析）
+        try { setAdvisorInsights(await getAdvisorInsights('open')); } catch { /* 忽略 */ }
       } catch (e: any) {
         const msg = e?.message || String(e);
         console.error('Dashboard load error:', e);
@@ -108,6 +113,9 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       }
       setLoading(false);
     })();
+    const onAdv = () => { getAdvisorInsights('open').then(setAdvisorInsights).catch(() => {}); };
+    window.addEventListener('costhub-advisor-done', onAdv);
+    return () => window.removeEventListener('costhub-advisor-done', onAdv);
   }, []);
 
   // 立即巡检（规则 + 本地 AI 深度洞察；后台执行，完成后刷新列表）
@@ -234,6 +242,15 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         )}
       </div>
 
+{/* ===== ④ 统计卡（导航入口） ===== */}
+      <div className="stat-cards">
+        <div className="stat-card card-a" onClick={() => onNavigate?.('parts')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">器件总数</div><div className="stat-value">{stats.total_parts}</div></div>
+        <div className="stat-card card-b" onClick={() => onNavigate?.('projects')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">项目总数</div><div className="stat-value">{stats.total_projects}</div></div>
+        <div className="stat-card card-c" onClick={() => onNavigate?.('projects')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">进行中项目</div><div className="stat-value">{stats.active_projects}</div></div>
+        <div className="stat-card card-d"><div className="stat-label">平均BOM成本</div><div className="stat-value">¥{(stats.avg_bom_cost ?? 0).toLocaleString()}</div></div>
+        <div className="stat-card card-e" onClick={() => onNavigate?.('competitors')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">竞品数量</div><div className="stat-value">{stats.total_competitors}</div></div>
+      </div>
+
       {/* ===== ② 最近成本变动（事实汇总：用户输入数据的变动，不叫 AI） ===== */}
       <div className="content-card" style={{ marginBottom: 16 }}>
         <div className="card-header">
@@ -328,6 +345,32 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             {auditLastAt && <span style={{ marginLeft: 8 }}>上次 {auditLastAt}</span>}
           </span>
         </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
+          {/* 左：自主建议（AI 助理后台分析） */}
+          <div style={{ border: '1px solid #E8ECF1', borderRadius: 10, padding: '10px 12px', background: '#FAFBFC' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <RobotOutlined style={{ color: '#0A84FF' }} />
+              <b style={{ fontSize: 13 }}>🤖 自主建议</b>
+              {advisorInsights.length > 0 && <Tag color="purple" style={{ margin: 0 }}>{advisorInsights.length} 条待处理</Tag>}
+            </div>
+            {advisorInsights.length === 0 ? (
+              <div style={{ fontSize: 12, color: '#94A3B8', padding: '8px 0' }}>暂无建议——系统空闲时自动分析成本机会/风险点，有新发现会在这里提醒</div>
+            ) : (
+              <>
+                {advisorInsights.slice(0, 3).map((a: any) => (
+                  <div key={a.id} style={{ padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: 12 }}>
+                    <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.title}</div>
+                    <div style={{ color: '#64748B', fontSize: 11.5, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.detail}</div>
+                  </div>
+                ))}
+                <div style={{ marginTop: 6, textAlign: 'center' }}>
+                  <a onClick={() => onNavigate?.('localAI')} style={{ fontSize: 12, color: '#0A84FF' }}>查看全部（处理 / 洞察 / 复制提示词）→</a>
+                </div>
+              </>
+            )}
+          </div>
+          {/* 右：AI 巡检发现 */}
+          <div>
         {(() => {
           const unreadFindings = auditFindings.filter((f: any) => f.status === 'unread');
           return unreadFindings.length > 0 ? (
@@ -371,18 +414,10 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           </div>
           );
         })()}
+          </div>
+        </div>
       </div>
-
-      {/* ===== ④ 统计卡（导航入口） ===== */}
-      <div className="stat-cards">
-        <div className="stat-card card-a" onClick={() => onNavigate?.('parts')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">器件总数</div><div className="stat-value">{stats.total_parts}</div></div>
-        <div className="stat-card card-b" onClick={() => onNavigate?.('projects')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">项目总数</div><div className="stat-value">{stats.total_projects}</div></div>
-        <div className="stat-card card-c" onClick={() => onNavigate?.('projects')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">进行中项目</div><div className="stat-value">{stats.active_projects}</div></div>
-        <div className="stat-card card-d"><div className="stat-label">平均BOM成本</div><div className="stat-value">¥{(stats.avg_bom_cost ?? 0).toLocaleString()}</div></div>
-        <div className="stat-card card-e" onClick={() => onNavigate?.('competitors')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">竞品数量</div><div className="stat-value">{stats.total_competitors}</div></div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         <div className="content-card">
           <div className="card-header"><h3><BarChartOutlined /> 各项目BOM成本</h3></div>
           <ReactECharts echarts={echarts} option={projBarOption} style={{ height: 320 }} />
