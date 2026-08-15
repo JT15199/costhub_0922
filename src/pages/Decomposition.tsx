@@ -1780,7 +1780,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
           {five.map(f => {
             const d = dims.find(x => x.dimension_type === f.key);
             return (
-              <div key={f.key} style={{ padding: 8, background: '#fff', border: '1px solid #E2E8F0', borderRadius: 8 }}>
+              <div key={f.key} style={{ padding: 8, background: 'var(--color-surface)', border: '1px solid #E2E8F0', borderRadius: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                   <span style={{ fontWeight: 600, fontSize: 12 }}>{f.key}</span>
                   <span style={{ fontSize: 10.5, color: '#9CA3AF' }}>{f.strong} ← → {f.weak}</span>
@@ -1880,7 +1880,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {dims.map((dim: any, idx: number) => (
-          <div key={idx} style={{ padding: '8px 10px', background: '#fff', borderRadius: 8, border: '1px solid #E2E8F0' }}>
+          <div key={idx} style={{ padding: '8px 10px', background: 'var(--color-surface)', borderRadius: 8, border: '1px solid #E2E8F0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <span style={{ fontWeight: 600, fontSize: 13 }}><BorderOutlined style={{ fontSize: 11, marginRight: 4, color: '#3B82F6' }} />{dim.dimension_type}</span>
               <Tag color={evidenceColors[dim.evidence_strength] || '#94A3B8'} style={{ fontSize: 9, margin: 0 }}>{dim.evidence_strength}</Tag>
@@ -2957,7 +2957,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                         const skill = BUILTIN_SKILLS.find((x: any) => x.id === s.skill_used);
                         const dims = quickDetailDims.filter(d => d._snapshot_id === s.id);
                         return (
-                          <div key={s.id} style={{ padding: 12, background: '#fff', border: '1px solid #E2E8F0', borderRadius: 10 }}>
+                          <div key={s.id} style={{ padding: 12, background: 'var(--color-surface)', border: '1px solid #E2E8F0', borderRadius: 10 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid #F1F5F9' }}>
                               <span style={{ fontSize: 15 }}>{skill?.icon || '📊'}</span>
                               <span style={{ fontWeight: 700, fontSize: 13 }}>{skill?.name || s.skill_used || '分析'}</span>
@@ -2992,7 +2992,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                           {quickAskHistory.map((c, i) => (
                             <div key={i} style={{ fontSize: 12, lineHeight: 1.7, color: '#3A4760' }}>
                               <div style={{ fontWeight: 600, color: '#1E293B', marginBottom: 2 }}>Q：{c.q}</div>
-                              <div style={{ whiteSpace: 'pre-wrap', background: '#fff', border: '1px solid #EEF2F8', borderRadius: 6, padding: '6px 10px' }}>
+                              <div style={{ whiteSpace: 'pre-wrap', background: 'var(--color-surface)', border: '1px solid #EEF2F8', borderRadius: 6, padding: '6px 10px' }}>
                                 {c.a}
                               </div>
                             </div>
@@ -3310,7 +3310,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                       <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
                         <div style={{
                           maxWidth: '85%',
-                          background: '#fff',
+                          background: 'var(--color-surface)',
                           border: '1px solid #E5E7EB',
                           padding: '14px 18px',
                           borderRadius: '16px 16px 16px 4px',
@@ -3343,7 +3343,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
             <div style={{
               borderTop: '1px solid #E5E7EB',
               padding: '16px 24px',
-              background: '#fff',
+              background: 'var(--color-surface)',
             }}>
               <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
                 <Input.TextArea
