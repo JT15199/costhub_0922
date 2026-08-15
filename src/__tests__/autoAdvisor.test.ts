@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildRuleCandidates, daysBetween } from '../autoAdvisor';
+import { auditPromptStrict } from '../aiBridge';
 import type { RuleInput } from '../autoAdvisor';
 
 const NOW = new Date('2026-08-14T10:00:00');
@@ -73,7 +74,9 @@ describe('buildRuleCandidates', () => {
     const ss = out.filter(c => c.insight_type === 'single_supplier');
     expect(ss.length).toBe(1);
     expect(ss[0].ref_id).toBe(11);
-    expect(ss[0].prompt).toContain('京东方');
+    // 供应商名只留在 detail（本地展示），提示词必须脱敏
+    expect(ss[0].detail).toContain('京东方');
+    expect(ss[0].prompt).not.toContain('京东方');
   });
 
   it('领域超目标 ≥5% → 提醒；未超不提醒', () => {
@@ -89,6 +92,15 @@ describe('buildRuleCandidates', () => {
     expect(tg.length).toBe(1);
     expect(tg[0].ref_name).toBe('P1');
     expect(tg[0].title).toContain('超目标');
+  });
+
+  it('提示词全部脱敏（无型号/厂家/成本，通过严格审计）', () => {
+    const out = buildRuleCandidates(baseInput());
+    expect(out.length).toBeGreaterThan(0);
+    for (const c of out) {
+      const r = auditPromptStrict(c.prompt);
+      expect(r.safe, c.insight_type + ': ' + c.prompt + ' → ' + JSON.stringify(r.matches)).toBe(true);
+    }
   });
 
   it('指纹唯一且稳定', () => {

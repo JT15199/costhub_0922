@@ -7,8 +7,9 @@ import { getSetting, setSetting } from './db/settings';
 import { getProjects, getProjectBOMs, getProjectCostSnapshots, getTargets } from './db/projects';
 import { getParts, getAllPartSuppliers } from './db/parts';
 import { computeTargetStatuses } from './targetInsight';
-import { findAdvisorByFingerprint, findDismissedByFingerprint, saveAdvisorInsight, updateAdvisorStatus } from './db/advisor';
+import { findAdvisorByFingerprint, findDismissedByFingerprint, saveAdvisorInsight, updateAdvisorStatus, getAdvisorInsights } from './db/advisor';
 import { logLocalAICall } from './ollama';
+import { auditPromptStrict } from './aiBridge';
 
 // ==================== 纯规则层（可 vitest） ====================
 export interface RuleInput {
@@ -67,7 +68,7 @@ export function buildRuleCandidates(input: RuleInput): AdvisorCandidate[] {
       title: `项目「${p.code}」成本已 ${days} 天未变动`,
       detail: `整机 BOM 成本 ¥${total.toFixed(2)}，自 ${lastAt.slice(0, 16)} 以来无成本留痕。大额物料：${top3}。长期不动通常意味着议价/比价停滞，建议主动推动。`,
       ref_type: 'project', ref_id: p.id, ref_name: p.code,
-      prompt: `你是资深成本经理。项目「${p.code}」整机成本 ¥${total.toFixed(2)} 已 ${days} 天未变动（上次留痕 ${lastAt.slice(0, 16)}），大额物料：${top3}。请给出：1) 按降本空间排序的议价优先级；2) 每项的目标砍价幅度；3) 可直接执行的谈判行动计划。`,
+      prompt: `你是资深成本经理。项目「${p.code}」整机成本已长期未变动，请：1) 按品类方向给出最值得推动议价的物料优先级（不列具体型号）；2) 每项目标砍价幅度；3) 可直接执行的谈判行动计划。`,
       fingerprint: fp,
     });
   }
@@ -99,7 +100,7 @@ export function buildRuleCandidates(input: RuleInput): AdvisorCandidate[] {
       title: `物料「${p.name}」¥${(p.cost || 0).toFixed(2)} 已 ${days} 天未调价`,
       detail: `型号 ${p.model || '—'}（${p.main_category || '未分类'}），现成本 ¥${(p.cost || 0).toFixed(2)}，自 ${(p.updated_at || '').slice(0, 16)} 起未变动。${supplierDesc}。${usageDesc ? `使用：${usageDesc}。` : ''}超过 ${STALE_PART_DAYS} 天未动价，值得作为议价抓手重新谈价。`,
       ref_type: 'part', ref_id: p.id, ref_name: p.name,
-      prompt: `你是资深成本经理。物料「${p.name}」（型号 ${p.model || '—'}，品类 ${p.main_category || '未分类'}，现成本 ¥${(p.cost || 0).toFixed(2)}）已 ${days} 天未调价，${supplierDesc}。请：1) 结合品类给出合理采购价区间；2) 建议目标谈判价与砍价幅度；3) 给 3 条谈判话术要点；4) 判断是否值得做行业行情洞察，值得则给出洞察关键词。`,
+      prompt: `你是资深成本经理。针对「${p.name}」品类物料开展议价评估：1) 结合品类近期行情给出合理采购价区间与砍价幅度；2) 给 3 条谈判话术要点；3) 判断是否值得做行业行情洞察，值得则给出洞察关键词。`,
       fingerprint: `spp|${p.id}|${p.updated_at || ''}`,
     });
   }
@@ -119,7 +120,7 @@ export function buildRuleCandidates(input: RuleInput): AdvisorCandidate[] {
       title: `项目「${s.code}」${s.domain} 超目标 ¥${s.diff.toFixed(2)}`,
       detail: `目标 ¥${(s.target || 0).toFixed(2)}，实际 ¥${s.actual.toFixed(2)}，超支 ${s.diff.toFixed(2)}（达成率 ${rate}%）。需要降本措施把成本压回目标线。`,
       ref_type: 'project', ref_id: s.projectId, ref_name: s.code,
-      prompt: `你是资深成本经理。项目「${s.code}」的「${s.domain}」实际成本 ¥${s.actual.toFixed(2)} 超目标 ¥${(s.target || 0).toFixed(2)}（超支 ¥${s.diff.toFixed(2)}）。请给出：1) 该领域最可能压缩成本的子项；2) 建议压回金额与节奏；3) 优先级排序。`,
+      prompt: `你是资深成本经理。项目「${s.code}」的「${s.domain}」领域成本超目标，请给出降本建议：1) 该领域最可能压缩成本的子项方向；2) 建议节奏；3) 优先级排序。`,
       fingerprint: `tg|${s.projectId}|${s.domain}|${s.actual.toFixed(2)}`,
     });
   }
@@ -134,7 +135,7 @@ export function buildRuleCandidates(input: RuleInput): AdvisorCandidate[] {
       title: `物料「${p.name}」仅单一供应商${s.supplier_name}`,
       detail: `型号 ${p.model || '—'} 成本 ¥${(p.cost || 0).toFixed(2)}（≥¥${BIG_PART_MIN} 大额），仅 ${s.supplier_name} 一家供货。${(() => { const u = usageOf(p.id); return u ? `使用：${u}。` : ''; })()}供应中断风险集中，且议价筹码有限，建议评估引入二供。`,
       ref_type: 'part', ref_id: p.id, ref_name: p.name,
-      prompt: `你是资深成本经理。物料「${p.name}」（型号 ${p.model || '—'}，成本 ¥${(p.cost || 0).toFixed(2)}）仅由 ${s.supplier_name} 单一供货。请评估：1) 供应风险等级与影响；2) 当前议价空间；3) 引入二供的候选方向与验证要点；4) 若暂不引入二供，如何管理该风险。`,
+      prompt: `你是资深成本经理。评估「${p.name}」品类物料的供应风险管理：1) 单一供货风险等级与影响；2) 当前议价空间；3) 引入二供的评估要点与验证方向；4) 若暂不引入二供，如何管理该风险。`,
       fingerprint: `ss|${p.id}|${s.supplier_name}`,
     });
   }
@@ -151,7 +152,7 @@ async function enhanceWithAI(cands: AdvisorCandidate[]): Promise<number> {
   const base = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
   const last = await getSetting('advisor_ai_last_run', '');
   if (last && Date.now() - new Date(last).getTime() < AI_INTERVAL_MS) return 0;
-  const sys = '你是资深成本经理，正在审阅成本管理系统的自动分析候选（JSON 数组，每项含 index/insight_type/title/detail/ref_name）。对每项输出：{ index, title: 更精准的标题, detail: 具体建议含数字依据（200字内）, prompt: 给用户可一键执行的提示词（100字内，可直接粘贴到 AI 助手中执行或用于行业洞察） }。只输出 JSON 数组，不要任何其他文字。';
+  const sys = '你是资深成本经理，正在审阅成本管理系统的自动分析候选（JSON 数组，每项含 index/insight_type/title/detail/ref_name）。对每项输出：{ index, title: 更精准的标题, detail: 具体建议含数字依据（200字内）, prompt: 给用户可一键执行的提示词（100字内，可直接粘贴到 AI 助手中执行或用于行业洞察） }。⚠️ prompt 字段必须脱敏：严禁出现任何器件型号、厂家名称、成本金额、供应商名称、项目代号、任何数字——只允许物料通用名称与品类描述。只输出 JSON 数组，不要任何其他文字。';
   const user = JSON.stringify(cands.map((c, i) => ({ index: i, insight_type: c.insight_type, title: c.title, detail: c.detail, ref_name: c.ref_name })));
   const userPrompt = `${user}\n\n请逐项输出优化后的建议。`;
   try {
@@ -184,6 +185,8 @@ async function enhanceWithAI(cands: AdvisorCandidate[]): Promise<number> {
       const detail = String(item?.detail || '').trim();
       const prompt = String(item?.prompt || '').trim();
       if (!title && !detail && !prompt) continue;
+      // 严格审计：润色输出的提示词含型号/金额/厂家 → 丢弃润色（保留规则脱敏模板）
+      if (prompt && !auditPromptStrict(prompt).safe) continue;
       const existing = await findAdvisorByFingerprint(c.fingerprint);
       if (existing) {
         await updateAdvisorStatus(existing.id, 'open', {
@@ -228,6 +231,15 @@ function parseJsonArray(text: string): any[] | null {
 export interface AdvisorRunResult { found: number; aiEnhanced: number; skipped: number; }
 
 export async function runAutoAdvisor(onProgress?: (msg: string) => void): Promise<AdvisorRunResult | null> {
+  // 存量提示词脱敏清理：历史建议若含型号/金额/厂家（旧模板或 AI 润色）→ 清空提示词，防止外传泄露
+  try {
+    const openList = await getAdvisorInsights('open');
+    for (const e of openList) {
+      if (e.prompt && !auditPromptStrict(e.prompt).safe) {
+        await updateAdvisorStatus(e.id, 'open', { detail: e.detail || '', insight: '' });
+      }
+    }
+  } catch { /* 忽略清理失败 */ }
   onProgress?.('自主分析：读取项目与 BOM…');
   const projects = await getProjects('', '', '');
   const active = projects.filter((p: any) => !p.is_deleted && (p.project_type || '') === '在研');

@@ -16,6 +16,22 @@ export const SENSITIVE_PATTERNS: { re: RegExp; desc: string }[] = [
 ];
 export interface AuditResult { safe: boolean; matches: { pattern: string; sample: string }[]; }
 
+// 严格审计（建议提示词用）：在 auditSensitive 基础上增加 器件型号/规格 检测——
+// 型号可反查料号与供应商，属于敏感信息，不得出现在可外传的提示词中
+export function auditPromptStrict(text: string): AuditResult {
+  const base = auditSensitive(text);
+  if (!base.safe) return base;
+  const extra = [
+    { re: /\b[A-Z]{1,6}[0-9][A-Z0-9\-]{2,}\b/, desc: '器件型号' },
+    { re: /\d+\s*(?:寸|英寸|mm|MHz|GHz|Hz|nm)\b/, desc: '规格参数' },
+  ];
+  for (const p of extra) {
+    const m = text.match(p.re);
+    if (m) { base.safe = false; base.matches.push({ pattern: p.desc, sample: m[0].slice(0, 40) }); }
+  }
+  return base;
+}
+
 export function auditSensitive(text: string): AuditResult {
   const matches: { pattern: string; sample: string }[] = [];
   for (const p of SENSITIVE_PATTERNS) {

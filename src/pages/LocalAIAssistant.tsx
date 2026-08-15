@@ -1788,7 +1788,7 @@ return (
                   {ins.prompt && (
                     advisorShowPrompt === ins.id ? (
                       <div style={{ marginTop: 8, background: '#F5F7FF', border: '1px dashed #C7D2FE', borderRadius: 6, padding: '8px 10px', fontSize: 12, color: '#4F46E5', whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>
-                        💬 提示词：{ins.prompt}
+                        🔒 已脱敏提示词（无型号/厂家/成本，可安全粘贴到任何 AI）：{ins.prompt}
                         <div style={{ marginTop: 4 }}><Button size="small" type="text" onClick={() => setAdvisorShowPrompt(null)}>收起 ▲</Button></div>
                       </div>
                     ) : (
