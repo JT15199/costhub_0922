@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Button, Input, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Badge } from 'antd';
+import { Button, Input, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Badge, Switch } from 'antd';
 import {
   SendOutlined, RobotOutlined, PlusOutlined, HistoryOutlined,
   ThunderboltOutlined, TeamOutlined, ClearOutlined,
@@ -989,6 +989,9 @@ export default function LocalAIAssistant() {
   const [advisorProgress, setAdvisorProgress] = useState('');
   const [advisorInsightBusy, setAdvisorInsightBusy] = useState<number | null>(null);
   const [advisorShowPrompt, setAdvisorShowPrompt] = useState<number | null>(null); // 展开提示词的卡片 id
+  const [bridgeReviewPrompt, setBridgeReviewPrompt] = useState<string | null>(null); // 云端发送前预览
+  const [bridgeReviewResolve, setBridgeReviewResolve] = useState<((ok: boolean) => void) | null>(null);
+  const [bridgeReviewMode, setBridgeReviewMode] = useState<'auto' | 'preview'>('auto'); // 云端发送前预览开关
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [elapsed, setElapsed] = useState(0); // 生成过程计时（秒）
@@ -1065,6 +1068,7 @@ export default function LocalAIAssistant() {
       const url = await getSetting('local_ai_base_url', 'http://localhost:11434');
       const mdl = await getSetting('local_ai_model', '');
       setOllamaUrl(url); setModel(mdl);
+      setBridgeReviewMode((await getSetting('ai_bridge_review', 'auto')) === 'preview' ? 'preview' : 'auto');
       const db = await getDb();
       const projs = await db.select<any[]>('SELECT id,code,name FROM projects WHERE COALESCE(is_deleted,0)=0 ORDER BY code');
       setProjects(projs);
@@ -1570,16 +1574,23 @@ export default function LocalAIAssistant() {
   const insightForAdvisor = async (ins: any) => {
     setAdvisorInsightBusy(ins.id);
     setAdvisorProgress('');
-    message.info('行业洞察进行中（搜索+分析，约 1-3 分钟），完成自动回填结论');
+    message.info('双向 AI 洞察：本地判断意图 → 云端行情 → 本地结合数据出建议（约 2-4 分钟）');
     try {
-      const { agentSearchLoop } = await import('../trendService');
-      const r = await agentSearchLoop(ins.ref_name, '', 'price-trend', m => setAdvisorProgress(m));
-      const extra = `\n\n🔍 行业洞察（${fmtA(new Date().toISOString())}）：方向 ${r.trend_direction}，置信度 ${r.confidence_level}${r.magnitude_min != null ? `，近1-3月幅度约 ${r.magnitude_min}%~${r.magnitude_max}%` : ''}\n${r.summary}\n💡 建议动作：${r.suggested_action}`;
+      const { runBridgedInsight } = await import('../aiBridge');
+      const reviewMode = (await getSetting('ai_bridge_review', 'auto')) === 'preview';
+      const r = await runBridgedInsight(ins, {
+        onProgress: m => setAdvisorProgress(m),
+        onNeedReview: reviewMode ? (prompt) => new Promise<boolean>(resolve => {
+          setBridgeReviewPrompt(prompt);
+          setBridgeReviewResolve(() => resolve);
+        }) : undefined,
+      });
+      const extra = `\n\n🔍 行业洞察（${fmtA(new Date().toISOString())}）：方向 ${r.cloud.trend_direction}，置信度 ${r.cloud.confidence_level}${r.cloud.magnitude_min != null ? `，近1-3月幅度约 ${r.cloud.magnitude_min}%~${r.cloud.magnitude_max}%` : ''}\n${r.cloud.summary}\n🧠 本地最终建议（结合本地数据）：判定 ${r.local.verdict}${r.local.target_price ? '；目标：' + r.local.target_price : ''}${r.local.risk ? '；风险：' + r.local.risk : ''}\n行动：${r.local.actions.join('；') || r.cloud.suggested_action}\n🔐 发送云端的提示词仅含物料名/品类/问题（已审计，本地数据不外传）`;
       await updateAdvisorStatus(ins.id, 'open', { detail: (ins.detail || '') + extra });
       await loadAdvisor();
-      message.success('行业洞察已完成，结论已回填到建议卡');
+      message.success('双向 AI 洞察完成：云端行情 + 本地建议已回填');
     } catch (e: any) {
-      message.error('行业洞察失败：' + (e?.message || e) + '（需配置云端 LLM Key 或开启原生搜索）');
+      message.error('洞察失败：' + (e?.message || e) + '（需配置本地模型与云端 LLM Key 或开启原生搜索）');
     }
     setAdvisorInsightBusy(null);
     setAdvisorProgress('');
@@ -1801,6 +1812,15 @@ return (
             <Select value={model} onChange={async v => { setModel(v); await setSetting('local_ai_model', v); }} style={{ width: '100%' }} options={models.map(m => ({ value: m, label: m }))} /></div>}
           {connStatus === 'ok' && !models.length && <div style={{ color: '#D97706', fontSize: 12 }}>已连接但无模型，请先运行：<code>ollama pull qwen2.5:7b</code></div>}
           <Divider style={{ margin: '12px 0' }} />
+          {/* ===== 本地-云端桥（双向 AI 洞察） ===== */}
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 8 }}>双向 AI 洞察（本地-云端桥）</div>
+          <div style={{ fontSize: 11.5, color: 'var(--color-text-secondary)', marginBottom: 8, lineHeight: 1.6 }}>
+            建议卡「生成行业洞察」：本地模型判断查询意图 → 云端查行业行情（仅物料名/品类/问题，发送前自动敏感审计）→ 本地模型结合本地数据出最终建议。成本/供应商/项目数据永不出本机。
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <Switch size="small" checked={bridgeReviewMode === 'preview'} onChange={async v => { setBridgeReviewMode(v ? 'preview' : 'auto'); await setSetting('ai_bridge_review', v ? 'preview' : 'auto'); }} />
+            <span style={{ fontSize: 12 }}>云端发送前预览确认（默认自动脱敏；开启后每次发送云端前弹窗展示提示词）</span>
+          </div>
           {/* ===== 数据安全：一键封禁 Ollama 联网 ===== */}
           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 8 }}>数据安全保护</div>
           {!netOllamaFound && <div style={{ color: '#D97706', fontSize: 12, marginBottom: 8 }}>未检测到 ollama.exe（可能未安装或位置特殊），请使用项目中的「ollama-隔离工具.ps1」手动配置。</div>}
@@ -1885,6 +1905,14 @@ return (
           </div>
         )}
       </Modal>
+      {/* ===== 云端发送前预览确认（本地-云端桥） ===== */}
+      <Modal title="🔐 发送前确认（脱敏提示词）" open={!!bridgeReviewPrompt} onOk={() => { bridgeReviewResolve?.(true); setBridgeReviewPrompt(null); }} onCancel={() => { bridgeReviewResolve?.(false); setBridgeReviewPrompt(null); }} okText="确认发送" cancelText="取消" width={560}>
+        <div style={{ fontSize: 12, color: '#64748B', marginBottom: 8, lineHeight: 1.6 }}>
+          以下内容将发送给<b>云端模型</b>，仅含物料名/品类/问题（已通过敏感审计）。本地成本、供应商、项目数据不会包含。
+        </div>
+        <pre style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, padding: 10, fontSize: 12, whiteSpace: 'pre-wrap', maxHeight: 260, overflow: 'auto', margin: 0 }}>{bridgeReviewPrompt}</pre>
+      </Modal>
+
 
       {/* 分类规则管理 */}
       <Modal

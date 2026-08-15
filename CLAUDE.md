@@ -2,6 +2,13 @@
 - **任何本地/内网地址（localhost/127.0.0.1/私有网段）的 reqwest client 必须显式 `.no_proxy()`**——reqwest 默认 features 含 system-proxy，Windows 走 WinHTTP 读系统代理（公司组策略设置，设置界面看不到），会把 127.0.0.1 转发到公司代理 → 504
 - 排查：`netsh winhttp show proxy`（WinHTTP）≠ 设置界面（WinINET）；GUI 启动 eprintln 不可见，诊断写 exe 同目录日志或塞回响应 body
 
+### v2.3.19 本地-云端桥 aiBridge（2026-08-15，工具亮点）
+- **三步链路**（建议卡「生成行业洞察」）：①本地 Ollama 读建议卡上下文（本地数据）→ 判断查询意图，只输出 {material_name, category, question} ②脱敏模板组装 → 发送前敏感审计 → 云端 agentSearchLoop('price-trend') ③本地 Ollama 结合本地数据 + 云端行情 → 最终建议（判定机会/风险/目标/行动）
+- **安全设计**：云端 prompt = 固定模板，只有 物料名/品类/问题 三个字段位（成本/供应商/项目代号结构上无位置可传）；正则审计兜底（金额¥/元/价格区间/成本数字/供应商项目信息，时间区间"1-3月"负向断言排除）；拦截即抛错；全程 logLocalAICall（bridge_intent/bridge_summary）留痕
+- **开关**：settings ai_bridge_review（auto 自动脱敏 / preview 每次发送前 Modal 预览确认）；设置弹窗「双向 AI 洞察」区 + 与「一键封禁 Ollama 联网」并存
+- **降级**：本地模型未配置 → 规则默认意图 + 云端 + 云端结论；本地总结解析失败 → 云端 suggested_action
+- **测试**：src/__tests__/aiBridge.test.ts 9 用例（脱敏通过/型号长数字不误伤/¥元区间供应商拦截/模板白名单/截断）
+- 📌 待办：讲解文档（演示文稿/演讲逻辑）加入该亮点页
 ### v2.3.19 自主分析引擎 autoAdvisor（2026-08-14）
 - **机制**：App 级 60 秒轮询（scheduleAppAdvisor）→ 规则发现机会/风险点 → 本地 Ollama 润色（30 分钟节流，失败降级规则文案，logLocalAICall 留痕）→ ai_advisor_insights 表 → LocalAIAssistant「自主建议」区展示
 - **规则**（纯函数 buildRuleCandidates，vitest 覆盖）：①项目成本 ≥60 天未变动（快照）②大额物料 ≥¥10 且 ≥90 天未调价 ③领域超目标 ≥5%（computeTargetStatuses）④大额物料单一供应商
