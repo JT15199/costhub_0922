@@ -159,10 +159,15 @@ async function updatePartWeightedCost(partId: number) {
     'SELECT price, share_ratio FROM part_suppliers WHERE part_id = ? AND is_active = 1',
     [partId]
   );
+  // 追溯链：读取旧成本（变化时写 cost_change_log）
+  const oldRow = await d.select<any[]>('SELECT cost, name FROM parts WHERE id = ?', [partId]);
+  const oldCost = Number(oldRow?.[0]?.cost) || 0;
+  const partName = oldRow?.[0]?.name || '';
 
   if (suppliers.length === 0) {
     // 没有启用的供应商，成本设为0
-    await d.execute('UPDATE parts SET cost = 0 WHERE id = ?', [partId]);
+    await d.execute('UPDATE parts SET cost = 0, updated_at = datetime(\'now\',\'localtime\') WHERE id = ?', [partId]);
+    await logPartCostChange(partId, partName, oldCost, 0);
     return;
   }
 
@@ -172,21 +177,37 @@ async function updatePartWeightedCost(partId: number) {
   if (totalShare === 0) {
     // 所有供应商份额都是0，取第一个供应商的价格
     const firstPrice = Number(suppliers[0]?.price) || 0;
-    await d.execute('UPDATE parts SET cost = ? WHERE id = ?', [firstPrice, partId]);
+    await d.execute('UPDATE parts SET cost = ?, updated_at = datetime(\'now\',\'localtime\') WHERE id = ?', [firstPrice, partId]);
+    await logPartCostChange(partId, partName, oldCost, firstPrice);
     return;
   }
 
-  // 归一化并计算加权成本
+  // 归一化并计算加权成本（原始值累加，禁止循环内舍入）
   const weightedCost = suppliers.reduce((sum, s) => {
     const share = Number(s.share_ratio) || 0;
     const price = Number(s.price) || 0;
     return sum + (price * share / totalShare);
   }, 0);
 
-  await d.execute('UPDATE parts SET cost = ? WHERE id = ?', [weightedCost, partId]);
+  await d.execute('UPDATE parts SET cost = ?, updated_at = datetime(\'now\',\'localtime\') WHERE id = ?', [weightedCost, partId]);
+  await logPartCostChange(partId, partName, oldCost, weightedCost);
 }
 
-
+// 成本变化 → 写成本变动日志（追溯链：改价 → 器件成本 → 影响项目）
+async function logPartCostChange(partId: number, partName: string, oldCost: number, newCost: number) {
+  if (Math.abs(newCost - oldCost) < 0.0001 || !partName) return;
+  try {
+    const d = await getDb();
+    const projs = await d.select<any[]>(
+      'SELECT DISTINCT p.code FROM project_boms b JOIN projects p ON p.id = b.project_id WHERE b.part_id = ? AND COALESCE(b.is_deleted,0)=0 AND COALESCE(p.is_deleted,0)=0',
+      [partId]
+    );
+    await d.execute(
+      'INSERT INTO cost_change_log (change_type, ref_type, ref_id, ref_name, old_value, new_value, change_reason, impact_scope, changed_at) VALUES (?,?,?,?,?,?,?,?,datetime(\'now\',\'localtime\'))',
+      ['part_cost', 'part', partId, partName, oldCost, newCost, '供应商加权成本变化', JSON.stringify(projs.map((p: any) => p.code))]
+    );
+  } catch { /* 日志失败不影响主流程 */ }
+}
 
 export async function getSupplierPriceHistory(partId: number, supplierName: string) {
   return (await getDb()).select<any[]>('SELECT * FROM part_supplier_price_history WHERE part_id = ? AND supplier_name = ? ORDER BY changed_at DESC, id DESC', [partId, supplierName]);
