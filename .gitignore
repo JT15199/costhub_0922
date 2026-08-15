@@ -43,3 +43,4 @@ exports/
 tsc-check.txt
 *.tsbuildinfo
 _boot.json
+demo-echarts.min.js
