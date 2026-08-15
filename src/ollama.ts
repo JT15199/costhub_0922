@@ -8,6 +8,8 @@ export interface OllamaStreamOpts {
   think?: boolean;
   endpoint?: 'v1' | 'native';
   json?: boolean;
+  tools?: any[];                       // Ollama function-calling 工具定义（本地模型自主调用云端助手）
+  onToolCalls?: (tcs: any[]) => void;  // 工具调用回调
 }
 
 /**
@@ -40,6 +42,12 @@ export async function startOllamaStream(
     if (ev.payload) onReasoning(ev.payload);
   });
   const u3 = await listenEvent<string>(`llm-done-${eventId}`, () => { console.log('[流式] done 事件, eventId:', eventId.slice(0, 12)); cleanup(); onDone(); });
+  const u4t = await listenEvent<string>(`llm-toolcalls-${eventId}`, ev => {
+    if (ev.payload && opts?.onToolCalls) {
+      try { const arr = JSON.parse(ev.payload); opts.onToolCalls(Array.isArray(arr) ? arr : []); } catch { /* 忽略 */ }
+    }
+  });
+  unlisteners.push(u4t);
   const u4 = await listenEvent<string>(`llm-error-${eventId}`, ev => { console.log('[流式] error 事件:', ev.payload, 'eventId:', eventId.slice(0, 12)); cleanup(); onError(ev.payload); });
   unlisteners.push(u1, u2, u3, u4);
   let body: any;
@@ -49,6 +57,8 @@ export async function startOllamaStream(
       model, messages, stream: true,
       // format:'json' 强制模型只能输出合法JSON——彻底阻止复述规则/散文（json:false 时跳过，用于文本总结等场景）
       ...(opts?.json === false ? {} : { format: 'json' }),
+      // 工具调用（本地模型自主调用云端助手）：tools 定义由调用方传入
+      ...(opts?.tools && opts.tools.length > 0 ? { tools: opts.tools } : {}),
       options: {
         temperature: opts?.temperature ?? 0.3,
         num_predict: opts?.num_predict ?? 1200,

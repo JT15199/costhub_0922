@@ -536,8 +536,17 @@ async fn http_stream(
                                 }
                             }
                         }
-                        // 方案B：Ollama 原生格式 message.content / message.thinking
+                        // 方案B：Ollama 原生格式 message.content / message.thinking / message.tool_calls
                         else if let Some(msg) = v.get("message") {
+                            // 工具调用（本地模型自主调用云端助手）：Ollama 在 message.tool_calls 返回
+                            if let Some(tcs) = msg.get("tool_calls") {
+                                if let Some(arr) = tcs.as_array() {
+                                    if !arr.is_empty() {
+                                        emitted_any = true;
+                                        app.emit(&format!("llm-toolcalls-{}", event_id), tcs.to_string()).ok();
+                                    }
+                                }
+                            }
                             if let Some(t) = msg.get("thinking").and_then(|x| x.as_str()) {
                                 if !t.is_empty() {
                                     emitted_any = true;

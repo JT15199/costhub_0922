@@ -13,6 +13,7 @@ export const SENSITIVE_PATTERNS: { re: RegExp; desc: string }[] = [
   { re: /\b\d+(?:\.\d+)?\s*(?:-|~|至|到)\s*\d+(?:\.\d+)?(?!(?:\s*(?:月|年|周|天|日|小时)))/, desc: '价格区间' },
   { re: /(?:成本|单价|采购价|报价|价格)\s*[:：]?\s*\d/, desc: '成本类数字' },
   { re: /(?:供应商|份额|占比|项目代号|项目名)\s*[:：]?\s*\S/, desc: '供应商/项目信息' },
+  { re: /[\u4e00-\u9fa5]{2,6}(?:科技|电子|半导体|光电|精密|股份|集团|实业|能源|光学|有限(?:公司)?|公司)/, desc: '公司/厂家名称' },
 ];
 export interface AuditResult { safe: boolean; matches: { pattern: string; sample: string }[]; }
 
@@ -89,6 +90,27 @@ function parseJsonObj(text: string): any {
   ];
   for (const fn of attempts) { try { return fn(); } catch { /* 下一级 */ } }
   return null;
+}
+
+// ==================== 云端工具调用闸门（对话中本地模型自主调用） ====================
+// 本地模型生成的工具参数是自由文本（非模板字段），必须代码级校验后才能发往云端
+export function validateCloudQueryArgs(args: any): { ok: boolean; reason?: string; clean?: { material: string; category: string; question: string } } {
+  if (!args || typeof args !== 'object') return { ok: false, reason: '工具参数格式错误' };
+  const material = String(args.material || args.material_name || '').trim().slice(0, 100);
+  const category = String(args.category || '').trim().slice(0, 50);
+  const question = String(args.question || '').trim().slice(0, 200);
+  if (!material) return { ok: false, reason: '缺少物料名称（请使用物料通用名）' };
+  if (!question) return { ok: false, reason: '缺少查询问题' };
+  // 严格审计：型号/金额/供应商/项目代号/规格 全拦
+  const audit = auditPromptStrict('物料名称：' + material + '\n品类：' + category + '\n查询问题：' + question);
+  // 项目/产品短码（P1/M270 等字母+数字短组合，可反查内部命名）
+  if (/\b[A-Z]{1,3}\d{1,2}\b/.test(material + ' ' + question)) {
+    return { ok: false, reason: '参数疑似含项目/产品短码（如 P1/M270）——请使用物料通用名，不含任何编号' };
+  }
+  if (!audit.safe) {
+    return { ok: false, reason: '参数含敏感信息（' + audit.matches.map(m => m.pattern + ':' + m.sample).join('、') + '）——请只用物料通用名，不含型号/金额/供应商/项目信息' };
+  }
+  return { ok: true, clean: { material, category, question } };
 }
 
 // ==================== 三步链路 ====================
@@ -254,6 +276,18 @@ export async function runBridgedInsight(
   }
   if (!audit.safe) {
     const detail = audit.matches.map(m => m.pattern + '(' + m.sample + ')').join('、');
+    // 拦截留痕：审计日志可见（安全中心"拦截记录"数据源）
+    try {
+      await logLocalAICall({
+        request_type: 'bridge_blocked',
+        material_name: intent.material_name || '',
+        system_prompt: '发送前安全审计',
+        user_prompt: cloudPrompt.slice(0, 1000),
+        response_summary: '',
+        success: false,
+        error_message: '审计拦截：' + detail,
+      });
+    } catch { /* 留痕失败不影响拦截 */ }
     throw new Error('发送前审计拦截：提示词疑似含敏感数据（' + detail + '），已阻止发送');
   }
   if (onNeedReview) {
@@ -275,6 +309,7 @@ export async function runBridgedInsight(
       category: intent.category,
       question: intent.question,
       cloud_result: JSON.stringify(cloud),
+      cloud_prompt: cloudPrompt,
       local_result: JSON.stringify(local),
       verdict: local.verdict,
     });

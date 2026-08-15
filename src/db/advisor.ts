@@ -70,6 +70,7 @@ export async function saveBridgeLog(log: {
   category?: string;
   question?: string;
   cloud_result?: string;
+  cloud_prompt?: string;
   local_result?: string;
   verdict?: string;
   reused?: number;
@@ -77,8 +78,8 @@ export async function saveBridgeLog(log: {
 }) {
   const d = await getDb();
   await d.execute(
-    'INSERT INTO ai_bridge_logs (material_key, material_name, category, question, cloud_result, local_result, verdict, reused, reuse_of) VALUES (?,?,?,?,?,?,?,?,?)',
-    [log.material_key, log.material_name, log.category || '', log.question || '', log.cloud_result || '', log.local_result || '', log.verdict || '', log.reused || 0, log.reuse_of || 0]
+    'INSERT INTO ai_bridge_logs (material_key, material_name, category, question, cloud_result, cloud_prompt, local_result, verdict, reused, reuse_of) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    [log.material_key, log.material_name, log.category || '', log.question || '', log.cloud_result || '', log.cloud_prompt || '', log.local_result || '', log.verdict || '', log.reused || 0, log.reuse_of || 0]
   );
 }
 // 最近一条洞察（同物料，用于复用）
@@ -95,6 +96,12 @@ export async function getBridgeLogsByMaterial(materialKey: string, limit = 10) {
   const d = await getDb();
   return d.select<any[]>('SELECT * FROM ai_bridge_logs WHERE material_key = ? ORDER BY id DESC LIMIT ?', [materialKey, limit]);
 }
+// 最近 N 条洞察记录（安全中心"发送记录"用）
+export async function getRecentBridgeLogs(limit = 10) {
+  const d = await getDb();
+  return d.select<any[]>('SELECT * FROM ai_bridge_logs ORDER BY id DESC LIMIT ?', [limit]);
+}
+
 // 物料 key 归一化（复用 normalizePartName 口径）
 export function materialKey(name: string, category = ''): string {
   return (name || '').trim().toLowerCase().replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0)).replace(/[\s_\-/\\]+/g, '') + '|' + (category || '').trim().toLowerCase();

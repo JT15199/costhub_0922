@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>CostHub 设计方案 Demo v2 — 信息密度整合</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #F5F7FA; color: #1F2937; padding: 24px; }
+  .demo-bar { max-width: 1060px; margin: 0 auto 16px; background: linear-gradient(135deg, #6366F1, #8B5CF6); color: #fff; border-radius: 12px; padding: 12px 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .demo-bar h1 { font-size: 15px; font-weight: 700; }
+  .demo-bar span { font-size: 12px; opacity: .9; }
+  .tabs { max-width: 1060px; margin: 0 auto 14px; display: flex; gap: 8px; }
+  .tab { padding: 7px 16px; border-radius: 8px; background: #fff; border: 1px solid #E2E8F0; font-size: 12.5px; cursor: pointer; color: #64748B; }
+  .tab.active { background: #6366F1; color: #fff; border-color: #6366F1; font-weight: 600; }
+  .page { max-width: 1060px; margin: 0 auto; display: none; }
+  .page.active { display: block; }
+  /* ===== 视觉纪律：颜色只出现在 badge/数字；一行一条；渐进披露 ===== */
+  .panel { background: #fff; border: 1px solid #E8ECF1; border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+  .panel-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+  .panel-head .title { font-size: 13.5px; font-weight: 700; }
+  .panel-head .sub { font-size: 11px; color: #94A3B8; }
+  .panel-head .right { margin-left: auto; font-size: 11.5px; color: #94A3B8; }
+  .num { font-variant-numeric: tabular-nums; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10.5px; font-weight: 600; }
+  .b-red { background: #FEE2E2; color: #DC2626; }
+  .b-amber { background: #FEF3C7; color: #D97706; }
+  .b-green { background: #DCFCE7; color: #16A34A; }
+  .b-purple { background: #EDE9FE; color: #7C3AED; }
+  .b-blue { background: #DBEAFE; color: #2563EB; }
+  .b-gray { background: #F1F5F9; color: #64748B; }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 10px; background: #F1F5F9; color: #64748B; margin-right: 4px; }
+  /* 状态仪表：四格，一眼扫 */
+  .gauges { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+  .gauge { cursor: pointer; background: #fff; border: 1px solid #E8ECF1; border-radius: 12px; padding: 12px 14px; cursor: pointer; transition: box-shadow .15s; }
+  .gauge:hover { box-shadow: 0 4px 14px rgba(0,0,0,.07); }
+  .gauge .g-name { font-size: 11px; color: #94A3B8; display: flex; align-items: center; gap: 5px; }
+  .gauge .g-val { font-size: 22px; font-weight: 800; margin-top: 4px; }
+  .gauge .g-extra { font-size: 10.5px; color: #94A3B8; margin-top: 2px; }
+  .gauge.ok .g-val { color: #16A34A; }
+  .gauge.warn .g-val { color: #D97706; }
+  .gauge.bad .g-val { color: #DC2626; }
+  /* 一行一条（渐进披露） */
+  .row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; cursor: pointer; border: 1px solid transparent; }
+  .row:hover { background: #F8FAFC; border-color: #E8ECF1; }
+  .row + .row { margin-top: 4px; }
+  .row .r-title { font-weight: 600; flex-shrink: 0; }
+  .row .r-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #475569; }
+  .row .r-num { font-weight: 700; flex-shrink: 0; }
+  .row .r-ext { font-size: 10.5px; color: #94A3B8; flex-shrink: 0; }
+  .row .chevron { color: #CBD5E1; font-size: 10px; flex-shrink: 0; }
+  .row.expanded { background: #F8FAFC; border-color: #E8ECF1; }
+  .row .detail { display: none; }
+  .row.expanded .detail { display: block; flex-basis: 100%; font-size: 11.5px; color: #64748B; line-height: 1.7; padding: 6px 2px 2px; }
+  .btn { padding: 3px 10px; border-radius: 6px; border: 1px solid #E2E8F0; background: #fff; font-size: 11px; cursor: pointer; color: #475569; }
+  .btn.primary { background: #6366F1; color: #fff; border-color: #6366F1; }
+  .btn.mini { font-size: 10px; padding: 1px 7px; }
+  /* 两列主区 */
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 900px) { .cols, .gauges { grid-template-columns: 1fr 1fr; } }
+  .sent-box { background: #F8FAFC; border: 1px dashed #C7D2FE; border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #4F46E5; font-family: Consolas, monospace; line-height: 1.7; margin-top: 6px; }
+  .collapse { border-top: 1px dashed #E2E8F0; margin-top: 10px; padding-top: 8px; }
+  .collapse summary { cursor: pointer; font-size: 12px; color: #6366F1; font-weight: 600; outline: none; }
+  .chart-ph { background: linear-gradient(180deg,#F8FAFC,#F1F5F9); border: 1px dashed #CBD5E1; border-radius: 8px; height: 120px; display: flex; align-items: center; justify-content: center; color: #94A3B8; font-size: 11.5px; }
+  .expand-toggle { cursor: pointer; color: #6366F1; font-size: 11px; user-select: none; }
+  .more { display: none; }
+  .more.show { display: block; }
+
+  /* ===== 微交互（emil-design-eng + apple-design）=====
+     · 反馈落在按压瞬间（pointer-down），不等待 release
+     · transition 只写精确属性，不用 all
+     · 展开/收起 150ms ease-out，可打断，无等待感
+     · 一切动画短促（<200ms），克制不抢戏 */
+  .row { transition: background-color 120ms ease-out, border-color 120ms ease-out; }
+  .row:active { transform: scale(0.995); transition: transform 80ms ease-out; }
+  .gauge { transition: box-shadow 150ms ease-out, transform 150ms ease-out; }
+  .gauge:hover { transform: translateY(-1px); }
+  .gauge:active { transform: scale(0.97); transition: transform 80ms ease-out; }
+  .btn { transition: transform 100ms ease-out, background-color 120ms ease-out; }
+  .btn:active { transform: scale(0.96); }
+  .btn.primary:hover { filter: brightness(1.05); }
+  .row .detail { animation: fadeSlide 160ms ease-out; }
+  @keyframes fadeSlide { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
+  .gauge .g-val { transition: color 200ms ease-out; }
+
+</style>
+</head>
+<body>
+
+<div class="demo-bar">
+  <h1>🎨 CostHub 设计 Demo v2</h1>
+  <span>v3 · 微交互打磨：按压即时反馈 · 精确过渡 · 展开动画 160ms（emil-design-eng + apple-design 原则）</span>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="show('dashboard')">📊 驾驶舱</div>
+  <div class="tab" onclick="show('security')">🛡 安全中心</div>
+  <div class="tab" onclick="show('advice')">🤖 建议卡细节</div>
+</div>
+
+<!-- ==================== 驾驶舱 ==================== -->
+<div class="page active" id="dashboard">
+
+  <!-- 状态仪表：4 格，一眼扫出"哪里需要我" -->
+  <div class="gauges">
+    <div class="gauge bad" onclick="goto('advice')">
+      <div class="g-name">🎯 目标预警</div>
+      <div class="g-val">2</div>
+      <div class="g-extra">个领域未达标 · 点击看明细</div>
+    </div>
+    <div class="gauge warn" onclick="goto('advice')">
+      <div class="g-name">🤖 AI 建议</div>
+      <div class="g-val">5</div>
+      <div class="g-extra">待处理 · 2 条新</div>
+    </div>
+    <div class="gauge ok">
+      <div class="g-name">📈 成本变动</div>
+      <div class="g-val">3</div>
+      <div class="g-extra">项 · 1 涨 2 降</div>
+    </div>
+    <div class="gauge ok" onclick="goto('security')">
+      <div class="g-name">🛡 安全状态</div>
+      <div class="g-val" style="font-size:16px;padding-top:4px">✓ 正常</div>
+      <div class="g-extra">云端 6 次 ✓ · 拦截 2 次可查</div>
+    </div>
+  </div>
+
+  <!-- 左：问题（目标预警）右：机会（AI 建议）—— 心智模型：固定位置固定含义 -->
+  <div class="cols">
+    <div class="panel">
+      <div class="panel-head"><span class="title">🎯 目标成本达成</span><span class="badge b-red">2 未达标</span><span class="right">全部 6 个已设目标</span></div>
+      <!-- 一行一条，点击展开 -->
+      <div class="row" onclick="this.classList.toggle('expanded')">
+        <span class="r-title">M270</span><span class="tag" style="background:#DBEAFE;color:#2563EB">显示类</span>
+        <span class="r-main">超目标</span>
+        <span class="r-num" style="color:#DC2626">¥170</span>
+        <span class="r-ext">达成率 83%</span><span class="chevron">▾</span>
+        <div class="detail">目标 <b class="num">¥980</b> → 实际 <b class="num" style="color:#DC2626">¥1,150</b>。点击卡片直达项目页查看 BOM 明细与降本措施。</div>
+      </div>
+      <div class="row" onclick="this.classList.toggle('expanded')">
+        <span class="r-title">P-27</span><span class="tag" style="background:#DBEAFE;color:#2563EB">电源类</span>
+        <span class="r-main">超目标</span>
+        <span class="r-num" style="color:#DC2626">¥18</span>
+        <span class="r-ext">达成率 85%</span><span class="chevron">▾</span>
+        <div class="detail">目标 <b class="num">¥120</b> → 实际 <b class="num" style="color:#DC2626">¥138</b>。</div>
+      </div>
+      <div style="text-align:right;margin-top:6px;font-size:11px;color:#94A3B8">✓ 其余 4 个领域均达标</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><span class="title">🤖 AI 建议</span><span class="badge b-amber">5 待处理</span><span class="right">60s 自动巡检</span></div>
+      <div class="row" onclick="this.classList.toggle('expanded')">
+        <span class="r-title">💰 液晶面板</span><span class="badge b-amber">久未调价</span>
+        <span class="r-main">120 天未动价 · 议价机会</span>
+        <span class="r-ext">2 项目</span><span class="chevron">▾</span>
+        <div class="detail">依据：上次调价 4月16日 · 启用供应商 2 家。操作：<button class="btn mini">复制提示词</button> <button class="btn mini primary">生成洞察</button> <button class="btn mini">已处理</button></div>
+      </div>
+      <div class="row" onclick="this.classList.toggle('expanded')">
+        <span class="r-title">⚠️ 主控芯片</span><span class="badge b-purple">单一供应商</span>
+        <span class="r-main">供应风险 · 建议引入二供</span>
+        <span class="r-ext">1 项目</span><span class="chevron">▾</span>
+        <div class="detail">依据：启用供应商仅 1 家 · 大额物料。操作：<button class="btn mini">复制提示词</button> <button class="btn mini">已处理</button></div>
+      </div>
+      <div class="row" onclick="this.classList.toggle('expanded')">
+        <span class="r-title">🕐 M270</span><span class="badge b-blue">成本久未变动</span>
+        <span class="r-main">90 天无成本留痕</span>
+        <span class="r-ext">整机</span><span class="chevron">▾</span>
+        <div class="detail">依据：最近快照 5月14日。大额物料：液晶面板、主控芯片、背光模组。</div>
+      </div>
+      <div style="text-align:right;margin-top:6px;font-size:11px;color:#6366F1;cursor:pointer">查看全部 5 条 →</div>
+    </div>
+  </div>
+
+  <!-- 下：数据变动（一行一条） -->
+  <div class="panel">
+    <div class="panel-head"><span class="title">📈 最近成本变动</span><span class="right">快照异动 · 改价 · 报价差异</span></div>
+    <div class="row" onclick="this.classList.toggle('expanded')">
+      <span class="r-title">M270</span><span class="badge b-green">▼ 3.2%</span>
+      <span class="r-main">供应商 A 面板调价</span>
+      <span class="r-num" style="color:#16A34A">¥1,150 → ¥1,113</span>
+      <span class="r-ext">今天 15:20</span><span class="chevron">▾</span>
+      <div class="detail">原因：年度议价落地。影响：M270 整机成本 ↓¥37。</div>
+    </div>
+    <div class="row" onclick="this.classList.toggle('expanded')">
+      <span class="r-title">P-27</span><span class="badge b-red">▲ 1.8%</span>
+      <span class="r-main">主控芯片供应商涨价</span>
+      <span class="r-num" style="color:#DC2626">¥138 → ¥140.5</span>
+      <span class="r-ext">今天 14:02</span><span class="chevron">▾</span>
+      <div class="detail">原因：晶圆成本传导。可查看成本变动追溯链。</div>
+    </div>
+  </div>
+
+  <!-- 完整数据：你知道的，折叠 -->
+  <details class="panel collapse">
+    <summary>📊 完整数据（统计卡 · 图表 · 最近更新 —— 想看再展开）</summary>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:12px 0">
+      <div style="background:#F8FAFC;border-radius:8px;padding:8px;text-align:center"><div style="font-size:10.5px;color:#94A3B8">器件总数</div><div style="font-size:18px;font-weight:700" class="num">2,847</div></div>
+      <div style="background:#F8FAFC;border-radius:8px;padding:8px;text-align:center"><div style="font-size:10.5px;color:#94A3B8">项目总数</div><div style="font-size:18px;font-weight:700" class="num">18</div></div>
+      <div style="background:#F8FAFC;border-radius:8px;padding:8px;text-align:center"><div style="font-size:10.5px;color:#94A3B8">进行中</div><div style="font-size:18px;font-weight:700" class="num">7</div></div>
+      <div style="background:#F8FAFC;border-radius:8px;padding:8px;text-align:center"><div style="font-size:10.5px;color:#94A3B8">平均BOM</div><div style="font-size:18px;font-weight:700" class="num">¥1,032</div></div>
+      <div style="background:#F8FAFC;border-radius:8px;padding:8px;text-align:center"><div style="font-size:10.5px;color:#94A3B8">竞品</div><div style="font-size:18px;font-weight:700" class="num">12</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="chart-ph">📊 各项目 BOM 成本</div>
+      <div class="chart-ph">📊 竞品 BOM 成本</div>
+    </div>
+  </details>
+</div>
+
+<!-- ==================== 安全中心 ==================== -->
+<div class="page" id="security">
+  <div class="panel">
+    <div class="panel-head"><span class="title">🛡 安全中心</span><span class="badge b-green">3 通道受控</span><span class="right">一切出站可查可审计</span></div>
+    <!-- 通道：一行一条 -->
+    <div class="row" onclick="this.classList.toggle('expanded')">
+      <span class="r-title">☁️ 云端 LLM</span><span class="badge b-green">已配置</span>
+      <span class="r-main">白名单模板 + 严格审计 · 只收 物料名/品类/问题</span>
+      <span class="r-ext">近30天 6 次</span><span class="chevron">▾</span>
+      <div class="detail">结构闸门：出站是固定模板，成本/型号/供应商/项目代号在模板中无字段位。<br>审计闸门：正则扫描，命中即拦截留痕。</div>
+    </div>
+    <div class="row" onclick="this.classList.toggle('expanded')">
+      <span class="r-title">🔍 搜索服务</span><span class="badge b-green">已配置</span>
+      <span class="r-main">仅接收搜索词（物料名+品类）</span>
+      <span class="r-ext">近30天 12 次</span><span class="chevron">▾</span>
+      <div class="detail">搜索词来自脱敏模板，不含任何本地数据。</div>
+    </div>
+    <div class="row" onclick="this.classList.toggle('expanded')">
+      <span class="r-title">💻 本地 Ollama</span><span class="badge b-amber">可联网</span>
+      <span class="r-main">读全库分析 · 可从设置一键封禁联网</span>
+      <span class="r-ext">封禁后仅本机推理</span><span class="chevron">▾</span>
+      <div class="detail">封禁后本地模型无法联网；解锁需确认。</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="title">最近云端发送记录（实际发送全文）</span><span class="badge b-green">6 条全部审计 ✓</span></div>
+    <div class="row" onclick="toggleRow(this)">
+      <span class="r-title">16:30</span><span class="badge b-green">✓</span>
+      <span class="r-main">液晶面板 · 行业洞察</span>
+      <span class="r-ext">42s</span><span class="chevron">▾</span>
+      <div class="detail"><div class="sent-box">物料名称：液晶面板<br>品类：显示器件<br>查询问题：该物料近期价格走势、供需状况与主要影响因素<br>请基于最新公开行业信息，给出该物料：1) 价格走势方向（近1-3月）2) 幅度区间 3) 供需状况 4) 主要影响因素。只基于公开行业信息回答，不得推断我司成本。</div></div>
+    </div>
+    <div class="row" onclick="toggleRow(this)">
+      <span class="r-title">16:12</span><span class="badge b-green">✓</span>
+      <span class="r-main">主控芯片 · 行业洞察</span>
+      <span class="r-ext">38s</span><span class="chevron">▾</span>
+      <div class="detail"><div class="sent-box">物料名称：主控芯片<br>品类：硬件类<br>查询问题：该物料近期价格走势、供需状况与主要影响因素<br>…</div></div>
+    </div>
+    <div class="row" onclick="toggleRow(this)">
+      <span class="r-title">15:48</span><span class="badge b-blue">♻ 复用</span>
+      <span class="r-main">DDR3 内存 · 复用 07-12 洞察（判定 中性）</span>
+      <span class="r-ext">未重复查询</span><span class="chevron">▾</span>
+      <div class="detail"><div class="sent-box">♻ 复用历史洞察，未调用云端。历史发送内容：物料名称：DDR3 内存…</div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="title">审计拦截记录</span><span class="badge b-red">近30天 2 次</span><span class="right">被拦下的内容从未发出</span></div>
+    <div class="row" onclick="toggleRow(this)">
+      <span class="r-title">08-12 14:03</span><span class="badge b-red">✗ 拦截</span>
+      <span class="r-main">本地意图含金额/型号</span>
+      <span class="r-ext">已阻止</span><span class="chevron">▾</span>
+      <div class="detail"><div class="sent-box" style="color:#DC2626">物料名称：液晶面板 M270<br>查询问题：我方采购成本约¥300/片…<br>→ 命中：金额（¥300）· 型号（M270）→ 已阻止发送，本地模型重新生成</div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="title">永不发送清单</span><span class="right">两道闸门保障 · 90 个测试守护</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      <span class="badge b-red" style="font-size:11px;padding:3px 10px">✗ 成本金额</span>
+      <span class="badge b-red" style="font-size:11px;padding:3px 10px">✗ 器件型号</span>
+      <span class="badge b-red" style="font-size:11px;padding:3px 10px">✗ 供应商名</span>
+      <span class="badge b-red" style="font-size:11px;padding:3px 10px">✗ 项目代号</span>
+      <span class="badge b-red" style="font-size:11px;padding:3px 10px">✗ 份额/用量</span>
+      <span class="badge b-red" style="font-size:11px;padding:3px 10px">✗ BOM 结构</span>
+      <span class="badge b-red" style="font-size:11px;padding:3px 10px">✗ 目标成本</span>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 建议卡细节 ==================== -->
+<div class="page" id="advice">
+  <div class="panel">
+    <div class="panel-head"><span class="title">🤖 建议卡 —— 三步链路每步可见</span><span class="right">能力边界如实呈现</span></div>
+    <div class="row" style="cursor:default;flex-wrap:wrap">
+      <span class="r-title" style="font-size:13px">💰 物料「液晶面板」已 120 天未调价</span><span class="badge b-amber">久未调价</span><span class="tag">规则发现</span><span class="tag">AI 润色 16:30</span>
+      <div class="detail" style="display:block;flex-basis:100%">
+        📋 <b>依据</b>：上次调价 2026-04-16 · 启用供应商 2 家 · 涉及 2 项目 3 件（全部来自库内数据，可跳转核对）<br>
+        🔒 <b>提示词（已脱敏）</b>：你是资深成本经理。针对「液晶面板」品类物料开展议价评估：1) 结合品类近期行情给出合理采购价区间与砍价幅度；2) 给 3 条谈判话术要点；3) 判断是否值得做行业行情洞察。<br>
+        <span style="margin-top:6px;display:inline-block">
+          ① 本地意图 <span class="tag">液晶面板 · 价格走势</span> →
+          ② 云端行情 <span class="expand-toggle" onclick="toggle(this)">查看本次发送全文 ▾</span>
+          <span class="more"><div class="sent-box">物料名称：液晶面板<br>品类：显示器件<br>查询问题：该物料近期价格走势…</div></span> →
+          ③ 本地总结 <span class="badge b-green">机会</span>
+        </span>
+      </div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-head"><span class="title">🔐 信任四要素</span></div>
+    <div style="font-size:12px;line-height:2.2;color:#475569">
+      <div>① <b>运行可见</b>：状态仪表实时显示"上次分析/待处理数/云端调用数"</div>
+      <div>② <b>依据可见</b>：每条建议标注数据来源（调价时间/供应商数/项目数）</div>
+      <div>③ <b>发送可见</b>：每次云端调用全文存档，建议卡/安全中心均可展开核验</div>
+      <div>④ <b>边界如实</b>：标注"规则发现/AI 润色"来源；洞察分段（意图/行情/总结）</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function show(id) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    document.querySelectorAll('.tab')[['dashboard','security','advice'].indexOf(id)].classList.add('active');
+  }
+  function goto(id) { show(id); }
+  function toggleRow(el) { el.classList.toggle('expanded'); }
+  function toggle(el) {
+    const more = el.parentElement.querySelector('.more');
+    const show = !more.classList.contains('show');
+    more.classList.toggle('show', show);
+    el.textContent = show ? '收起 ▲' : '查看本次发送全文 ▾';
+  }
+</script>
+</body>
+</html>

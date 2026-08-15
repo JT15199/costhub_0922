@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { auditSensitive, auditPromptStrict, sanitizeForCloud, SENSITIVE_PATTERNS, buildSanitizedContext, stripModelCodes, isProjectInsight } from '../aiBridge';
+import { auditSensitive, auditPromptStrict, sanitizeForCloud, SENSITIVE_PATTERNS, buildSanitizedContext, stripModelCodes, isProjectInsight, validateCloudQueryArgs } from '../aiBridge';
 import { materialKey } from '../db/advisor';
 
 describe('auditSensitive 发送前审计', () => {
@@ -75,6 +75,31 @@ describe('脱敏上下文（提示词红线）', () => {
     const p = sanitizeForCloud({ material_name: '液晶面板 M270', category: '显示', question: '走势' });
     expect(auditSensitive(p).safe).toBe(true);       // 宽松审计放过
     expect(auditPromptStrict(p).safe).toBe(false);   // 严格审计拦截（型号）
+  });
+});
+
+describe('validateCloudQueryArgs 云端工具闸门', () => {
+  it('合法参数（通用名）通过', () => {
+    const r = validateCloudQueryArgs({ material: '液晶面板', category: '显示器件', question: '近期价格走势' });
+    expect(r.ok).toBe(true);
+    expect(r.clean?.material).toBe('液晶面板');
+  });
+  it('含型号被拒', () => {
+    const r = validateCloudQueryArgs({ material: '液晶面板 M270', question: '走势' });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('敏感');
+  });
+  it('含金额被拒', () => {
+    expect(validateCloudQueryArgs({ material: '屏', question: '我方成本¥300，近期走势' }).ok).toBe(false);
+  });
+  it('含供应商/项目代号被拒', () => {
+    expect(validateCloudQueryArgs({ material: '屏', question: '京东方科技供货情况' }).ok).toBe(false);
+    expect(validateCloudQueryArgs({ material: '屏', question: '供应商：京东方' }).ok).toBe(false);
+    expect(validateCloudQueryArgs({ material: '屏', question: '项目P1用量' }).ok).toBe(false);
+  });
+  it('缺参数被拒', () => {
+    expect(validateCloudQueryArgs({}).ok).toBe(false);
+    expect(validateCloudQueryArgs({ material: '屏' }).ok).toBe(false);
   });
 });
 

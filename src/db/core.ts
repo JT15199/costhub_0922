@@ -158,6 +158,7 @@ async function ensureSchema(d: Database) {
       category TEXT DEFAULT '',
       question TEXT DEFAULT '',
       cloud_result TEXT DEFAULT '',
+      cloud_prompt TEXT DEFAULT '',
       local_result TEXT DEFAULT '',
       verdict TEXT DEFAULT '',
       reused INTEGER DEFAULT 0,
@@ -303,6 +304,7 @@ async function ensureSchema(d: Database) {
 
     // part_insights 补 handled_json（已处理组快照，供「已处理」视图查看/撤销）
   await ignoreSchemaError(d.execute("ALTER TABLE part_insights ADD COLUMN handled_json TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE ai_bridge_logs ADD COLUMN cloud_prompt TEXT DEFAULT ''"));
 // 为 trend_items 表添加缺失的列
   await ignoreSchemaError(d.execute('ALTER TABLE trend_items ADD COLUMN magnitude_min REAL DEFAULT NULL'));
   await ignoreSchemaError(d.execute('ALTER TABLE trend_items ADD COLUMN magnitude_max REAL DEFAULT NULL'));

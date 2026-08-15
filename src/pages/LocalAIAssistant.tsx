@@ -973,6 +973,25 @@ function dominantCat(cats: Record<string, number> | undefined) {
   const [main, sub] = entries[0][0].split('/');
   return { main, sub };
 }
+// ===== 云端助手工具定义（本地模型对话中自主调用云端大模型） =====
+// 安全：工具描述强制"通用名"；参数在 aiBridge.validateCloudQueryArgs 二次校验（型号/金额/供应商/项目代号 全拦）
+const CLOUD_TOOL_DEF = {
+  type: 'function',
+  function: {
+    name: 'cloud_query',
+    description: '需要实时行业行情、供需状况或更强的分析能力时，调用云端大模型辅助判断。参数必须使用物料通用名称（严禁型号、金额、供应商名称、项目编号）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        material: { type: 'string', description: '物料通用名称，如 液晶面板、PCB、锂电池（严禁型号/编号）' },
+        category: { type: 'string', description: '物料品类，如 显示器件、硬件类' },
+        question: { type: 'string', description: '要查询的具体问题，一句话' },
+      },
+      required: ['material', 'question'],
+    },
+  },
+};
+
 export default function LocalAIAssistant() {
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
   const [model, setModel] = useState('');
@@ -993,6 +1012,7 @@ export default function LocalAIAssistant() {
   const [bridgeReviewPrompt, setBridgeReviewPrompt] = useState<string | null>(null); // 云端发送前预览
   const [bridgeReviewResolve, setBridgeReviewResolve] = useState<((ok: boolean) => void) | null>(null);
   const [bridgeReviewMode, setBridgeReviewMode] = useState<'auto' | 'preview'>('auto'); // 云端发送前预览开关
+  const [cloudToolMode, setCloudToolMode] = useState(true); // 对话中本地模型自主调用云端
   const [bridgeReuseInfo, setBridgeReuseInfo] = useState<{ ins: any; recent: any } | null>(null); // 复用确认
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -1071,6 +1091,7 @@ export default function LocalAIAssistant() {
       const mdl = await getSetting('local_ai_model', '');
       setOllamaUrl(url); setModel(mdl);
       setBridgeReviewMode((await getSetting('ai_bridge_review', 'auto')) === 'preview' ? 'preview' : 'auto');
+      setCloudToolMode((await getSetting('ai_local_cloud_tool', 'on')) !== 'off');
       const db = await getDb();
       const projs = await db.select<any[]>('SELECT id,code,name FROM projects WHERE COALESCE(is_deleted,0)=0 ORDER BY code');
       setProjects(projs);
@@ -1263,6 +1284,7 @@ export default function LocalAIAssistant() {
   const sendMessage = useCallback(async (userContent: string) => {
     if (!userContent.trim() || streaming) return;
     if (!model) { message.warning('请先连接Ollama并选择模型'); return; }
+    const cloudToolEnabled = (await getSetting('ai_local_cloud_tool', 'on')) !== 'off';
     let sid = sessionId;
     if (!sid) {
       sid = await newSession(userContent.slice(0, 20));
@@ -1304,10 +1326,12 @@ export default function LocalAIAssistant() {
     let reasoning = '';
     let rateStart = Date.now();
     let rateBase = 0;
-    // ===== 两阶段查询循环：模型可中途请求查库 =====
-    const runStream = async () => {
-      cleanupRef.current = await startOllamaStream(
-        ollamaUrl, model, apiMessages,
+    // ===== 流式请求（支持工具调用：本地模型可中途请求云端大模型） =====
+    const runStream = (msgs: any[]): Promise<any[]> => new Promise<any[]>((resolve, reject) => {
+      const toolCalls: any[] = [];
+      const enabledCloudTool = cloudToolEnabled;
+      startOllamaStream(
+        ollamaUrl, model, msgs,
         (token) => {
           setPhase('streaming');
           full += token;
@@ -1323,30 +1347,46 @@ export default function LocalAIAssistant() {
           setPhase('thinking');
           setMessages(prev => { const arr = [...prev]; arr[arr.length - 1] = { role: 'assistant', content: full, reasoning }; return arr; });
         },
-        async () => {
-          finishStream();
+        () => { resolve(toolCalls); },
+        (err) => { reject(new Error(err)); },
+        {
+          endpoint: 'native',
+          think: false,
+          tools: enabledCloudTool ? [CLOUD_TOOL_DEF] : undefined,
+          onToolCalls: (list) => {
+            list.forEach(tc => { if (!toolCalls.some(x => JSON.stringify(x) === JSON.stringify(tc))) toolCalls.push(tc); });
+          },
         },
-        (err) => {
-          setStreaming(false); cleanupRef.current = null; setPhase('idle');
-          // 审计日志：失败也记录
-          saveAIRequestLog({
-            request_type: 'local_ai_chat',
-            system_prompt: (systemPrompt + dataBlock).slice(0, 2000),
-            user_prompt: userContent.slice(0, 2000),
-            response_summary: (full || '').slice(0, 2000),
-            success: false,
-            error_message: String(err).slice(0, 500),
-            provider_name: 'Ollama（本地）', model_name: model,
-          }).catch(() => {});
-          if (full) {
-            setMessages(prev => { const arr = [...prev]; arr[arr.length - 1] = { role: 'assistant', content: `${full}\n\n---\n[警告] 输出中断：${err}`, reasoning }; return arr; });
-            saveMsg(currentSid, 'assistant', `${full}\n\n---\n[警告] 输出中断：${err}`, reasoning);
-          } else {
-            setMessages(prev => { const arr = [...prev]; arr[arr.length - 1] = { role: 'assistant', content: `请求失败：${err}\n\n请确认 Ollama 正在运行，且模型已下载。可在右上角设置里重新连接。`, reasoning }; return arr; });
-          }
-          playChime('error');
-        }
-      );
+      ).then(c => { cleanupRef.current = c; }).catch(() => { /* 错误走 onError */ });
+    });
+    // 云端工具执行：安全校验 → 脱敏 → 云端查询 → 结果回给本地模型
+    const executeCloudQuery = async (tcs: any[]): Promise<string> => {
+      const fn = tcs?.[0]?.function;
+      if (!fn || fn.name !== 'cloud_query') return '错误：不支持的云端工具';
+      let args: any = {};
+      try { args = JSON.parse(fn.arguments || '{}'); } catch { return '错误：云端工具参数解析失败'; }
+      const { validateCloudQueryArgs } = await import('../aiBridge');
+      const v = validateCloudQueryArgs(args);
+      if (!v.ok) {
+        try {
+          await logLocalAICall({ request_type: 'local_chat_cloud_tool', material_name: String(args.material || ''), system_prompt: '工具参数安全校验', user_prompt: fn.arguments.slice(0, 1000), response_summary: '', success: false, error_message: v.reason || '参数校验失败', model_name: model });
+        } catch { /* 留痕失败忽略 */ }
+        return `云端调用被安全审计拦截：${v.reason}。请使用物料通用名称重新发起（可换个说法）。`;
+      }
+      // 气泡提示：正在调用云端（用户感知）
+      setPhase('querying');
+      setMessages(prev => { const arr = [...prev]; arr[arr.length - 1] = { role: 'assistant', content: (arr[arr.length - 1]?.content || '') + '\n\n🔍 本地模型正在调用云端大模型查询行情（内容已脱敏审计）…', reasoning }; return arr; });
+      try {
+        const { agentSearchLoop } = await import('../trendService');
+        const r = await agentSearchLoop(v.clean!.material, v.clean!.category, 'price-trend', () => { setPhase('querying'); });
+        const summary = `【云端查询结果】物料：${v.clean!.material}（品类：${v.clean!.category || '未知'}）\n行情方向：${r.trend_direction} · 置信度：${r.confidence_level}${r.magnitude_min != null ? ` · 近1-3月幅度 ${r.magnitude_min}%~${r.magnitude_max}%` : ''}\n摘要：${r.summary}\n建议动作：${r.suggested_action}`;
+        try {
+          await logLocalAICall({ request_type: 'local_chat_cloud_tool', material_name: v.clean!.material, system_prompt: '本地模型自主调用云端（脱敏）', user_prompt: `material=${v.clean!.material}&category=${v.clean!.category}&question=${v.clean!.question}`, response_summary: summary.slice(0, 800), success: true, model_name: model });
+        } catch { /* 忽略 */ }
+        return summary;
+      } catch (e: any) {
+        return `云端查询失败：${e?.message || e}（请确认云端 LLM/搜索已配置；本地回答可继续）`;
+      }
     };
     const finishStream = async () => {
       setStreaming(false); cleanupRef.current = null; setPhase('idle');
@@ -1367,7 +1407,39 @@ export default function LocalAIAssistant() {
       } catch (e) { console.error('审计日志记录失败', e); }
     };
     stoppedRef.current = false; // 重置停止标记
-    await runStream();
+    // ===== 工具循环：本地模型可自主调用云端（最多 1 轮工具，防止死循环） =====
+    try {
+      let tcs = await runStream(apiMessages);
+      if (tcs.length > 0 && !stoppedRef.current) {
+        const toolResult = await executeCloudQuery(tcs);
+        if (!stoppedRef.current) {
+          const followMsgs = [
+            ...apiMessages,
+            { role: 'assistant' as const, content: full || '', tool_calls: tcs },
+            { role: 'tool' as const, content: toolResult },
+          ];
+          await runStream(followMsgs);
+        }
+      }
+      await finishStream();
+    } catch (e: any) {
+      setStreaming(false); cleanupRef.current = null; setPhase('idle');
+      const err = String(e?.message || e);
+      try {
+        await saveAIRequestLog({
+          request_type: 'local_ai_chat', system_prompt: (systemPrompt + dataBlock).slice(0, 2000),
+          user_prompt: userContent.slice(0, 2000), response_summary: (full || '').slice(0, 2000),
+          success: false, error_message: err.slice(0, 500), provider_name: 'Ollama（本地）', model_name: model,
+        });
+      } catch { /* 忽略 */ }
+      if (full) {
+        setMessages(prev => { const arr = [...prev]; arr[arr.length - 1] = { role: 'assistant', content: `${full}\n\n---\n[警告] 输出中断：${err}`, reasoning }; return arr; });
+        saveMsg(currentSid, 'assistant', `${full}\n\n---\n[警告] 输出中断：${err}`, reasoning);
+      } else {
+        setMessages(prev => { const arr = [...prev]; arr[arr.length - 1] = { role: 'assistant', content: `请求失败：${err}\n\n请确认 Ollama 正在运行，且模型已下载。可在右上角设置里重新连接。`, reasoning }; return arr; });
+      }
+      playChime('error');
+    }
   }, [streaming, model, sessionId, messages, ollamaUrl, buildSystemPrompt, extractMemories]);
 
   const injectAndSend = useCallback(async (dataCtx: string, prompt: string) => {
@@ -1589,7 +1661,7 @@ export default function LocalAIAssistant() {
         }) : undefined,
       });
       const reuseTag = r.reused && r.reuseOf ? `♻ 复用 ${fmtA(r.reuseOf.created_at)} 洞察（判定 ${r.reuseOf.verdict || '未知'}，未重复查询云端）\n` : '';
-      const extra = `\n\n${reuseTag}🔍 行业洞察（${r.reused && r.reuseOf ? fmtA(r.reuseOf.created_at) : fmtA(new Date().toISOString())}）：方向 ${r.cloud.trend_direction}，置信度 ${r.cloud.confidence_level}${r.cloud.magnitude_min != null ? `，近1-3月幅度约 ${r.cloud.magnitude_min}%~${r.cloud.magnitude_max}%` : ''}\n${r.cloud.summary}\n🧠 本地最终建议（结合本地数据）：判定 ${r.local.verdict}${r.local.target_price ? '；目标：' + r.local.target_price : ''}${r.local.risk ? '；风险：' + r.local.risk : ''}\n行动：${r.local.actions.join('；') || r.cloud.suggested_action}\n🔐 发送云端的提示词仅含物料名/品类/问题（已审计，本地数据不外传）`;
+      const extra = `\n\n${reuseTag}🔍 行业洞察（${r.reused && r.reuseOf ? fmtA(r.reuseOf.created_at) : fmtA(new Date().toISOString())}）：方向 ${r.cloud.trend_direction}，置信度 ${r.cloud.confidence_level}${r.cloud.magnitude_min != null ? `，近1-3月幅度约 ${r.cloud.magnitude_min}%~${r.cloud.magnitude_max}%` : ''}\n${r.cloud.summary}\n🧠 本地最终建议（结合本地数据）：判定 ${r.local.verdict}${r.local.target_price ? '；目标：' + r.local.target_price : ''}${r.local.risk ? '；风险：' + r.local.risk : ''}\n行动：${r.local.actions.join('；') || r.cloud.suggested_action}\n🔐 本次实际发送云端的内容（可核验）：\n${r.cloudPrompt}\n—— 以上为发送全文，仅含物料名/品类/问题，本地数据不外传`;
       await updateAdvisorStatus(ins.id, 'open', { detail: (ins.detail || '') + extra });
       await loadAdvisor();
       message.success(r.reused ? '已复用上次洞察结果（防重复查询），如需最新行情可点「♻ 强制最新」' : '双向 AI 洞察完成：云端行情 + 本地建议已回填');
@@ -1836,6 +1908,10 @@ return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <Switch size="small" checked={bridgeReviewMode === 'preview'} onChange={async v => { setBridgeReviewMode(v ? 'preview' : 'auto'); await setSetting('ai_bridge_review', v ? 'preview' : 'auto'); }} />
             <span style={{ fontSize: 12 }}>云端发送前预览确认（默认自动脱敏；开启后每次发送云端前弹窗展示提示词）</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <Switch size="small" checked={cloudToolMode} onChange={async v => { setCloudToolMode(v); await setSetting('ai_local_cloud_tool', v ? 'on' : 'off'); }} />
+            <span style={{ fontSize: 12 }}>对话中允许本地模型自主调用云端助手（需实时行情/更强分析时；参数经安全审计，全程留痕）</span>
           </div>
           {/* ===== 数据安全：一键封禁 Ollama 联网 ===== */}
           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 8 }}>数据安全保护</div>
