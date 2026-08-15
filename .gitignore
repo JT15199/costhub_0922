@@ -42,3 +42,4 @@ exports/
 .fuse_hidden*
 tsc-check.txt
 *.tsbuildinfo
+_boot.json
