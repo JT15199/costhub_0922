@@ -1641,3 +1641,103 @@ body {
   font-size: 13px;
   color: var(--color-text-secondary, #787774);
 }
+
+/* ========== 极简白（Apple 风浅色实底）：白卡无边框 + 细腻阴影 + 胶囊控件 ========== */
+[data-theme="minimal"] {
+  --radius: 14px;
+  --radius-lg: 18px;
+  --radius-sm: 8px;
+}
+[data-theme="minimal"] body {
+  background: #F5F5F7 !important;
+}
+[data-theme="minimal"] .main-content {
+  background: #F5F5F7;
+}
+/* 侧边栏：白底 hairline */
+[data-theme="minimal"] .sidebar {
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: 1px solid rgba(0,0,0,0.07);
+}
+/* 内容卡：无边框白卡 + 细腻双层阴影（层级靠阴影不靠描边） */
+[data-theme="minimal"] .content-card {
+  background: #FFFFFF;
+  border: none;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 8px 24px rgba(0,0,0,0.04);
+}
+[data-theme="minimal"] .content-card:hover {
+  box-shadow: 0 2px 6px rgba(0,0,0,0.07), 0 12px 32px rgba(0,0,0,0.07);
+}
+/* 统计卡 */
+[data-theme="minimal"] .stat-card {
+  background: #FFFFFF;
+  border: none;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 8px 24px rgba(0,0,0,0.04);
+}
+/* 主按钮：胶囊 + 系统蓝 */
+[data-theme="minimal"] .ant-btn-primary {
+  background: #007AFF;
+  border-color: #007AFF;
+  border-radius: 980px;
+  box-shadow: 0 1px 2px rgba(0,122,255,0.3);
+}
+[data-theme="minimal"] .ant-btn-primary:hover { background: #0A84FF; border-color: #0A84FF; }
+[data-theme="minimal"] .ant-btn:not(.ant-btn-primary) {
+  border-radius: 980px;
+}
+/* Segmented 分段控件：浅灰胶囊 + 白滑块 */
+[data-theme="minimal"] .ant-segmented {
+  background: #E9E9EC;
+  border-radius: 980px;
+  padding: 2px;
+}
+[data-theme="minimal"] .ant-segmented-item-selected {
+  background: #FFFFFF;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.06);
+  border-radius: 980px;
+}
+/* 输入框 / 下拉 / 弹窗圆角 */
+[data-theme="minimal"] .ant-input, [data-theme="minimal"] .ant-input-affix-wrapper,
+[data-theme="minimal"] .ant-select-selector, [data-theme="minimal"] .ant-input-number,
+[data-theme="minimal"] .ant-picker, [data-theme="minimal"] .ant-modal-content {
+  border-radius: 10px;
+}
+/* 表格：无竖线 hairline 底边，行 hover 浅灰 */
+[data-theme="minimal"] .ant-table {
+  background: transparent;
+}
+[data-theme="minimal"] .ant-table-thead > tr > th {
+  background: transparent;
+  color: #86868B;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(0,0,0,0.07);
+}
+[data-theme="minimal"] .ant-table-tbody > tr > td {
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+[data-theme="minimal"] .ant-table-tbody > tr:hover > td {
+  background: #F5F5F7;
+}
+/* 标签胶囊 */
+[data-theme="minimal"] .ant-tag {
+  border-radius: 980px;
+}
+/* 弹窗遮罩圆角 + 阴影 */
+[data-theme="minimal"] .ant-modal .ant-modal-content {
+  border-radius: 18px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.12);
+}
+/* 抽屉/气泡 */
+[data-theme="minimal"] .ant-drawer-content, [data-theme="minimal"] .ant-popover-inner {
+  border-radius: 14px;
+}
+/* 卡片通用 */
+[data-theme="minimal"] .ant-card {
+  border-radius: 16px;
+  border: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 8px 24px rgba(0,0,0,0.04);
+}

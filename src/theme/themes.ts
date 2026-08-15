@@ -439,5 +439,47 @@ export const themes: Record<string, Theme> = {
       fontSerif: "'Newsreader', 'Georgia', serif",
       fontMono: "'JetBrains Mono', 'SF Mono', 'Consolas', monospace",
     },
+  }, 
+  minimal: {
+    name: 'minimal',
+    label: '极简白',
+    colors: {
+      primary: '#007AFF',
+      primaryHover: '#0A84FF',
+      primaryActive: '#0062CC',
+
+      canvas: '#F5F5F7',
+      surface: '#FFFFFF',
+      elevated: '#FFFFFF',
+
+      textPrimary: '#1D1D1F',
+      textSecondary: '#6E6E73',
+      textTertiary: '#86868B',
+
+      border: 'rgba(0,0,0,0.08)',
+      divider: 'rgba(0,0,0,0.06)',
+
+      accentRed: '#FF3B30',
+      accentRedBg: 'rgba(255,59,48,0.10)',
+      accentBlue: '#007AFF',
+      accentBlueBg: 'rgba(0,122,255,0.10)',
+      accentGreen: '#34C759',
+      accentGreenBg: 'rgba(52,199,89,0.12)',
+      accentYellow: '#FF9500',
+      accentYellowBg: 'rgba(255,149,0,0.12)',
+
+      success: '#34C759',
+      error: '#FF3B30',
+      warning: '#FF9500',
+      info: '#007AFF',
+
+      shadowCard: '0 1px 3px rgba(0,0,0,0.05), 0 8px 24px rgba(0,0,0,0.04)',
+      shadowHover: '0 2px 6px rgba(0,0,0,0.07), 0 12px 32px rgba(0,0,0,0.08)',
+    },
+    typography: {
+      fontSans: "'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif",
+      fontSerif: "'Newsreader', 'Georgia', serif",
+      fontMono: "'SF Mono', 'Consolas', monospace",
+    },
   },
 };
