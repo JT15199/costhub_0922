@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { auditSensitive, sanitizeForCloud, SENSITIVE_PATTERNS } from '../aiBridge';
+import { auditSensitive, auditPromptStrict, sanitizeForCloud, SENSITIVE_PATTERNS, buildSanitizedContext, stripModelCodes, isProjectInsight } from '../aiBridge';
 import { materialKey } from '../db/advisor';
 
 describe('auditSensitive 发送前审计', () => {
@@ -44,6 +44,37 @@ describe('sanitizeForCloud 模板白名单', () => {
   it('超长字段截断', () => {
     const p = sanitizeForCloud({ material_name: 'X'.repeat(300), category: 'Y'.repeat(100), question: 'Z'.repeat(500) });
     expect(p.length).toBeLessThan(600);
+  });
+});
+
+describe('脱敏上下文（提示词红线）', () => {
+  it('buildSanitizedContext 不含型号/金额/供应商/项目代号', () => {
+    const ctx = buildSanitizedContext({
+      insight_type: 'stale_part_price', ref_name: '屏',
+      title: '物料「屏」¥300 已 90 天未调价',
+      detail: '供应商：京东方，成本 ¥300，使用：P1(2件)、M270',
+    });
+    expect(ctx).not.toContain('京东方');
+    expect(ctx).not.toContain('300');
+    expect(ctx).not.toContain('M270');
+    expect(auditPromptStrict(ctx).safe).toBe(true);
+  });
+  it('项目类建议不携带项目代号', () => {
+    const ctx = buildSanitizedContext({ insight_type: 'stale_project_cost', ref_name: 'P1', detail: '整机成本 ¥1000' });
+    expect(ctx).not.toContain('P1');
+    expect(ctx).not.toContain('1000');
+    expect(isProjectInsight({ insight_type: 'target_gap' })).toBe(true);
+    expect(isProjectInsight({ insight_type: 'stale_part_price' })).toBe(false);
+  });
+  it('stripModelCodes 剥离型号', () => {
+    expect(stripModelCodes('液晶面板 M270')).toBe('液晶面板');
+    expect(stripModelCodes('DDR3 EM68B32CWKG-25H')).toBe('DDR3');
+    expect(stripModelCodes('27寸屏')).toBe('屏');
+  });
+  it('云端提示词含型号被严格审计拦截', () => {
+    const p = sanitizeForCloud({ material_name: '液晶面板 M270', category: '显示', question: '走势' });
+    expect(auditSensitive(p).safe).toBe(true);       // 宽松审计放过
+    expect(auditPromptStrict(p).safe).toBe(false);   // 严格审计拦截（型号）
   });
 });
 

@@ -108,6 +108,40 @@ export interface BridgedInsightResult {
   reuseOf?: any;              // 复用的来源记录
 }
 
+// ==================== 脱敏上下文（提示词红线：任何模型都不收原始 detail） ====================
+// 建议类型 → 无敏感描述（不含型号/金额/供应商/项目代号）
+const TYPE_DESC: Record<string, string> = {
+  stale_part_price: '某物料长期未调价，需评估议价空间',
+  stale_project_cost: '某项目整机成本长期未变动，需评估推动议价的方向',
+  target_gap: '某项目某领域成本超目标，需降本建议',
+  single_supplier: '某物料存在单一供货风险，需供应风险管理建议',
+};
+// 项目类建议（ref_name 是项目代号，不得外传/不得用于行业洞察）
+export function isProjectInsight(ins: any): boolean {
+  const t = ins?.insight_type || '';
+  return t === 'stale_project_cost' || t === 'target_gap';
+}
+// 构造脱敏上下文：只含建议类型描述 + 物料通用名（不含型号/金额/供应商/项目代号）
+export function buildSanitizedContext(ins: any): string {
+  const t = ins?.insight_type || '';
+  const desc = TYPE_DESC[t] || '某物料的成本管理建议';
+  const name = String(ins?.ref_name || '').trim();
+  const isProject = isProjectInsight(ins);
+  // 项目类：不传代号；物料类：传通用名（校验通过才带）
+  if (isProject || !name) return desc;
+  const namePart = '（物料通用名：' + name + '）';
+  const strict = auditPromptStrict(desc + namePart);
+  return strict.safe ? desc + namePart : desc;
+}
+// 剥离型号代码段（字母数字混合串），用于降级
+export function stripModelCodes(text: string): string {
+  return String(text || '')
+    .replace(/\b[A-Z]{1,6}[0-9][A-Z0-9\-]{2,}\b/g, ' ')
+    .replace(/\d+\s*(?:寸|英寸|mm|MHz|GHz|Hz|nm)(?![A-Za-z0-9])/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 // 第一步：本地模型读建议卡上下文（含本地数据 + 历史洞察）→ 产出脱敏意图（只输出物料名/品类/问题）
 // 历史注入：本地模型能看到上次洞察结论，判断本次是否重复——同题则标记 reuse，避免云端重复查询
 export async function extractLocalIntent(ins: any, history: any[] = []): Promise<{ material_name: string; category: string; question: string; usedLocal: boolean; reuse?: boolean }> {
@@ -118,11 +152,12 @@ export async function extractLocalIntent(ins: any, history: any[] = []): Promise
     usedLocal: false,
   };
   try {
-    const sys = '你是成本分析助手。以下是本地发现的成本机会点（仅用于理解，绝不外传）与历史洞察记录。你的任务：判断需要向外部行业知识库查询什么。只输出 JSON：{"reuse":true}（若本次查询问题与历史重复且无需更新）；否则 {"material_name":"对外查询的物料名称（可含通用型号，不得含成本/金额/供应商/项目信息）","category":"物料品类","question":"要查询的具体问题（一句话）"}。不得输出任何其他文字。';
+    const sys = '你是成本分析助手。以下是本地发现的成本机会点描述（已脱敏）与历史洞察记录。你的任务：判断需要向外部行业知识库查询什么。只输出 JSON：{"reuse":true}（若本次查询问题与历史重复且无需更新）；否则 {"material_name":"对外查询的物料名称（只允许通用名，严禁型号/规格/成本/金额/供应商/项目信息）","category":"物料品类","question":"要查询的具体问题（一句话）"}。不得输出任何其他文字。';
     const historyBlock = history.length > 0
       ? '\n历史洞察（同物料，仅参考，判断是否重复）：\n' + history.map(h => `- ${(h.created_at || '').slice(0, 16)}：方向 ${(() => { try { return JSON.parse(h.cloud_result || '{}').trend_direction || '未知'; } catch { return '未知'; } })()}，判定 ${h.verdict || '未知'}`).join('\n')
       : '';
-    const user = `本地机会点：${ins?.title || ''}\n详情：${(ins?.detail || '').slice(0, 600)}${historyBlock}\n\n请输出查询意图 JSON。`;
+    // 脱敏输入：不传 title/detail 原文（含成本/供应商/项目代号），只传类型描述+通用名
+    const user = `本地机会点：${buildSanitizedContext(ins)}${historyBlock}\n\n请输出查询意图 JSON。`;
     const raw = await localChat(sys, user, 'bridge_intent', ins?.ref_name);
     const parsed = parseJsonObj(raw);
     if (parsed && parsed.reuse === true) {
@@ -153,7 +188,8 @@ export async function summarizeWithLocal(ins: any, cloud: any): Promise<BridgedI
   };
   try {
     const sys = '你是资深成本经理。结合"本地数据"（仅本地，不外传）与"行业洞察"（外部查询结果），给出最终议价建议。只输出 JSON：{"verdict":"机会/风险/中性","target_price":"目标谈判价建议（不含具体金额数字，用策略描述如：按近期低位谈判）","risk":"风险等级与要点","actions":["行动1","行动2","行动3"]}。不得输出任何其他文字。';
-    const user = `本地数据：${ins?.title || ''} \n${(ins?.detail || '').slice(0, 500)}\n\n行业洞察：方向 ${cloud?.trend_direction || '未知'}，置信度 ${cloud?.confidence_level || '未知'}${cloud?.magnitude_min != null ? `，幅度 ${cloud.magnitude_min}%~${cloud.magnitude_max}%` : ''}\n${cloud?.summary || ''}\n建议：${cloud?.suggested_action || ''}\n\n请输出最终建议 JSON。`;
+    // 脱敏输入：本地模型也不收原始 detail（红线：提示词不携带敏感数据），只传类型描述 + 云端结果
+    const user = `本地机会点：${buildSanitizedContext(ins)}\n\n行业洞察：方向 ${cloud?.trend_direction || '未知'}，置信度 ${cloud?.confidence_level || '未知'}${cloud?.magnitude_min != null ? `，幅度 ${cloud.magnitude_min}%~${cloud.magnitude_max}%` : ''}\n${cloud?.summary || ''}\n建议：${cloud?.suggested_action || ''}\n\n请输出最终建议 JSON。`;
     const raw = await localChat(sys, user, 'bridge_summary', ins?.ref_name);
     const parsed = parseJsonObj(raw);
     if (parsed) {
@@ -177,6 +213,10 @@ export async function runBridgedInsight(
   opts: { onProgress?: (m: string) => void; onNeedReview?: (prompt: string) => Promise<boolean>; force?: boolean } = {},
 ): Promise<BridgedInsightResult> {
   const { onProgress, onNeedReview, force } = opts;
+  // 项目类建议不适用行业洞察（洞察对象不明确 + 项目代号不得外传）
+  if (isProjectInsight(ins)) {
+    throw new Error('该建议针对项目整体，行业洞察适用于具体物料建议（请在物料类建议上使用）');
+  }
   const key = materialKey(ins?.ref_name || '', '');
   // 复用检查：同一物料近期（7 天）已洞察过且未强制 → 直接复用，不再查云端
   const recent = await getRecentBridgeLog(key, 7);
@@ -201,9 +241,17 @@ export async function runBridgedInsight(
     try { const lr = JSON.parse(recent.local_result || '{}'); if (lr) local = { ...local, ...lr }; } catch { /* 保持默认 */ }
     return { cloud, local, cloudPrompt: '', audited: true, usedLocalIntent: true, reused: true, reuseOf: recent };
   }
-  // 第二步：脱敏模板 + 发送前审计
-  const cloudPrompt = sanitizeForCloud(intent);
-  const audit = auditSensitive(cloudPrompt);
+  // 第二步：脱敏模板 + 严格发送前审计（金额/供应商/型号/规格 全拦）
+  let cloudPrompt = sanitizeForCloud(intent);
+  let audit = auditPromptStrict(cloudPrompt);
+  if (!audit.safe) {
+    // 型号残留 → 剥离后重审；仍不干净才拦截
+    const stripped = stripModelCodes(intent.material_name || '');
+    if (stripped && stripped !== (intent.material_name || '').trim()) {
+      cloudPrompt = sanitizeForCloud({ ...intent, material_name: stripped });
+      audit = auditPromptStrict(cloudPrompt);
+    }
+  }
   if (!audit.safe) {
     const detail = audit.matches.map(m => m.pattern + '(' + m.sample + ')').join('、');
     throw new Error('发送前审计拦截：提示词疑似含敏感数据（' + detail + '），已阻止发送');

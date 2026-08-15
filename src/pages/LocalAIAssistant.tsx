@@ -16,6 +16,7 @@ import { MAIN_CATEGORIES } from '../constants';
 import { startOllamaStream, logLocalAICall } from '../ollama';
 import { getAdvisorInsights, updateAdvisorStatus } from '../db/advisor';
 import { runAutoAdvisor } from '../autoAdvisor';
+import { isProjectInsight } from '../aiBridge';
 import DemoGenerator from '../components/DemoGenerator';
 
 // ===== Types =====
@@ -1799,7 +1800,7 @@ return (
                   )}
                   <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     <Button size="small" onClick={() => copyPrompt(ins.prompt)}>📋 复制提示词</Button>
-                    {ins.status === 'open' && <Button size="small" loading={advisorInsightBusy === ins.id} onClick={() => insightForAdvisor(ins)}>{advisorInsightBusy === ins.id ? '洞察中…' : '🔍 生成行业洞察'}</Button>}
+                    {ins.status === 'open' && !isProjectInsight(ins) && <Button size="small" loading={advisorInsightBusy === ins.id} onClick={() => insightForAdvisor(ins)}>{advisorInsightBusy === ins.id ? '洞察中…' : '🔍 生成行业洞察'}</Button>}
                     {ins.status === 'open' && <Button size="small" type="primary" onClick={() => setAdvisorStatus(ins.id, 'done')}>✓ 已处理</Button>}
                     {ins.status === 'open' && <Button size="small" onClick={() => setAdvisorStatus(ins.id, 'dismissed')}>忽略</Button>}
                   </div>
