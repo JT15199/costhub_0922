@@ -123,6 +123,7 @@ export async function updatePartSupplier(data: any) {
     await d.execute(
       'INSERT INTO part_supplier_price_history (part_id, supplier_name, old_price, new_price, change_reason, changed_at) VALUES (?,?,?,?,?,datetime(\'now\',\'localtime\'))',
       [data.part_id ?? old[0].part_id, data.supplier_name ?? old[0].supplier_name, oldPrice, price, data.change_reason || '手动更新']
+    );
     // 供应商报价变动 → 成本变动日志（追溯链起点，含影响项目）
     try {
       const partRow = await d.select<any[]>('SELECT name FROM parts WHERE id = ?', [data.part_id ?? old[0].part_id]);
@@ -135,7 +136,6 @@ export async function updatePartSupplier(data: any) {
         ['part_supplier_price', 'part', data.part_id ?? old[0].part_id, partRow?.[0]?.name || '', data.supplier_name ?? old[0].supplier_name, oldPrice, price, data.change_reason || '手动更新', JSON.stringify(projs.map((p: any) => p.code))]
       );
     } catch { /* 日志失败不影响主流程 */ }
-    );
   }
 
   await d.execute(
