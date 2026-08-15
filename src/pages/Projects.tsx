@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { EmojiIcon } from '../iconMap';
-import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Segmented, Tag, message, Popconfirm, Tabs, Row, Col, Tooltip, Card, Statistic, Upload, Alert, DatePicker, Checkbox, AutoComplete, Radio, Tree, Badge } from 'antd';
+import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Segmented, Tag, message, notification, Popconfirm, Tabs, Row, Col, Tooltip, Card, Statistic, Upload, Alert, DatePicker, Checkbox, AutoComplete, Radio, Tree, Badge } from 'antd';
 import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined, InboxOutlined, DollarOutlined, TagOutlined, LineChartOutlined, BarChartOutlined, ToolOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, AimOutlined, BuildOutlined, HistoryOutlined, EyeOutlined, CheckOutlined, CloseOutlined, RobotOutlined, BulbOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import ReactECharts from 'echarts-for-react/esm/core';
@@ -402,7 +402,7 @@ export default function Projects() {
       }
       const allDone = await rebuildModuleInsight(ins);
       if (allDone) await markInsightRead(ins.category, ins.module_name); // 全部处理完才归档已读；还有其他组则保持待处理
-      await appendHandledInsight(ins.category, ins.module_name, {
+      const handledIdx = await appendHandledInsight(ins.category, ins.module_name, {
         name: g.name, type: g.type || 'rule', action: 'confirmed', rows: g.rows, diff: g.diff || 0,
         handled_at: new Date().toLocaleString('zh-CN', { hour12: false }),
       });
@@ -412,9 +412,12 @@ export default function Projects() {
       const maxP = Math.max(...prices), minP = Math.min(...prices);
       const save = (maxP - minP) * Math.max(...g.rows.map((r: any) => r.quantity || 1));
       await loadInsights(); // 后台校正
-      message.success(save > 0.01
-        ? '已确认「' + g.name + '」为同一物料（别名已沉淀，下次自动归组）。若按最低价 ¥' + minP.toFixed(2) + ' 谈，每台最多可省 ¥' + save.toFixed(2) + '，建议找对应采购议价'
-        : '已确认「' + g.name + '」为同一物料，别名已沉淀，下次自动归组');
+      notification.success({
+        message: '已确认「' + g.name + '」为同一物料',
+        description: save > 0.01 ? '若按最低价 ¥' + minP.toFixed(2) + ' 谈，每台最多可省 ¥' + save.toFixed(2) : '别名已沉淀，下次自动归组',
+        placement: 'bottomRight', duration: 4,
+        btn: <Button size="small" type="link" onClick={() => undoHandledInsight(ins, handledIdx)}>撤销</Button>,
+      });
     } catch (e: any) {
       console.error('确认同一失败:', e);
       message.error('确认失败：' + (e?.message || e));
@@ -431,13 +434,17 @@ export default function Projects() {
       await savePartAlias({ module_name: ins.module_name, alias_name: `#NEG#${keys}`, alias_model: '', canonical_name: '', canonical_model: '', source: 'marked_different' });
       const allDone = await rebuildModuleInsight(ins);
       if (allDone) await markInsightRead(ins.category, ins.module_name); // 全部处理完才归档；还有其他组则保持待处理
-      await appendHandledInsight(ins.category, ins.module_name, {
+      const handledIdx = await appendHandledInsight(ins.category, ins.module_name, {
         name: g.name, type: g.type || 'rule', action: 'rejected', rows: g.rows, diff: g.diff || 0,
         handled_at: new Date().toLocaleString('zh-CN', { hour12: false }),
       });
       window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
       await loadInsights(); // 后台校正
-      message.success('已标记不同，AI 不再建议该组合（该组已从情报中消除）');
+      notification.success({
+        message: '已标记不同，AI 不再建议该组合',
+        placement: 'bottomRight', duration: 4,
+        btn: <Button size="small" type="link" onClick={() => undoHandledInsight(ins, handledIdx)}>撤销</Button>,
+      });
     } catch (e: any) {
       console.error('标记不同失败:', e);
       message.error('操作失败：' + (e?.message || e));
@@ -451,7 +458,11 @@ export default function Projects() {
     try {
       await markInsightRead(ins.category, ins.module_name);
       window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
-      message.success('已归档（已读）——可在「全部」中查看，需要时点「恢复待处理」');
+      notification.success({
+        message: '已归档（已读）',
+        placement: 'bottomRight', duration: 4,
+        btn: <Button size="small" type="link" onClick={() => restoreInsight(ins)}>撤销</Button>,
+      });
     } catch (e: any) {
       console.error('标记已读失败:', e);
       await loadInsights();

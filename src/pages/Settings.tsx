@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { EmojiIcon } from '../iconMap';
 import * as XLSX from 'xlsx';
 import {
   Button, Space, Alert, message, Spin, Descriptions, Modal, Tag, Empty, Select, Input, Tooltip,
@@ -1921,7 +1922,7 @@ export default function Settings({ embedded }: { embedded?: boolean }) {
               />
             )}
             <div style={{ marginTop: 12, fontSize: 11.5, color: '#94A3B8' }}>
-              💡 恢复后需重启应用生效；恢复前会自动把当前库备份为 costhub-pre-restore-*.db（位于 exe 同目录）
+              <EmojiIcon e="💡" /> 恢复后需重启应用生效；恢复前会自动把当前库备份为 costhub-pre-restore-*.db（位于 exe 同目录）
             </div>
           </Card>
         </div>
@@ -1999,7 +2000,7 @@ export default function Settings({ embedded }: { embedded?: boolean }) {
               </div>
             )}
             <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 10 }}>
-              💡 用量仅统计外部 LLM API 调用（趋势洞察等），本地 Ollama 不产生费用。Token 消耗 × 供应商单价 ≈ 费用，可在各供应商官网查看计费标准。
+              <EmojiIcon e="💡" /> 用量仅统计外部 LLM API 调用（趋势洞察等），本地 Ollama 不产生费用。Token 消耗 × 供应商单价 ≈ 费用，可在各供应商官网查看计费标准。
             </div>
           </>
         )}
@@ -2047,7 +2048,7 @@ export default function Settings({ embedded }: { embedded?: boolean }) {
               查看所有AI请求的详细记录，确保数据安全
             </p>
             <div style={{ marginTop: 8, padding: '8px 12px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 8, fontSize: 12, color: '#166534', lineHeight: 1.7 }}>
-              🔒 <b>数据安全边界：</b>云端模型只有 HTTP 转发通道，<b>无法访问本地数据库</b>——发送内容仅限物料名称/分类等业务字段（前端主动拼进请求，全程记录如上）。本地模型（Ollama）可读取项目数据辅助分析，每一次本地访问也记录在此（标记「本地」），可供审查。
+              <EmojiIcon e="🔒" /> <b>数据安全边界：</b>云端模型只有 HTTP 转发通道，<b>无法访问本地数据库</b>——发送内容仅限物料名称/分类等业务字段（前端主动拼进请求，全程记录如上）。本地模型（Ollama）可读取项目数据辅助分析，每一次本地访问也记录在此（标记「本地」），可供审查。
             </div>
           </div>
           <Space>

@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import { EmojiIcon } from '../iconMap';
 import {
   Table, Button, Input, Select, Space, Modal, Form, Tag, message,
   Popconfirm, Spin, Empty, Tooltip, Progress, Radio, List, Card, Row, Col, Typography, Alert, Timeline,
 } from 'antd';
-import {
+import { CloseOutlined,
   PlusOutlined, EditOutlined, DeleteOutlined, ThunderboltOutlined,
   CheckOutlined, SearchOutlined, DownloadOutlined, SendOutlined, QuestionCircleOutlined,
   RadarChartOutlined, ApartmentOutlined, MergeCellsOutlined,
@@ -1864,7 +1865,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
           </div>
           {finalDim && (
             <div style={{ marginTop: 10, padding: 10, background: '#F0FDF4', border: '1px solid #86EFAC55', borderRadius: 8 }}>
-              <div style={{ fontWeight: 700, fontSize: 12, color: '#047857', marginBottom: 4 }}>🎯 {finalDim.dimension_type}</div>
+              <div style={{ fontWeight: 700, fontSize: 12, color: '#047857', marginBottom: 4 }}><EmojiIcon e="🎯" /> {finalDim.dimension_type}</div>
               <div style={{ fontSize: 11.5, lineHeight: 1.6, color: '#334155' }}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{finalDim.content}</ReactMarkdown>
               </div>
@@ -2360,7 +2361,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                         </span>
                       ))
                     : <span style={{ color: '#C7C7CC' }}>悬停节点看血缘链 · 双击聚焦</span>}
-                  {focusNodeId != null && <span style={{ color: '#FF9500', flexShrink: 0, marginLeft: 4 }}>聚焦中 ✕</span>}
+                  {focusNodeId != null && <span style={{ color: '#FF9500', flexShrink: 0, marginLeft: 4 }}>聚焦中 <CloseOutlined style={{ fontSize: 10 }} /></span>}
                 </Panel>
 <Panel position="top-left">
                   <div style={{ padding: '8px 10px', borderRadius: 10, background: 'color-mix(in srgb, var(--card-bg, #fff) 92%, transparent)', border: '1px solid var(--card-border, #E2E8F0)', boxShadow: '0 4px 12px rgba(15,23,42,0.08)', fontSize: 11, color: 'var(--text-secondary, #475569)' }}>

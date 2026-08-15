@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
+import { EmojiIcon } from '../iconMap';
 import { Table, Button, Select, Space, Modal, Form, Input, InputNumber, Tag, message, Popconfirm, Tooltip, AutoComplete, Checkbox } from 'antd';
 import { PlusOutlined, CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, AppstoreOutlined, TagOutlined, InboxOutlined, BarChartOutlined, CheckSquareOutlined, SortAscendingOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react/esm/core';
@@ -585,7 +586,7 @@ export default function ModuleLibrary() {
             };
             return (
               <div style={{ marginTop: 16, border: '1px solid #E2E8F0', borderRadius: 10, padding: '12px 14px', background: '#FAFBFC' }}>
-                <div style={{ marginBottom: 8 }}><b style={{ fontSize: 13, color: '#1E3A6E' }}>📋 器件级对比（{cmpProjects.map((p: any) => p.project_code).join(' vs ')}）</b>
+                <div style={{ marginBottom: 8 }}><b style={{ fontSize: 13, color: '#1E3A6E' }}><EmojiIcon e="📋" /> 器件级对比（{cmpProjects.map((p: any) => p.project_code).join(' vs ')}）</b>
                   <span style={{ fontSize: 11, color: '#94A3B8', marginLeft: 8 }}>上方表格勾选列选择参与对比的项目（勾选 = 参与）</span>
                 </div>
                 {/* 子类成本分布对比图 */}

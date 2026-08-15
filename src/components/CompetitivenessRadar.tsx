@@ -3,6 +3,7 @@
 // 整机成本口径统一用 BOM 成本：我方项目 = project_boms 快照累加（与 recordProjectCostSnapshot 一致），竞品 = competitors.bom_cost
 // 模块-特性关联：手动配置"哪些模块影响哪些特性"，评分时列出关联模块及其成本占比作为打分依据
 import { useEffect, useState } from 'react';
+import { EmojiIcon } from '../iconMap';
 import { Select, Button, Space, Modal, Slider, Tag, Input, Checkbox, message, Empty, Radio, Table } from 'antd';
 import { RadarChartOutlined, LinkOutlined, EditOutlined, SearchOutlined, AimOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react/esm/core';
@@ -272,8 +273,8 @@ export default function CompetitivenessRadar() {
     // tooltip 判读（单图/子图共用）
     const verdictOf = (spec: number | null, cost: number | null) => {
       if (spec === null || cost === null) return '';
-      if (spec > 0 && cost < 0) return '<br/><b style="color:#10B981">💪 规格强 + 成本低——我方优势特性</b>';
-      if (spec < 0 && cost > 0) return '<br/><b style="color:#DC2626">⚠️ 规格弱 + 成本高——我方劣势特性</b>';
+      if (spec > 0 && cost < 0) return '<br/><b style="color:#10B981"><EmojiIcon e="💪" /> 规格强 + 成本低——我方优势特性</b>';
+      if (spec < 0 && cost > 0) return '<br/><b style="color:#DC2626"><EmojiIcon e="⚠" /> 规格弱 + 成本高——我方劣势特性</b>';
       if (spec > 0) return '<br/><span style="color:#D97706">规格强但成本更高</span>';
       return '<br/><span style="color:#D97706">规格弱但成本更低</span>';
     };
@@ -433,7 +434,7 @@ export default function CompetitivenessRadar() {
           <div style={{ marginBottom: 10, padding: '6px 10px', background: '#FFF7E6', border: '1px solid #FFE7BA', borderRadius: 8, fontSize: 11.5, color: '#B45309', display: 'flex', flexWrap: 'wrap', gap: 10 }}>
             {noCost.length > 0 && <span>⚠️ {noCost.map(p => p.name).join('、')} 无成本数据（成本竞争力/长城图成本差不完整）</span>}
             {noScore.length > 0 && <span>⚠️ {noScore.map(p => p.name).join('、')} 未评分（雷达特性维度空白）</span>}
-            {noLink && <span>⚠️ 模块-特性关联未配置——先点「模块-特性关联」</span>}
+            {noLink && <span><EmojiIcon e="⚠" /> 模块-特性关联未配置——先点「模块-特性关联」</span>}
           </div>
         ) : null;
       })()}
@@ -504,7 +505,7 @@ export default function CompetitivenessRadar() {
               {!anyCostLinked && <Tag color="orange">特性成本为 0——先到「模块-特性关联」配置哪些模块影响哪些特性</Tag>}
             </div>
             <div style={{ fontSize: 11.5, color: '#64748B', marginBottom: 8 }}>
-              每个特性的成本 = 该产品中与此特性关联的模块成本合计（一个模块计入其关联的所有维度）；<b>每分成本 = 特性成本 ÷ 特性评分</b>——同特性下谁低谁强（花更少的钱得到同样的表现）。💪 = 该特性组内每分成本最低。
+              每个特性的成本 = 该产品中与此特性关联的模块成本合计（一个模块计入其关联的所有维度）；<b>每分成本 = 特性成本 ÷ 特性评分</b>——同特性下谁低谁强（花更少的钱得到同样的表现）。💪 图标 = 该特性组内每分成本最低。
             </div>
             {/* 上下布局：图全宽（高度随竞品数自适应）+ 表全宽，避免侧栏挤压遮挡 */}
             <div style={{ marginBottom: 12 }}>
@@ -544,7 +545,7 @@ export default function CompetitivenessRadar() {
                     {
                       title: '每分成本最低', key: 'best', width: 110,
                       render: (_: any, r: any) => r.best
-                        ? <span style={{ fontSize: 11.5, color: '#10B981', fontWeight: 600 }}>💪 {r.best.prod.name}</span>
+                        ? <span style={{ fontSize: 11.5, color: '#10B981', fontWeight: 600 }}><EmojiIcon e="💪" /> {r.best.prod.name}</span>
                         : <span style={{ fontSize: 11, color: '#CBD5E1' }}>—</span>,
                     },
                   ]} />
@@ -567,8 +568,8 @@ export default function CompetitivenessRadar() {
               </div>
             )}
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 11.5, color: '#64748B', marginTop: 4 }}>
-              <span><b style={{ color: '#10B981' }}>💪 柱正 + 线负</b>：规格强且成本低——优势特性</span>
-              <span><b style={{ color: '#DC2626' }}>⚠️ 柱负 + 线正</b>：规格弱且成本高——劣势特性</span>
+              <span><b style={{ color: '#10B981' }}><EmojiIcon e="💪" /> 柱正 + 线负</b>：规格强且成本低——优势特性</span>
+              <span><b style={{ color: '#DC2626' }}><EmojiIcon e="⚠" /> 柱负 + 线正</b>：规格弱且成本高——劣势特性</span>
               <span>柱正 + 线正：规格强但更贵</span>
               <span>柱负 + 线负：规格弱但便宜</span>
             </div>

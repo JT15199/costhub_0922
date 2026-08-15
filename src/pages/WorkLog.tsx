@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { EmojiIcon } from '../iconMap';
 import { Button, Input, Select, message, Empty, Popconfirm, DatePicker, Spin, Tooltip, Checkbox, Modal, AutoComplete } from 'antd';
 import { PlusOutlined, DeleteOutlined, SearchOutlined, RobotOutlined, CheckOutlined, CloseOutlined, FlagOutlined, CheckCircleFilled, BookOutlined, PushpinOutlined, SaveOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -449,7 +450,7 @@ export default function WorkLog() {
                   <span style={{ flex: 1, fontSize: 13.5, color: 'rgba(0,0,0,0.85)' }}>{t.content}</span>
                   <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>{(t.log_date || '').slice(5, 16)}</span>
                   {t.work_project && (
-                    <span style={{ fontSize: 10.5, padding: '1px 8px', borderRadius: 999, background: 'rgba(0,0,0,0.06)', color: 'rgba(0,0,0,0.6)' }}>📌 {t.work_project}</span>
+                    <span style={{ fontSize: 10.5, padding: '1px 8px', borderRadius: 999, background: 'rgba(0,0,0,0.06)', color: 'rgba(0,0,0,0.6)' }}><EmojiIcon e="📌" /> {t.work_project}</span>
                   )}
                   <Popconfirm title="删除？" onConfirm={async () => { await deleteWorkLog(t.id); loadLogs(); }}>
                     <Button size="small" type="text" danger icon={<DeleteOutlined />} />
@@ -475,7 +476,7 @@ export default function WorkLog() {
                   <CheckCircleFilled style={{ color: '#43A047' }} />
                   <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>{(t.log_date || '').slice(5, 16)}</span>
                   {t.work_project && (
-                    <span style={{ fontSize: 10.5, padding: '1px 8px', borderRadius: 999, background: 'rgba(0,0,0,0.06)', color: 'rgba(0,0,0,0.6)' }}>📌 {t.work_project}</span>
+                    <span style={{ fontSize: 10.5, padding: '1px 8px', borderRadius: 999, background: 'rgba(0,0,0,0.06)', color: 'rgba(0,0,0,0.6)' }}><EmojiIcon e="📌" /> {t.work_project}</span>
                   )}
                   <Popconfirm title="删除？" onConfirm={async () => { await deleteWorkLog(t.id); loadLogs(); }}>
                     <Button size="small" type="text" danger icon={<DeleteOutlined />} />
@@ -581,7 +582,7 @@ export default function WorkLog() {
                               fontSize: 10.5, padding: '1px 8px', borderRadius: 999,
                               background: 'rgba(0,0,0,0.06)', color: 'rgba(0,0,0,0.6)',
                               border: '1px solid rgba(0,0,0,0.08)',
-                            }}>📌 {log.work_project}</span>
+                            }}><EmojiIcon e="📌" /> {log.work_project}</span>
                           )}
                         </div>
                         {log.title && <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, color: 'rgba(0,0,0,0.88)' }}>{log.title}</div>}
@@ -622,7 +623,7 @@ export default function WorkLog() {
         {timelineMonths.length > 0 && (
           <div style={{ marginBottom: 16, padding: '14px 16px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 12 }}>
             <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span>📅 时间轴选择</span>
+              <span><EmojiIcon e="📅" /> 时间轴选择</span>
               <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>点选月份（可多选），范围自动覆盖所选首尾月</span>
               <Button
                 size="small" type="text" style={{ marginLeft: 'auto', fontSize: 11 }}

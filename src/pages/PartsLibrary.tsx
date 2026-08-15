@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import { EmojiIcon } from '../iconMap';
 import { Button, Input, Select, Space, Modal, Form, InputNumber, Tag, message, Popconfirm, Tooltip, Upload, Row, Col } from 'antd';
 import type { TableRowSelection } from 'antd/es/table/interface';
 import { PlusOutlined, EditOutlined, DeleteOutlined, DownloadOutlined, UploadOutlined, HistoryOutlined, SearchOutlined, ShopOutlined, ToolOutlined, CheckOutlined } from '@ant-design/icons';
@@ -563,7 +564,7 @@ export default function PartsLibrary() {
                 {/* 供应商价格趋势小结（规则驱动，自动生成） */}
                 {suppliers.filter(s => supplierTrends[s.id] && supplierTrends[s.id].direction !== 'none').length > 0 && (
                   <div style={{ marginBottom: 12, padding: '8px 12px', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, fontSize: 12, color: '#475569', lineHeight: 1.7 }}>
-                    <b style={{ color: '#0A84FF', marginRight: 6 }}>📈 供应商价格趋势</b>
+                    <b style={{ color: '#0A84FF', marginRight: 6 }}><EmojiIcon e="📈" /> 供应商价格趋势</b>
                     {suppliers.filter(s => supplierTrends[s.id] && supplierTrends[s.id].direction !== 'none').map(s => {
                       const t = supplierTrends[s.id];
                       const first = t.direction === 'up' ? '持续上涨' : t.direction === 'down' ? '持续下降' : t.direction === 'mixed' ? '价格波动' : t.direction === 'flat' ? '基本平稳' : '仅一次变动';

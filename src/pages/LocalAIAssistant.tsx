@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Button, Input, InputNumber, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Switch, Segmented } from 'antd';
+import { Button, Input, InputNumber, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Switch, Segmented, notification } from 'antd';
 import { CopyOutlined, RadarChartOutlined } from '@ant-design/icons';
 import {
   SendOutlined, RobotOutlined, PlusOutlined, HistoryOutlined,
@@ -1688,7 +1688,18 @@ export default function LocalAIAssistant() {
     try {
       await updateAdvisorStatus(id, status);
       await loadAdvisor();
-      message.success(status === 'done' ? '已标记处理 ✓' : '已忽略（该建议数据不变将不再提醒）');
+      // 反馈条带撤销：处理错了一键恢复
+      notification.success({
+        message: status === 'done' ? '已标记处理' : '已忽略（数据不变将不再提醒）',
+        placement: 'bottomRight', duration: 4,
+        btn: <Button size="small" type="link" onClick={async () => {
+          try {
+            await updateAdvisorStatus(id, 'open');
+            await loadAdvisor();
+            notification.success({ message: '已恢复为待处理', placement: 'bottomRight', duration: 3 });
+          } catch (e2: any) { notification.error({ message: '撤销失败：' + (e2?.message || e2), placement: 'bottomRight' }); }
+        }}>撤销</Button>,
+      });
     } catch (e: any) { message.error('操作失败：' + (e?.message || e)); await loadAdvisor(); }
   };
   // 洞察执行（force=true 强制重新查询云端）

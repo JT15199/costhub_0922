@@ -65,13 +65,14 @@ export async function upsertInsight(category: string, moduleName: string, insigh
 
 
 // ===== 已处理记录（确认/标记快照，供查看与撤销） =====
-export async function appendHandledInsight(category: string, moduleName: string, item: any) {
+export async function appendHandledInsight(category: string, moduleName: string, item: any): Promise<number> {
   const d = await getDb();
   const rows = await d.select<any[]>('SELECT handled_json FROM part_insights WHERE category = ? AND module_name = ?', [category || '', moduleName]);
   let arr: any[] = [];
   try { arr = JSON.parse(rows?.[0]?.handled_json || '[]'); } catch { arr = []; }
   arr.push(item);
   await d.execute('UPDATE part_insights SET handled_json = ? WHERE category = ? AND module_name = ?', [JSON.stringify(arr), category || '', moduleName]);
+  return arr.length - 1; // 新记录索引（撤销用）
 }
 export async function removeHandledInsight(category: string, moduleName: string, index: number) {
   const d = await getDb();

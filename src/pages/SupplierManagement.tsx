@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { EmojiIcon } from '../iconMap';
 import { Card, Button, Input, Select, Tag, Space, Modal, Form, message, Tabs, Row, Col, Statistic, Table, Popconfirm, Empty, InputNumber, Radio, Upload } from 'antd';
 import { ShopOutlined, AppstoreOutlined, UnorderedListOutlined, EditOutlined, DeleteOutlined, HistoryOutlined, HomeOutlined, BuildOutlined, ToolOutlined, BarChartOutlined, SearchOutlined, CameraOutlined } from '@ant-design/icons';
 import { getAllPartSuppliers, getParts, addPartSupplier, updatePartSupplier, deletePartSupplier, getSupplierPriceHistory, getProjects, getProjectSuppliers, getSupplierProfiles, saveSupplierProfile } from '../db';
@@ -328,7 +329,7 @@ export default function SupplierManagement() {
             <div>
               <b style={{ color: '#0C4A6E' }}>整机供应商（ODM）</b>：指承接整机生产制造的 ODM 工厂，可能提供<b>部分物料或全部物料</b>（含整机 BOM、结构件、组装等）。
               <div style={{ marginTop: 2 }}>
-                添加方式：在<b>「项目管理」→ 项目详情 → 🏭 整机供应商</b>标签页中为该项目的 ODM 工厂录入报价与份额，此处自动汇总展示。
+                添加方式：在<b>「项目管理」→ 项目详情 → <EmojiIcon e="🏭" /> 整机供应商</b>标签页中为该项目的 ODM 工厂录入报价与份额，此处自动汇总展示。
               </div>
             </div>
           </div>
@@ -869,7 +870,7 @@ export default function SupplierManagement() {
                     </Col>
                   </Row>
                   <div style={{ marginTop: 12, fontSize: 11.5, color: '#94A3B8' }}>
-                    💡 ODM 供应商的报价、份额、报价历史在「项目管理 → 项目详情 → 🏭 整机供应商」中维护，此处自动汇总。
+                    <EmojiIcon e="💡" /> ODM 供应商的报价、份额、报价历史在「项目管理 → 项目详情 → <EmojiIcon e="🏭" /> 整机供应商」中维护，此处自动汇总。
                   </div>
                 </div>
               )
