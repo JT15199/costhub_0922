@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Button, Input, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Switch, Segmented } from 'antd';
+import { Button, Input, InputNumber, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Switch, Segmented } from 'antd';
 import {
   SendOutlined, RobotOutlined, PlusOutlined, HistoryOutlined,
   ThunderboltOutlined, TeamOutlined, ClearOutlined,
@@ -14,7 +14,8 @@ import * as XLSX from 'xlsx';
 import { getDb, saveProject, getModuleRules, saveModuleRule, deleteModuleRule, clearModuleRules, loadContextEntries, saveContextEntry, deleteContextEntry, getSetting, setSetting, saveAIRequestLog } from '../db';
 import { MAIN_CATEGORIES } from '../constants';
 import { startOllamaStream, logLocalAICall } from '../ollama';
-import { getAdvisorInsights, updateAdvisorStatus } from '../db/advisor';
+import { getAdvisorInsights, updateAdvisorStatus, getRecentBridgeLog, materialKey } from '../db/advisor';
+import { getDailyCloudUsage } from '../db/settings';
 import { runAutoAdvisor } from '../autoAdvisor';
 import { isProjectInsight } from '../aiBridge';
 import DemoGenerator from '../components/DemoGenerator';
@@ -979,7 +980,7 @@ const CLOUD_TOOL_DEF = {
   type: 'function',
   function: {
     name: 'cloud_query',
-    description: '需要实时行业行情、供需状况或更强的分析能力时，调用云端大模型辅助判断。参数必须使用物料通用名称（严禁型号、金额、供应商名称、项目编号）。',
+    description: '需要实时行业行情、供需状况或更强的分析能力时，调用云端大模型辅助判断。注意：云端只能提供行业趋势/供需/参考区间（无法获取具体采购价格，具体价格以本地数据为准）。参数必须使用物料通用名称（严禁型号、金额、供应商名称、项目编号）。',
     parameters: {
       type: 'object',
       properties: {
@@ -1013,6 +1014,7 @@ export default function LocalAIAssistant() {
   const [bridgeReviewResolve, setBridgeReviewResolve] = useState<((ok: boolean) => void) | null>(null);
   const [bridgeReviewMode, setBridgeReviewMode] = useState<'auto' | 'preview'>('auto'); // 云端发送前预览开关
   const [cloudToolMode, setCloudToolMode] = useState(true); // 对话中本地模型自主调用云端
+  const [cloudDailyLimit, setCloudDailyLimit] = useState(50); // 每日云端调用上限
   const [bridgeReuseInfo, setBridgeReuseInfo] = useState<{ ins: any; recent: any } | null>(null); // 复用确认
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -1092,6 +1094,7 @@ export default function LocalAIAssistant() {
       setOllamaUrl(url); setModel(mdl);
       setBridgeReviewMode((await getSetting('ai_bridge_review', 'auto')) === 'preview' ? 'preview' : 'auto');
       setCloudToolMode((await getSetting('ai_local_cloud_tool', 'on')) !== 'off');
+      setCloudDailyLimit(Math.max(1, Number(await getSetting('ai_usage_cloud_daily_limit', '50')) || 50));
       const db = await getDb();
       const projs = await db.select<any[]>('SELECT id,code,name FROM projects WHERE COALESCE(is_deleted,0)=0 ORDER BY code');
       setProjects(projs);
@@ -1310,13 +1313,15 @@ export default function LocalAIAssistant() {
       autoData = { data: '', note: '' };
     }
     const systemPrompt = await buildSystemPrompt(userContent);
+    // 云端助手使用规则（克制调用 + 边界认知 + 防重复）：注入系统提示
+    const cloudRules = '\n\n【云端助手使用规则】你可以在需要时调用 cloud_query 工具获取实时行业信息，但请遵守：\n1. 克制调用：先用本地知识与库内数据分析，确实需要实时行业趋势/供需信息时才调用；\n2. 边界认知：云端只能提供行业趋势/供需/参考区间，无法获取具体采购价格——结果仅供趋势参考与机会判断；\n3. 一次查询尽量覆盖完整问题，避免碎片化追问；\n4. 已查询过的信息不要重复查询（系统会自动复用最近结果）。';
     const dataBlock = autoData.data
       ? `\n\n【已自动读取的数据库资料（真实数据，请以此为准）】\n${autoData.data}\n`
       : '';
     // 只保留最近6轮历史，避免 CPU 上下文膨胀拖慢生成
     const recentHistory = messages.slice(-12).map(m => ({ role: m.role, content: m.content }));
     const apiMessages = [
-      { role: 'system', content: systemPrompt + dataBlock },
+      { role: 'system', content: systemPrompt + cloudRules + dataBlock },
       ...recentHistory,
       { role: 'user', content: userContent },
     ].filter(m => m.content);
@@ -1359,8 +1364,8 @@ export default function LocalAIAssistant() {
         },
       ).then(c => { cleanupRef.current = c; }).catch(() => { /* 错误走 onError */ });
     });
-    // 云端工具执行：安全校验 → 脱敏 → 云端查询 → 结果回给本地模型
-    const executeCloudQuery = async (tcs: any[]): Promise<string> => {
+    // 云端工具执行：安全校验 → 用量阈值 → 复用检查 → 云端查询（结果回给本地模型，支持多轮追问）
+    const executeCloudQuery = async (tcs: any[], sessionCache: Map<string, string>): Promise<string> => {
       const fn = tcs?.[0]?.function;
       if (!fn || fn.name !== 'cloud_query') return '错误：不支持的云端工具';
       let args: any = {};
@@ -1371,7 +1376,30 @@ export default function LocalAIAssistant() {
         try {
           await logLocalAICall({ request_type: 'local_chat_cloud_tool', material_name: String(args.material || ''), system_prompt: '工具参数安全校验', user_prompt: fn.arguments.slice(0, 1000), response_summary: '', success: false, error_message: v.reason || '参数校验失败', model_name: model });
         } catch { /* 留痕失败忽略 */ }
-        return `云端调用被安全审计拦截：${v.reason}。请使用物料通用名称重新发起（可换个说法）。`;
+        return `云端调用被安全审计拦截：${v.reason}。请换一种说法重新发起（使用物料通用名，不含型号/金额/供应商/项目信息）。`;
+      }
+      // 用量阈值管控（每日云端请求上限）
+      const limit = Math.max(1, Number(await getSetting('ai_usage_cloud_daily_limit', '50')) || 50);
+      const usage = await getDailyCloudUsage();
+      if (usage.count >= limit) {
+        try {
+          await logLocalAICall({ request_type: 'local_chat_cloud_tool', material_name: v.clean!.material, system_prompt: '云端用量阈值管控', user_prompt: `material=${v.clean!.material}`, response_summary: '', success: false, error_message: `已达今日云端上限 ${limit} 次`, model_name: model });
+        } catch { /* 忽略 */ }
+        return `今日云端调用已达上限（${usage.count}/${limit} 次），无法继续查询。请基于本地数据继续分析；如需提高上限可在设置中调整。`;
+      }
+      // 会话内防重复：同物料本会话已查 → 直接复用结果（不消耗 token）
+      const key = materialKey(v.clean!.material, v.clean!.category);
+      if (sessionCache.has(key)) {
+        return `【复用本会话已查询结果，未消耗新 token】\n${sessionCache.get(key)}\n（如需其他维度信息，可换个问题追问）`;
+      }
+      // 库内 7 天复用：同物料近期已洞察过 → 直接返回历史结果
+      const recent = await getRecentBridgeLog(key, 7);
+      if (recent) {
+        let rc: any = {};
+        try { rc = JSON.parse(recent.cloud_result || '{}'); } catch { rc = {}; }
+        const cached = `【云端查询结果（复用 ${(recent.created_at || '').slice(0, 16)} 历史，未消耗新 token）】物料：${recent.material_name || v.clean!.material}\n行情方向：${rc.trend_direction || '未知'} · 置信度：${rc.confidence_level || '未知'}${rc.magnitude_min != null ? ` · 幅度 ${rc.magnitude_min}%~${rc.magnitude_max}%` : ''}\n摘要：${rc.summary || ''}\n建议动作：${rc.suggested_action || ''}\n（如需最新行情可要求刷新）`;
+        sessionCache.set(key, cached);
+        return cached;
       }
       // 气泡提示：正在调用云端（用户感知）
       setPhase('querying');
@@ -1379,7 +1407,8 @@ export default function LocalAIAssistant() {
       try {
         const { agentSearchLoop } = await import('../trendService');
         const r = await agentSearchLoop(v.clean!.material, v.clean!.category, 'price-trend', () => { setPhase('querying'); });
-        const summary = `【云端查询结果】物料：${v.clean!.material}（品类：${v.clean!.category || '未知'}）\n行情方向：${r.trend_direction} · 置信度：${r.confidence_level}${r.magnitude_min != null ? ` · 近1-3月幅度 ${r.magnitude_min}%~${r.magnitude_max}%` : ''}\n摘要：${r.summary}\n建议动作：${r.suggested_action}`;
+        const summary = `【云端查询结果（参考性质：行业趋势/参考区间，具体价格以本地数据为准）】物料：${v.clean!.material}（品类：${v.clean!.category || '未知'}）\n行情方向：${r.trend_direction} · 置信度：${r.confidence_level}${r.magnitude_min != null ? ` · 近1-3月幅度 ${r.magnitude_min}%~${r.magnitude_max}%` : ''}\n摘要：${r.summary}\n建议动作：${r.suggested_action}`;
+        sessionCache.set(key, summary);
         try {
           await logLocalAICall({ request_type: 'local_chat_cloud_tool', material_name: v.clean!.material, system_prompt: '本地模型自主调用云端（脱敏）', user_prompt: `material=${v.clean!.material}&category=${v.clean!.category}&question=${v.clean!.question}`, response_summary: summary.slice(0, 800), success: true, model_name: model });
         } catch { /* 忽略 */ }
@@ -1407,19 +1436,34 @@ export default function LocalAIAssistant() {
       } catch (e) { console.error('审计日志记录失败', e); }
     };
     stoppedRef.current = false; // 重置停止标记
-    // ===== 工具循环：本地模型可自主调用云端（最多 1 轮工具，防止死循环） =====
+    // ===== 工具循环：本地模型可自主调用云端（拦截重试≤2 次不耗轮次；真实云端调用≤3 轮，防死循环） =====
     try {
+      const sessionCloudCache = new Map<string, string>();
       let tcs = await runStream(apiMessages);
-      if (tcs.length > 0 && !stoppedRef.current) {
-        const toolResult = await executeCloudQuery(tcs);
-        if (!stoppedRef.current) {
-          const followMsgs = [
-            ...apiMessages,
-            { role: 'assistant' as const, content: full || '', tool_calls: tcs },
-            { role: 'tool' as const, content: toolResult },
-          ];
-          await runStream(followMsgs);
+      let toolRounds = 0;
+      let blockedRetries = 0;
+      while (tcs.length > 0 && !stoppedRef.current) {
+        const toolResult = await executeCloudQuery(tcs, sessionCloudCache);
+        const blocked = toolResult.indexOf('云端调用被安全审计拦截') === 0;
+        if (blocked) {
+          blockedRetries++;
+          if (blockedRetries >= 2) {
+            setMessages(prev => { const arr = [...prev]; arr[arr.length - 1] = { role: 'assistant', content: (arr[arr.length - 1]?.content || '') + '\n\n⚠️ 云端调用参数多次未通过安全审计（2 次），已停止云端查询。可手动以"生成行业洞察"方式发起。', reasoning }; return arr; });
+            break;
+          }
+        } else {
+          toolRounds++;
+          if (toolRounds >= 3) {
+            setMessages(prev => { const arr = [...prev]; arr[arr.length - 1] = { role: 'assistant', content: (arr[arr.length - 1]?.content || '') + '\n\nℹ️ 已进行多轮云端查询（3 轮），如需继续分析可再次提问。', reasoning }; return arr; });
+            break;
+          }
         }
+        const followMsgs = [
+          ...apiMessages,
+          { role: 'assistant' as const, content: full || '', tool_calls: tcs },
+          { role: 'tool' as const, content: toolResult },
+        ];
+        tcs = await runStream(followMsgs);
       }
       await finishStream();
     } catch (e: any) {
@@ -1912,6 +1956,11 @@ return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <Switch size="small" checked={cloudToolMode} onChange={async v => { setCloudToolMode(v); await setSetting('ai_local_cloud_tool', v ? 'on' : 'off'); }} />
             <span style={{ fontSize: 12 }}>对话中允许本地模型自主调用云端助手（需实时行情/更强分析时；参数经安全审计，全程留痕）</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 12, flexShrink: 0 }}>每日云端调用上限：</span>
+            <InputNumber size="small" min={1} max={1000} value={cloudDailyLimit} onChange={async v => { setCloudDailyLimit(v ?? 50); await setSetting('ai_usage_cloud_daily_limit', String(v ?? 50)); }} style={{ width: 90 }} />
+            <span style={{ fontSize: 11, color: '#94A3B8' }}>次（达上限自动停止云端调用并提示）</span>
           </div>
           {/* ===== 数据安全：一键封禁 Ollama 联网 ===== */}
           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 8 }}>数据安全保护</div>

@@ -288,6 +288,15 @@ export async function saveAIUsageLog(data: {
 
 
 // Token 用量统计（按供应商/模型聚合）
+// 今日云端（非本地）请求次数与 token 消耗（Dashboard 用量格 + 阈值管控）
+export async function getDailyCloudUsage(): Promise<{ count: number; tokens: number }> {
+  const d = await getDb();
+  const rows = await d.select<any[]>(
+    "SELECT COUNT(*) AS cnt, SUM(COALESCE(total_tokens,0)) AS tk FROM ai_request_logs WHERE provider_name NOT LIKE 'Ollama%' AND created_at >= datetime('now','localtime','start of day')"
+  );
+  return { count: rows?.[0]?.cnt || 0, tokens: rows?.[0]?.tk || 0 };
+}
+
 export async function getTokenUsageStats(): Promise<{
   total: { prompt: number; completion: number; total: number; count: number };
   byProvider: { provider_name: string; model_name: string; prompt: number; completion: number; total: number; count: number }[];

@@ -3,7 +3,7 @@ import { Spin, Tag, Button, message } from 'antd';
 import { BarChartOutlined, ShopOutlined, AimOutlined, BulbOutlined, AlertOutlined, RobotOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
-import { getDashboardStats, getProjects, getProjectBOMs, getCompetitors, getCompetitorBOMs, getTargets, getProjectCostSnapshots, getInsights } from '../db';
+import { getDashboardStats, getProjects, getProjectBOMs, getCompetitors, getCompetitorBOMs, getTargets, getProjectCostSnapshots, getInsights, getSetting } from '../db';
 import { getCategoryColor } from '../constants';
 import DataTable from '../components/DataTable';
 import type { DashboardStats } from '../types';
@@ -11,6 +11,7 @@ import { CHART_COLORS, chartTooltip, chartAxisStyle, chartGrid, chartTextMuted, 
 import { computeTargetStatuses, summarizeTargets, detectSnapshotChanges, type TargetStatus } from '../targetInsight';
 import { getAuditFindings, markAuditRead, dismissAuditFinding, getRecentPartPriceChanges } from '../auditStore';
 import { getAdvisorInsights } from '../db/advisor';
+import { getDailyCloudUsage } from '../db/settings';
 import { runAutoAudit } from '../autoAudit';
 
 interface DashboardProps {
@@ -41,6 +42,9 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [recentPriceChanges, setRecentPriceChanges] = useState<any[]>([]);
   // 自主建议（autoAdvisor）
   const [advisorInsights, setAdvisorInsights] = useState<any[]>([]);
+  // 云端用量（今日请求/阈值）
+  const [cloudUsage, setCloudUsage] = useState<{ count: number; tokens: number }>({ count: 0, tokens: 0 });
+  const [cloudLimit, setCloudLimit] = useState(50);
   // 折叠控制
   const [costOpen, setCostOpen] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
@@ -106,6 +110,11 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         } catch { /* 忽略 */ }
         // 自主建议（AI 助理后台分析）
         try { setAdvisorInsights(await getAdvisorInsights('open')); } catch { /* 忽略 */ }
+        // 云端用量（今日请求/阈值）
+        try {
+          setCloudUsage(await getDailyCloudUsage());
+          setCloudLimit(Math.max(1, Number(await getSetting('ai_usage_cloud_daily_limit', '50')) || 50));
+        } catch { /* 忽略 */ }
       } catch (e: any) {
         const msg = e?.message || String(e);
         console.error('Dashboard load error:', e);
@@ -195,7 +204,37 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     <div>
       <div className="page-title"><BarChartOutlined /> 驾驶舱</div>
 
-      {/* ===== ① 目标成本达成（最显眼） ===== */}
+            {/* ===== 状态仪表：一眼扫出哪里需要我 ===== */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 14 }}>
+        <div onClick={() => onNavigate?.('projects')} style={{ background: '#fff', border: '1px solid #E8ECF1', borderRadius: 12, padding: '12px 14px', cursor: onNavigate ? 'pointer' : 'default', transition: 'box-shadow 150ms ease-out, transform 150ms ease-out' }}>
+          <div style={{ fontSize: 11, color: '#94A3B8' }}>🎯 目标预警</div>
+          <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: missedSorted.length > 0 ? '#DC2626' : '#16A34A' }}>{missedSorted.length}</div>
+          <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>{missedSorted.length > 0 ? '个领域未达标' : '全部达标'}</div>
+        </div>
+        <div onClick={() => onNavigate?.('localAI')} style={{ background: '#fff', border: '1px solid #E8ECF1', borderRadius: 12, padding: '12px 14px', cursor: onNavigate ? 'pointer' : 'default', transition: 'box-shadow 150ms ease-out, transform 150ms ease-out' }}>
+          <div style={{ fontSize: 11, color: '#94A3B8' }}>🤖 AI 建议</div>
+          <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: advisorInsights.length > 0 ? '#D97706' : '#16A34A' }}>{advisorInsights.length}</div>
+          <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>待处理{advisorInsights.length > 0 ? ' · 见本地 AI 页' : ' · 无'}</div>
+        </div>
+        <div style={{ background: '#fff', border: '1px solid #E8ECF1', borderRadius: 12, padding: '12px 14px' }}>
+          <div style={{ fontSize: 11, color: '#94A3B8' }}>📈 成本变动</div>
+          <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: (snapshotChanges.length + recentPriceChanges.length) > 0 ? '#2563EB' : '#16A34A' }}>{snapshotChanges.length + recentPriceChanges.length}</div>
+          <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>项近期变动</div>
+        </div>
+        <div style={{ background: '#fff', border: '1px solid #E8ECF1', borderRadius: 12, padding: '12px 14px' }}>
+          <div style={{ fontSize: 11, color: '#94A3B8' }}>🛡 安全状态</div>
+          <div style={{ fontSize: 16, fontWeight: 800, marginTop: 6, color: '#16A34A' }}>✓ 受控</div>
+          <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>审计留痕 · 永不外传敏感</div>
+        </div>
+        <div style={{ background: '#fff', border: '1px solid ' + (cloudUsage.count >= cloudLimit ? '#FECACA' : '#E8ECF1'), borderRadius: 12, padding: '12px 14px' }}>
+          <div style={{ fontSize: 11, color: '#94A3B8' }}>☁️ 云端用量</div>
+          <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: cloudUsage.count >= cloudLimit ? '#DC2626' : '#16A34A' }}>{cloudUsage.count}<span style={{ fontSize: 12, color: '#94A3B8' }}>/{cloudLimit}</span></div>
+          <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>{cloudUsage.count >= cloudLimit ? '已达今日上限' : (cloudUsage.tokens > 0 ? cloudUsage.tokens.toLocaleString() + ' token' : '今日未调用')}</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14, marginBottom: 14 }}>
+{/* ===== ① 目标成本达成（最显眼） ===== */}
       <div className="content-card" style={{ marginBottom: 16, border: missedSorted.length > 0 ? '1.5px solid #FF4D4F' : '1px solid #E2E8F0', background: missedSorted.length > 0 ? 'linear-gradient(180deg, #FFF7F7 0%, #FFFFFF 100%)' : undefined }}>
         <div className="card-header">
           <h3><AimOutlined style={{ color: '#CF0A2C' }} /> 目标成本达成</h3>
@@ -242,16 +281,92 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         )}
       </div>
 
-{/* ===== ④ 统计卡（导航入口） ===== */}
-      <div className="stat-cards">
-        <div className="stat-card card-a" onClick={() => onNavigate?.('parts')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">器件总数</div><div className="stat-value">{stats.total_parts}</div></div>
-        <div className="stat-card card-b" onClick={() => onNavigate?.('projects')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">项目总数</div><div className="stat-value">{stats.total_projects}</div></div>
-        <div className="stat-card card-c" onClick={() => onNavigate?.('projects')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">进行中项目</div><div className="stat-value">{stats.active_projects}</div></div>
-        <div className="stat-card card-d"><div className="stat-label">平均BOM成本</div><div className="stat-value">¥{(stats.avg_bom_cost ?? 0).toLocaleString()}</div></div>
-        <div className="stat-card card-e" onClick={() => onNavigate?.('competitors')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">竞品数量</div><div className="stat-value">{stats.total_competitors}</div></div>
+{/* ===== ③ AI 洞察建议（本地模型：机会点/占比意见/思路——这才叫 AI） ===== */}
+      <div className="content-card" style={{ marginBottom: 16 }}>
+        <div className="card-header">
+          <h3><RobotOutlined style={{ color: '#0A84FF' }} /> AI 洞察建议</h3>
+          <span style={{ fontSize: 12, color: '#94A3B8' }}>
+            <Button size="small" icon={<RobotOutlined />} loading={auditRunning} onClick={refreshAudit} style={{ fontSize: 11.5 }}>
+              {auditRunning ? 'AI 巡检中…' : 'AI 自主巡检'}
+            </Button>
+            {auditLastAt && <span style={{ marginLeft: 8 }}>上次 {auditLastAt}</span>}
+          </span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* 自主建议（AI 助理后台分析） */}
+          <div style={{ border: '1px solid #E8ECF1', borderRadius: 10, padding: '10px 12px', background: '#FAFBFC' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <RobotOutlined style={{ color: '#0A84FF' }} />
+              <b style={{ fontSize: 13 }}>🤖 自主建议</b>
+              {advisorInsights.length > 0 && <Tag color="purple" style={{ margin: 0 }}>{advisorInsights.length} 条待处理</Tag>}
+            </div>
+            {advisorInsights.length === 0 ? (
+              <div style={{ fontSize: 12, color: '#94A3B8', padding: '8px 0' }}>暂无建议——系统空闲时自动分析成本机会/风险点，有新发现会在这里提醒</div>
+            ) : (
+              <>
+                {advisorInsights.slice(0, 3).map((a: any) => (
+                  <div key={a.id} style={{ padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: 12 }}>
+                    <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.title}</div>
+                    <div style={{ color: '#64748B', fontSize: 11.5, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.detail}</div>
+                  </div>
+                ))}
+                <div style={{ marginTop: 6, textAlign: 'center' }}>
+                  <a onClick={() => onNavigate?.('localAI')} style={{ fontSize: 12, color: '#0A84FF' }}>查看全部（处理 / 洞察 / 复制提示词）→</a>
+                </div>
+              </>
+            )}
+          </div>
+          {/* 右：AI 巡检发现 */}
+          <div>
+        {(() => {
+          const unreadFindings = auditFindings.filter((f: any) => f.status === 'unread');
+          return unreadFindings.length > 0 ? (
+          <div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {(auditOpen ? unreadFindings : unreadFindings.slice(0, 2)).map((f: any) => (
+                <div key={f.id} onClick={() => goToAuditObject(f)}
+                  style={{ padding: '10px 14px', background: f.level === 'warn' ? '#FFFBEB' : '#F0F7FF', border: f.level === 'warn' ? '1px solid #FDE68A' : '1px solid #BFDBFE', borderRadius: 10, cursor: 'pointer', transition: 'box-shadow 0.2s' }}
+                  onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(10,132,255,0.12)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
+                    <Tag color={f.level === 'warn' ? 'orange' : 'blue'} style={{ margin: 0, flexShrink: 0, fontSize: 11 }}>{f.source === 'ai' ? 'AI 洞察' : '规则发现'}</Tag>
+                    <b style={{ fontSize: 13, color: '#1F2937' }}>{f.title}</b>
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94A3B8', flexShrink: 0 }}>点击直达 →</span>
+                    {f.status === 'unread' ? (
+                      <a style={{ fontSize: 11.5, flexShrink: 0 }} onClick={(e) => { e.stopPropagation(); markAuditRead(f.id); setAuditFindings((prev: any[]) => prev.map((x: any) => x.id === f.id ? { ...x, status: 'read' } : x)); }}>标记已读</a>
+                    ) : (
+                      <a style={{ fontSize: 11.5, flexShrink: 0, color: '#94A3B8' }} onClick={(e) => { e.stopPropagation(); dismissAuditFinding(f.id); setAuditFindings((prev: any[]) => prev.filter((x: any) => x.id !== f.id)); }}>忽略</a>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#4B5563', lineHeight: 1.7 }}>{f.detail}</div>
+                  {f.suggestion && (
+                    <div style={{ marginTop: 6, padding: '6px 10px', background: '#EEF2FF', border: '1px solid #C7D2FE', borderRadius: 8, fontSize: 12, color: '#3730A3', lineHeight: 1.6 }}>
+                      <b>💡 建议：</b>{f.suggestion}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            {unreadFindings.length > 2 && (
+              <div style={{ marginTop: 8, textAlign: 'center' }}>
+                <a onClick={() => setAuditOpen(o => !o)} style={{ fontSize: 12, color: '#0A84FF' }}>
+                  {auditOpen ? '收起 ▲' : '展开全部（' + (unreadFindings.length - 2) + ' 条）▼'}
+                </a>
+              </div>
+            )}
+          </div>
+          ) : (
+          <div style={{ padding: '6px 2px', fontSize: 13, color: '#94A3B8' }}>
+            暂无待处理洞察。已标记已读/忽略的发现不再提示；若问题内容发生变化（如占比升高、新增情报）会作为新情况重新提醒。
+          </div>
+          );
+        })()}
+          </div>
+        </div>
+      </div>
       </div>
 
-      {/* ===== ② 最近成本变动（事实汇总：用户输入数据的变动，不叫 AI） ===== */}
+{/* ===== ② 最近成本变动（事实汇总：用户输入数据的变动，不叫 AI） ===== */}
       <div className="content-card" style={{ marginBottom: 16 }}>
         <div className="card-header">
           <h3><BarChartOutlined style={{ color: '#D97706' }} /> 最近成本变动</h3>
@@ -334,90 +449,16 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         })()}
       </div>
 
-      {/* ===== ③ AI 洞察建议（本地模型：机会点/占比意见/思路——这才叫 AI） ===== */}
-      <div className="content-card" style={{ marginBottom: 16 }}>
-        <div className="card-header">
-          <h3><RobotOutlined style={{ color: '#0A84FF' }} /> AI 洞察建议</h3>
-          <span style={{ fontSize: 12, color: '#94A3B8' }}>
-            <Button size="small" icon={<RobotOutlined />} loading={auditRunning} onClick={refreshAudit} style={{ fontSize: 11.5 }}>
-              {auditRunning ? 'AI 巡检中…' : 'AI 自主巡检'}
-            </Button>
-            {auditLastAt && <span style={{ marginLeft: 8 }}>上次 {auditLastAt}</span>}
-          </span>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14 }}>
-          {/* 左：自主建议（AI 助理后台分析） */}
-          <div style={{ border: '1px solid #E8ECF1', borderRadius: 10, padding: '10px 12px', background: '#FAFBFC' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-              <RobotOutlined style={{ color: '#0A84FF' }} />
-              <b style={{ fontSize: 13 }}>🤖 自主建议</b>
-              {advisorInsights.length > 0 && <Tag color="purple" style={{ margin: 0 }}>{advisorInsights.length} 条待处理</Tag>}
-            </div>
-            {advisorInsights.length === 0 ? (
-              <div style={{ fontSize: 12, color: '#94A3B8', padding: '8px 0' }}>暂无建议——系统空闲时自动分析成本机会/风险点，有新发现会在这里提醒</div>
-            ) : (
-              <>
-                {advisorInsights.slice(0, 3).map((a: any) => (
-                  <div key={a.id} style={{ padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: 12 }}>
-                    <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.title}</div>
-                    <div style={{ color: '#64748B', fontSize: 11.5, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.detail}</div>
-                  </div>
-                ))}
-                <div style={{ marginTop: 6, textAlign: 'center' }}>
-                  <a onClick={() => onNavigate?.('localAI')} style={{ fontSize: 12, color: '#0A84FF' }}>查看全部（处理 / 洞察 / 复制提示词）→</a>
-                </div>
-              </>
-            )}
-          </div>
-          {/* 右：AI 巡检发现 */}
-          <div>
-        {(() => {
-          const unreadFindings = auditFindings.filter((f: any) => f.status === 'unread');
-          return unreadFindings.length > 0 ? (
-          <div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {(auditOpen ? unreadFindings : unreadFindings.slice(0, 2)).map((f: any) => (
-                <div key={f.id} onClick={() => goToAuditObject(f)}
-                  style={{ padding: '10px 14px', background: f.level === 'warn' ? '#FFFBEB' : '#F0F7FF', border: f.level === 'warn' ? '1px solid #FDE68A' : '1px solid #BFDBFE', borderRadius: 10, cursor: 'pointer', transition: 'box-shadow 0.2s' }}
-                  onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(10,132,255,0.12)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; }}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
-                    <Tag color={f.level === 'warn' ? 'orange' : 'blue'} style={{ margin: 0, flexShrink: 0, fontSize: 11 }}>{f.source === 'ai' ? 'AI 洞察' : '规则发现'}</Tag>
-                    <b style={{ fontSize: 13, color: '#1F2937' }}>{f.title}</b>
-                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94A3B8', flexShrink: 0 }}>点击直达 →</span>
-                    {f.status === 'unread' ? (
-                      <a style={{ fontSize: 11.5, flexShrink: 0 }} onClick={(e) => { e.stopPropagation(); markAuditRead(f.id); setAuditFindings((prev: any[]) => prev.map((x: any) => x.id === f.id ? { ...x, status: 'read' } : x)); }}>标记已读</a>
-                    ) : (
-                      <a style={{ fontSize: 11.5, flexShrink: 0, color: '#94A3B8' }} onClick={(e) => { e.stopPropagation(); dismissAuditFinding(f.id); setAuditFindings((prev: any[]) => prev.filter((x: any) => x.id !== f.id)); }}>忽略</a>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 12, color: '#4B5563', lineHeight: 1.7 }}>{f.detail}</div>
-                  {f.suggestion && (
-                    <div style={{ marginTop: 6, padding: '6px 10px', background: '#EEF2FF', border: '1px solid #C7D2FE', borderRadius: 8, fontSize: 12, color: '#3730A3', lineHeight: 1.6 }}>
-                      <b>💡 建议：</b>{f.suggestion}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            {unreadFindings.length > 2 && (
-              <div style={{ marginTop: 8, textAlign: 'center' }}>
-                <a onClick={() => setAuditOpen(o => !o)} style={{ fontSize: 12, color: '#0A84FF' }}>
-                  {auditOpen ? '收起 ▲' : '展开全部（' + (unreadFindings.length - 2) + ' 条）▼'}
-                </a>
-              </div>
-            )}
-          </div>
-          ) : (
-          <div style={{ padding: '6px 2px', fontSize: 13, color: '#94A3B8' }}>
-            暂无待处理洞察。已标记已读/忽略的发现不再提示；若问题内容发生变化（如占比升高、新增情报）会作为新情况重新提醒。
-          </div>
-          );
-        })()}
-          </div>
-        </div>
+      {/* ===== ④ 统计卡（导航入口） ===== */}
+      <div className="stat-cards">
+        <div className="stat-card card-a" onClick={() => onNavigate?.('parts')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">器件总数</div><div className="stat-value">{stats.total_parts}</div></div>
+        <div className="stat-card card-b" onClick={() => onNavigate?.('projects')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">项目总数</div><div className="stat-value">{stats.total_projects}</div></div>
+        <div className="stat-card card-c" onClick={() => onNavigate?.('projects')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">进行中项目</div><div className="stat-value">{stats.active_projects}</div></div>
+        <div className="stat-card card-d"><div className="stat-label">平均BOM成本</div><div className="stat-value">¥{(stats.avg_bom_cost ?? 0).toLocaleString()}</div></div>
+        <div className="stat-card card-e" onClick={() => onNavigate?.('competitors')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">竞品数量</div><div className="stat-value">{stats.total_competitors}</div></div>
       </div>
-<div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         <div className="content-card">
           <div className="card-header"><h3><BarChartOutlined /> 各项目BOM成本</h3></div>
           <ReactECharts echarts={echarts} option={projBarOption} style={{ height: 320 }} />
