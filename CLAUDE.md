@@ -2,6 +2,9 @@
 - **任何本地/内网地址（localhost/127.0.0.1/私有网段）的 reqwest client 必须显式 `.no_proxy()`**——reqwest 默认 features 含 system-proxy，Windows 走 WinHTTP 读系统代理（公司组策略设置，设置界面看不到），会把 127.0.0.1 转发到公司代理 → 504
 - 排查：`netsh winhttp show proxy`（WinHTTP）≠ 设置界面（WinINET）；GUI 启动 eprintln 不可见，诊断写 exe 同目录日志或塞回响应 body
 
+### 审查交付汇总（2026-08-15，15 轮）
+- 见「会话接续说明.md」；核心：撤销反馈/批量/emoji图标/洞察树升级/极简白/用量阈值/追溯链/深色适配/软删过滤/快照去重
+
 ### v2.3.19 本地-云端桥 aiBridge（2026-08-15，工具亮点）
 - **三步链路**（建议卡「生成行业洞察」）：①本地 Ollama 读建议卡上下文（本地数据）→ 判断查询意图，只输出 {material_name, category, question} ②脱敏模板组装 → 发送前敏感审计 → 云端 agentSearchLoop('price-trend') ③本地 Ollama 结合本地数据 + 云端行情 → 最终建议（判定机会/风险/目标/行动）
 - **安全设计**：云端 prompt = 固定模板，只有 物料名/品类/问题 三个字段位（成本/供应商/项目代号结构上无位置可传）；正则审计兜底（金额¥/元/价格区间/成本数字/供应商项目信息，时间区间"1-3月"负向断言排除）；拦截即抛错；全程 logLocalAICall（bridge_intent/bridge_summary）留痕
