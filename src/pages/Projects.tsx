@@ -322,6 +322,7 @@ export default function Projects() {
   const [insightModal, setInsightModal] = useState(false);
   const [insights, setInsights] = useState<any[]>([]);
   const [insightView, setInsightView] = useState<'pending' | 'all' | 'done'>('pending'); // 待处理/全部/已处理
+  const [insightSelected, setInsightSelected] = useState<Set<number>>(new Set()); // 批量选择（模块 id）
   const [insightBusyKey, setInsightBusyKey] = useState<string | null>(null); // 正在处理的 模块id|组index
   const [unreadMods, setUnreadMods] = useState<Set<string>>(new Set());
   const loadInsights = async () => {
@@ -454,6 +455,61 @@ export default function Projects() {
       console.error('标记已读失败:', e);
       await loadInsights();
     }
+  };
+
+  // ===== 批量操作（ui-ux-pro-max 准则：多选 + 操作条） =====
+  const toggleInsightSelect = (id: number) => {
+    setInsightSelected(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  };
+  const clearInsightSelect = () => setInsightSelected(new Set());
+  // 批量归档（已读）：选中模块全部标记已读
+  const batchArchiveInsights = async () => {
+    const ids = [...insightSelected];
+    if (ids.length === 0) return;
+    const targets = insights.filter(i => ids.includes(i.id));
+    for (const ins of targets) {
+      try {
+        await markInsightRead(ins.category, ins.module_name);
+      } catch { /* 单项失败继续 */ }
+    }
+    setInsightSelected(new Set());
+    await loadInsights();
+    message.success(`已归档 ${ids.length} 个模块（可在「全部」查看或恢复）`);
+  };
+  // 批量确认同一：选中模块内所有待处理组逐组确认（汇总结果）
+  const batchConfirmInsights = async () => {
+    const ids = [...insightSelected];
+    if (ids.length === 0) return;
+    const targets = insights.filter(i => ids.includes(i.id));
+    let confirmed = 0, groups = 0;
+    for (const ins of targets) {
+      let data: any[] = [];
+      try { data = JSON.parse(ins.insight_json || '[]'); } catch { data = []; }
+      for (const g of data) {
+        try {
+          for (const r of g.rows || []) {
+            await savePartAlias({ module_name: ins.module_name, alias_name: r.name, alias_model: r.model, canonical_name: g.name, canonical_model: '', source: 'user_confirmed' });
+          }
+          await appendHandledInsight(ins.category, ins.module_name, {
+            name: g.name, type: g.type || 'rule', action: 'confirmed', rows: g.rows, diff: g.diff || 0,
+            handled_at: new Date().toLocaleString('zh-CN', { hour12: false }),
+          });
+          groups++;
+        } catch { /* 单项失败继续 */ }
+      }
+      try {
+        const rebuildDone = await rebuildModuleInsight(ins);
+        if (rebuildDone) await markInsightRead(ins.category, ins.module_name);
+      } catch { /* 忽略 */ }
+      confirmed++;
+    }
+    setInsightSelected(new Set());
+    await loadInsights();
+    message.success(`批量确认完成：${confirmed} 个模块、${groups} 组已沉淀别名并消除情报`);
   };
   // 撤销已处理：删别名 → 重算 → 组回到待处理
   const undoHandledInsight = async (ins: any, hi: number) => {
@@ -2941,6 +2997,14 @@ export default function Projects() {
           <Segmented size="small" value={insightView} options={[{ label: '待处理', value: 'pending' }, { label: '全部', value: 'all' }, { label: '已处理', value: 'done' }]}
             onChange={(v: any) => setInsightView(v)} />
           <span style={{ fontSize: 11.5, color: '#94A3B8' }}>待处理 = 未读；「已处理」保留确认/标记记录，可撤销恢复</span>
+          {insightSelected.size > 0 && (
+            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 12, color: '#475569' }}>已选 <b>{insightSelected.size}</b> 个模块</span>
+              <Button size="small" type="primary" onClick={batchConfirmInsights}>✓ 批量确认同一</Button>
+              <Button size="small" onClick={batchArchiveInsights}>归档（已读）</Button>
+              <Button size="small" type="text" onClick={clearInsightSelect}>取消</Button>
+            </span>
+          )}
         </div>
         {(() => {
           if (insightView === 'done') {
@@ -2991,11 +3055,12 @@ export default function Projects() {
                 try { data = JSON.parse(ins.insight_json); } catch { data = []; }
                 return (
                   <div key={idx} style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>
-                      📦 {ins.module_name}
-                      {ins.status === 'unread' && <Tag color="red" style={{ marginLeft: 8 }}>未读</Tag>}
-                      {ins.status === 'read' && data.length > 0 && <Tag color="default" style={{ marginLeft: 8 }}>已归档</Tag>}
-                      {data.length === 0 && <Tag color="green" style={{ marginLeft: 8 }}>已核对 ✓</Tag>}
+                    <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Checkbox checked={insightSelected.has(ins.id)} onChange={() => toggleInsightSelect(ins.id)} />
+                      <span>📦 {ins.module_name}</span>
+                      {ins.status === 'unread' && <Tag color="red" style={{ margin: 0 }}>未读</Tag>}
+                      {ins.status === 'read' && data.length > 0 && <Tag color="default" style={{ margin: 0 }}>已归档</Tag>}
+                      {data.length === 0 && <Tag color="green" style={{ margin: 0 }}>已核对 ✓</Tag>}
                     </div>
                     {data.length === 0 && <div style={{ fontSize: 12, color: '#CBD5E1', padding: '4px 8px' }}>无异常（报价均在正常范围）</div>}
               {data.map((g: any, gi: number) => (

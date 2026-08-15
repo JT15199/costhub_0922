@@ -18,8 +18,8 @@
   .panel { background: #fff; border: 1px solid #E8ECF1; border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
   .panel-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
   .panel-head .title { font-size: 13.5px; font-weight: 700; }
-  .panel-head .sub { font-size: 11px; color: #94A3B8; }
-  .panel-head .right { margin-left: auto; font-size: 11.5px; color: #94A3B8; }
+  .panel-head .sub { font-size: 11px; color: #64748B; }
+  .panel-head .right { margin-left: auto; font-size: 11.5px; color: #64748B; }
   .num { font-variant-numeric: tabular-nums; }
   .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10.5px; font-weight: 600; }
   .b-red { background: #FEE2E2; color: #DC2626; }
@@ -33,9 +33,9 @@
   .gauges { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
   .gauge { cursor: pointer; background: #fff; border: 1px solid #E8ECF1; border-radius: 12px; padding: 12px 14px; cursor: pointer; transition: box-shadow .15s; }
   .gauge:hover { box-shadow: 0 4px 14px rgba(0,0,0,.07); }
-  .gauge .g-name { font-size: 11px; color: #94A3B8; display: flex; align-items: center; gap: 5px; }
+  .gauge .g-name { font-size: 11px; color: #64748B; display: flex; align-items: center; gap: 5px; }
   .gauge .g-val { font-size: 22px; font-weight: 800; margin-top: 4px; }
-  .gauge .g-extra { font-size: 10.5px; color: #94A3B8; margin-top: 2px; }
+  .gauge .g-extra { font-size: 10.5px; color: #64748B; margin-top: 2px; }
   .gauge.ok .g-val { color: #16A34A; }
   .gauge.warn .g-val { color: #D97706; }
   .gauge.bad .g-val { color: #DC2626; }
@@ -46,7 +46,7 @@
   .row .r-title { font-weight: 600; flex-shrink: 0; }
   .row .r-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #475569; }
   .row .r-num { font-weight: 700; flex-shrink: 0; }
-  .row .r-ext { font-size: 10.5px; color: #94A3B8; flex-shrink: 0; }
+  .row .r-ext { font-size: 10.5px; color: #64748B; flex-shrink: 0; }
   .row .chevron { color: #CBD5E1; font-size: 10px; flex-shrink: 0; }
   .row.expanded { background: #F8FAFC; border-color: #E8ECF1; }
   .row .detail { display: none; }
@@ -60,7 +60,7 @@
   .sent-box { background: #F8FAFC; border: 1px dashed #C7D2FE; border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #4F46E5; font-family: Consolas, monospace; line-height: 1.7; margin-top: 6px; }
   .collapse { border-top: 1px dashed #E2E8F0; margin-top: 10px; padding-top: 8px; }
   .collapse summary { cursor: pointer; font-size: 12px; color: #6366F1; font-weight: 600; outline: none; }
-  .chart-ph { background: linear-gradient(180deg,#F8FAFC,#F1F5F9); border: 1px dashed #CBD5E1; border-radius: 8px; height: 120px; display: flex; align-items: center; justify-content: center; color: #94A3B8; font-size: 11.5px; }
+  .chart-ph { background: linear-gradient(180deg,#F8FAFC,#F1F5F9); border: 1px dashed #CBD5E1; border-radius: 8px; height: 120px; display: flex; align-items: center; justify-content: center; color: #64748B; font-size: 11.5px; }
   .expand-toggle { cursor: pointer; color: #6366F1; font-size: 11px; user-select: none; }
   .more { display: none; }
   .more.show { display: block; }
@@ -82,19 +82,130 @@
   @keyframes fadeSlide { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
   .gauge .g-val { transition: color 200ms ease-out; }
 
+
+  /* ===== demo v4：语义图标（SVG 替代 emoji，ui-ux-pro-max Priority-4 规则） ===== */
+  .ic { width: 16px; height: 16px; display: inline-block; vertical-align: -3px; margin-right: 4px; }
+  .ic-sm { width: 13px; height: 13px; }
+  .ic-lg { width: 18px; height: 18px; }
+
+
+  /* ===== demo v5：三种克制风（CSS 变量覆盖） ===== */
+  body { background: #F5F7FA; }
+  /* ---- A 企业蓝（Spectrum 风）：中性底、细边框、深蓝主色、无渐变 ---- */
+  body[data-theme="a"] {
+    background: #F7F8FA;
+  }
+  body[data-theme="a"] .panel, body[data-theme="a"] .gauge, body[data-theme="a"] .channel { background: #FFFFFF; border-color: #E2E6EC; border-radius: 10px; box-shadow: none; }
+  body[data-theme="a"] .tab.active { background: #1E40AF; border-color: #1E40AF; }
+  body[data-theme="a"] .btn.primary { background: #1E40AF; border-color: #1E40AF; }
+  body[data-theme="a"] .expand-toggle, body[data-theme="a"] .row .r-num { color: #1E40AF; }
+  body[data-theme="a"] .status-bar { background: #F0F4FA; border-color: #D6E0F0; }
+  body[data-theme="a"] .gauge:hover { box-shadow: 0 3px 10px rgba(30,64,175,.08); }
+  /* ---- B 极简白：纯白、极细边框、单色主调、大留白 ---- */
+  body[data-theme="b"] {
+    background: #FFFFFF;
+  }
+  body[data-theme="b"] .panel, body[data-theme="b"] .gauge, body[data-theme="b"] .channel { background: #FFFFFF; border-color: #EDEEF0; border-radius: 6px; box-shadow: none; }
+  body[data-theme="b"] .panel { padding: 18px 20px; }
+  body[data-theme="b"] .tab { border-radius: 4px; }
+  body[data-theme="b"] .tab.active { background: #111827; border-color: #111827; color: #fff; }
+  body[data-theme="b"] .btn.primary { background: #111827; border-color: #111827; }
+  body[data-theme="b"] .expand-toggle { color: #111827; }
+  body[data-theme="b"] .gauge { border-radius: 4px; }
+  body[data-theme="b"] .row:hover { background: #F9FAFB; border-color: #EDEEF0; }
+  body[data-theme="b"] .status-bar { background: #FAFAFA; border-color: #EDEEF0; }
+  /* ---- C 深色驾驶舱：深底、高对比、青蓝数据强调 ---- */
+  body[data-theme="c"] {
+    background: #0F172A; color: #E2E8F0;
+  }
+  body[data-theme="c"] .panel, body[data-theme="c"] .gauge, body[data-theme="c"] .channel { background: #1E293B; border-color: rgba(255,255,255,.08); border-radius: 12px; }
+  body[data-theme="c"] .panel-head .title { color: #F1F5F9; }
+  body[data-theme="c"] .row { color: #E2E8F0; }
+  body[data-theme="c"] .row:hover { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.1); }
+  body[data-theme="c"] .row .r-main { color: #94A3B8; }
+  body[data-theme="c"] .row.expanded { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.12); }
+  body[data-theme="c"] .row .detail { color: #94A3B8; }
+  body[data-theme="c"] .tab { background: #1E293B; border-color: rgba(255,255,255,.1); color: #94A3B8; }
+  body[data-theme="c"] .tab.active { background: #38BDF8; color: #0F172A; border-color: #38BDF8; }
+  body[data-theme="c"] .btn { background: #1E293B; border-color: rgba(255,255,255,.12); color: #CBD5E1; }
+  body[data-theme="c"] .btn.primary { background: #38BDF8; color: #0F172A; border-color: #38BDF8; }
+  body[data-theme="c"] .gauge { border-color: rgba(255,255,255,.08); }
+  body[data-theme="c"] .gauge .g-name, body[data-theme="c"] .gauge .g-extra { color: #64748B; }
+  body[data-theme="c"] .sent-box { background: #0F172A; border-color: rgba(56,189,248,.3); color: #7DD3FC; }
+  body[data-theme="c"] .status-bar { background: #1E293B; border-color: rgba(255,255,255,.08); }
+  body[data-theme="c"] .collapse summary { color: #38BDF8; }
+  body[data-theme="c"] .tag { background: rgba(255,255,255,.08); color: #CBD5E1; }
+  body[data-theme="c"] .badge.b-blue { background: rgba(56,189,248,.15); color: #7DD3FC; }
+  body[data-theme="c"] .badge.b-green { background: rgba(34,197,94,.15); color: #4ADE80; }
+  body[data-theme="c"] .badge.b-red { background: rgba(239,68,68,.15); color: #F87171; }
+  body[data-theme="c"] .badge.b-amber { background: rgba(245,158,11,.15); color: #FBBF24; }
+  body[data-theme="c"] .badge.b-purple { background: rgba(168,85,247,.15); color: #C084FC; }
+  body[data-theme="c"] .gauge.ok .g-val { color: #4ADE80; }
+  body[data-theme="c"] .gauge.warn .g-val { color: #FBBF24; }
+  body[data-theme="c"] .gauge.bad .g-val { color: #F87171; }
+  body[data-theme="c"] .row .r-num { color: #38BDF8; }
+  body[data-theme="c"] .chart-ph { background: #16213A; border-color: rgba(255,255,255,.1); color: #64748B; }
+
+.theme-btn { padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,.35); background: rgba(255,255,255,.15); color: #fff; font-size: 11.5px; cursor: pointer; }
+  .theme-btn.active { background: #fff; color: #6366F1; font-weight: 700; border-color: #fff; }
+
+  /* ===== v6 质感层：材质 + 高级动效 ===== */
+  /* 卡片：分层阴影 + 内高光（质感的关键：阴影有层次，不是一块灰） */
+  .panel, .gauge {
+    box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    transition: box-shadow 200ms cubic-bezier(.32,.72,0,1), transform 200ms cubic-bezier(.32,.72,0,1);
+  }
+  .gauge:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 2px 4px rgba(16,24,40,.06), 0 8px 20px rgba(16,24,40,.10);
+  }
+  /* 主按钮：细腻渐变 + 内高光 + 阴影（press 回压） */
+  .btn.primary {
+    background: linear-gradient(180deg, #4F46E5 0%, #4338CA 100%);
+    border: 1px solid rgba(0,0,0,.08);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 1px 2px rgba(67,56,202,.3);
+    color: #fff;
+  }
+  .btn.primary:hover { filter: brightness(1.06); box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 3px 8px rgba(67,56,202,.35); }
+  .btn.primary:active { transform: scale(.97); box-shadow: inset 0 1px 3px rgba(0,0,0,.2); }
+  /* 次要按钮：白底 + 细描边 + 微阴影 */
+  .btn {
+    background: #fff;
+    border: 1px solid #E5E7EB;
+    box-shadow: 0 1px 2px rgba(16,24,40,.04);
+    transition: all 140ms cubic-bezier(.32,.72,0,1);
+  }
+  .btn:hover { border-color: #D1D5DB; box-shadow: 0 2px 6px rgba(16,24,40,.07); transform: translateY(-0.5px); }
+  .btn:active { transform: scale(.97); }
+  /* 徽章：胶囊 + 细描边（比纯底色更有质感） */
+  .badge { box-shadow: inset 0 1px 0 rgba(255,255,255,.5); border: 1px solid rgba(0,0,0,.04); }
+  /* 行 hover：细腻背景过渡 */
+  .row { transition: background-color 150ms ease-out, border-color 150ms ease-out, transform 150ms ease-out; }
+  .row:hover { transform: translateX(2px); }
+  /* 入场动效：stagger fade-up（150ms / 40ms 间隔 / ease-out） */
+  .rise { opacity: 0; transform: translateY(10px); }
+  .rise.in { opacity: 1; transform: translateY(0); transition: opacity 260ms ease-out, transform 260ms cubic-bezier(.32,.72,0,1); }
+  /* 数字跳变 */
+  .count { display: inline-block; }
+  /* 迷你 sparkline 质感：渐变面积 + 端点 */
+  .spark { display: block; width: 100%; height: 64px; }
+  .spark .area { fill: url(#gradA); }
+  .spark .line { fill: none; stroke: #4F46E5; stroke-width: 2; stroke-linecap: round; }
+  .spark .dot { fill: #fff; stroke: #4F46E5; stroke-width: 2; }
+
 </style>
 </head>
 <body>
 
 <div class="demo-bar">
-  <h1>🎨 CostHub 设计 Demo v2</h1>
+  <h1> CostHub 设计 Demo v2</h1>
   <span>v3 · 微交互打磨：按压即时反馈 · 精确过渡 · 展开动画 160ms（emil-design-eng + apple-design 原则）</span>
 </div>
 
 <div class="tabs">
-  <div class="tab active" onclick="show('dashboard')">📊 驾驶舱</div>
-  <div class="tab" onclick="show('security')">🛡 安全中心</div>
-  <div class="tab" onclick="show('advice')">🤖 建议卡细节</div>
+  <div class="tab active" onclick="show('dashboard')"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg> 驾驶舱</div>
+  <div class="tab" onclick="show('security')"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z"/><path d="M8.5 12l2.5 2.5 4.5-4.5"/></svg> 安全中心</div>
+  <div class="tab" onclick="show('advice')"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="8" width="14" height="10" rx="3"/><circle cx="9" cy="13" r="1.2" fill="currentColor"/><circle cx="15" cy="13" r="1.2" fill="currentColor"/><path d="M12 8V5M9 3h6"/></svg> 建议卡细节</div>
 </div>
 
 <!-- ==================== 驾驶舱 ==================== -->
@@ -103,31 +214,31 @@
   <!-- 状态仪表：4 格，一眼扫出"哪里需要我" -->
   <div class="gauges">
     <div class="gauge bad" onclick="goto('advice')">
-      <div class="g-name">🎯 目标预警</div>
+      <div class="g-name"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5" fill="currentColor"/></svg>目标预警</div>
       <div class="g-val">2</div>
       <div class="g-extra">个领域未达标 · 点击看明细</div>
     </div>
     <div class="gauge warn" onclick="goto('advice')">
-      <div class="g-name">🤖 AI 建议</div>
+      <div class="g-name"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="8" width="14" height="10" rx="3"/><circle cx="9" cy="13" r="1.2" fill="currentColor"/><circle cx="15" cy="13" r="1.2" fill="currentColor"/><path d="M12 8V5M9 3h6"/></svg>AI 建议</div>
       <div class="g-val">5</div>
       <div class="g-extra">待处理 · 2 条新</div>
     </div>
     <div class="gauge ok">
-      <div class="g-name">📈 成本变动</div>
+      <div class="g-name"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>成本变动</div>
       <div class="g-val">3</div>
       <div class="g-extra">项 · 1 涨 2 降</div>
     </div>
     <div class="gauge ok" onclick="goto('security')">
-      <div class="g-name">🛡 安全状态</div>
-      <div class="g-val" style="font-size:16px;padding-top:4px">✓ 正常</div>
-      <div class="g-extra">云端 6 次 ✓ · 拦截 2 次可查</div>
+      <div class="g-name"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z"/><path d="M8.5 12l2.5 2.5 4.5-4.5"/></svg>安全状态</div>
+      <div class="g-val" style="font-size:16px;padding-top:4px"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 12.5l5 5L20 6.5"/></svg> 正常</div>
+      <div class="g-extra">云端 6 次 <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 12.5l5 5L20 6.5"/></svg> · 拦截 2 次可查</div>
     </div>
   </div>
 
   <!-- 左：问题（目标预警）右：机会（AI 建议）—— 心智模型：固定位置固定含义 -->
   <div class="cols">
     <div class="panel">
-      <div class="panel-head"><span class="title">🎯 目标成本达成</span><span class="badge b-red">2 未达标</span><span class="right">全部 6 个已设目标</span></div>
+      <div class="panel-head"><span class="title"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5" fill="currentColor"/></svg>目标成本达成</span><span class="badge b-red">2 未达标</span><span class="right">全部 6 个已设目标</span></div>
       <!-- 一行一条，点击展开 -->
       <div class="row" onclick="this.classList.toggle('expanded')">
         <span class="r-title">M270</span><span class="tag" style="background:#DBEAFE;color:#2563EB">显示类</span>
@@ -143,25 +254,25 @@
         <span class="r-ext">达成率 85%</span><span class="chevron">▾</span>
         <div class="detail">目标 <b class="num">¥120</b> → 实际 <b class="num" style="color:#DC2626">¥138</b>。</div>
       </div>
-      <div style="text-align:right;margin-top:6px;font-size:11px;color:#94A3B8">✓ 其余 4 个领域均达标</div>
+      <div style="text-align:right;margin-top:6px;font-size:11px;color:#64748B"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 12.5l5 5L20 6.5"/></svg> 其余 4 个领域均达标</div>
     </div>
 
     <div class="panel">
-      <div class="panel-head"><span class="title">🤖 AI 建议</span><span class="badge b-amber">5 待处理</span><span class="right">60s 自动巡检</span></div>
+      <div class="panel-head"><span class="title"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="8" width="14" height="10" rx="3"/><circle cx="9" cy="13" r="1.2" fill="currentColor"/><circle cx="15" cy="13" r="1.2" fill="currentColor"/><path d="M12 8V5M9 3h6"/></svg>AI 建议</span><span class="badge b-amber">5 待处理</span><span class="right">60s 自动巡检</span></div>
       <div class="row" onclick="this.classList.toggle('expanded')">
-        <span class="r-title">💰 液晶面板</span><span class="badge b-amber">久未调价</span>
+        <span class="r-title"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M9.5 8.5c0-1 1-1.8 2.5-1.8s2.5.6 2.5 1.6-1 1.5-2.5 1.7-2.5 1-2.5 2 1 1.8 2.5 1.8 2.5-.6 2.5-1.6"/></svg>液晶面板</span><span class="badge b-amber">久未调价</span>
         <span class="r-main">120 天未动价 · 议价机会</span>
         <span class="r-ext">2 项目</span><span class="chevron">▾</span>
         <div class="detail">依据：上次调价 4月16日 · 启用供应商 2 家。操作：<button class="btn mini">复制提示词</button> <button class="btn mini primary">生成洞察</button> <button class="btn mini">已处理</button></div>
       </div>
       <div class="row" onclick="this.classList.toggle('expanded')">
-        <span class="r-title">⚠️ 主控芯片</span><span class="badge b-purple">单一供应商</span>
+        <span class="r-title"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" stroke-width="2"><path d="M12 3l9 16H3l9-16z"/><path d="M12 10v4M12 17v.5"/></svg>主控芯片</span><span class="badge b-purple">单一供应商</span>
         <span class="r-main">供应风险 · 建议引入二供</span>
         <span class="r-ext">1 项目</span><span class="chevron">▾</span>
         <div class="detail">依据：启用供应商仅 1 家 · 大额物料。操作：<button class="btn mini">复制提示词</button> <button class="btn mini">已处理</button></div>
       </div>
       <div class="row" onclick="this.classList.toggle('expanded')">
-        <span class="r-title">🕐 M270</span><span class="badge b-blue">成本久未变动</span>
+        <span class="r-title"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>M270</span><span class="badge b-blue">成本久未变动</span>
         <span class="r-main">90 天无成本留痕</span>
         <span class="r-ext">整机</span><span class="chevron">▾</span>
         <div class="detail">依据：最近快照 5月14日。大额物料：液晶面板、主控芯片、背光模组。</div>
@@ -172,7 +283,7 @@
 
   <!-- 下：数据变动（一行一条） -->
   <div class="panel">
-    <div class="panel-head"><span class="title">📈 最近成本变动</span><span class="right">快照异动 · 改价 · 报价差异</span></div>
+    <div class="panel-head"><span class="title"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>最近成本变动</span><span class="right">快照异动 · 改价 · 报价差异</span></div>
     <div class="row" onclick="this.classList.toggle('expanded')">
       <span class="r-title">M270</span><span class="badge b-green">▼ 3.2%</span>
       <span class="r-main">供应商 A 面板调价</span>
@@ -191,17 +302,17 @@
 
   <!-- 完整数据：你知道的，折叠 -->
   <details class="panel collapse">
-    <summary>📊 完整数据（统计卡 · 图表 · 最近更新 —— 想看再展开）</summary>
+    <summary><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg> 完整数据（统计卡 · 图表 · 最近更新 —— 想看再展开）</summary>
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:12px 0">
-      <div style="background:#F8FAFC;border-radius:8px;padding:8px;text-align:center"><div style="font-size:10.5px;color:#94A3B8">器件总数</div><div style="font-size:18px;font-weight:700" class="num">2,847</div></div>
-      <div style="background:#F8FAFC;border-radius:8px;padding:8px;text-align:center"><div style="font-size:10.5px;color:#94A3B8">项目总数</div><div style="font-size:18px;font-weight:700" class="num">18</div></div>
-      <div style="background:#F8FAFC;border-radius:8px;padding:8px;text-align:center"><div style="font-size:10.5px;color:#94A3B8">进行中</div><div style="font-size:18px;font-weight:700" class="num">7</div></div>
-      <div style="background:#F8FAFC;border-radius:8px;padding:8px;text-align:center"><div style="font-size:10.5px;color:#94A3B8">平均BOM</div><div style="font-size:18px;font-weight:700" class="num">¥1,032</div></div>
-      <div style="background:#F8FAFC;border-radius:8px;padding:8px;text-align:center"><div style="font-size:10.5px;color:#94A3B8">竞品</div><div style="font-size:18px;font-weight:700" class="num">12</div></div>
+      <div style="background:#F8FAFC;border-radius:8px;padding:8px;text-align:center"><div style="font-size:10.5px;color:#64748B">器件总数</div><div style="font-size:18px;font-weight:700" class="num">2,847</div></div>
+      <div style="background:#F8FAFC;border-radius:8px;padding:8px;text-align:center"><div style="font-size:10.5px;color:#64748B">项目总数</div><div style="font-size:18px;font-weight:700" class="num">18</div></div>
+      <div style="background:#F8FAFC;border-radius:8px;padding:8px;text-align:center"><div style="font-size:10.5px;color:#64748B">进行中</div><div style="font-size:18px;font-weight:700" class="num">7</div></div>
+      <div style="background:#F8FAFC;border-radius:8px;padding:8px;text-align:center"><div style="font-size:10.5px;color:#64748B">平均BOM</div><div style="font-size:18px;font-weight:700" class="num">¥1,032</div></div>
+      <div style="background:#F8FAFC;border-radius:8px;padding:8px;text-align:center"><div style="font-size:10.5px;color:#64748B">竞品</div><div style="font-size:18px;font-weight:700" class="num">12</div></div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <div class="chart-ph">📊 各项目 BOM 成本</div>
-      <div class="chart-ph">📊 竞品 BOM 成本</div>
+      <div class="chart-ph"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg> 各项目 BOM 成本</div>
+      <div class="chart-ph"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg> 竞品 BOM 成本</div>
     </div>
   </details>
 </div>
@@ -209,22 +320,22 @@
 <!-- ==================== 安全中心 ==================== -->
 <div class="page" id="security">
   <div class="panel">
-    <div class="panel-head"><span class="title">🛡 安全中心</span><span class="badge b-green">3 通道受控</span><span class="right">一切出站可查可审计</span></div>
+    <div class="panel-head"><span class="title"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z"/><path d="M8.5 12l2.5 2.5 4.5-4.5"/></svg>安全中心</span><span class="badge b-green">3 通道受控</span><span class="right">一切出站可查可审计</span></div>
     <!-- 通道：一行一条 -->
     <div class="row" onclick="this.classList.toggle('expanded')">
-      <span class="r-title">☁️ 云端 LLM</span><span class="badge b-green">已配置</span>
+      <span class="r-title">云端 LLM</span><span class="badge b-green">已配置</span>
       <span class="r-main">白名单模板 + 严格审计 · 只收 物料名/品类/问题</span>
       <span class="r-ext">近30天 6 次</span><span class="chevron">▾</span>
       <div class="detail">结构闸门：出站是固定模板，成本/型号/供应商/项目代号在模板中无字段位。<br>审计闸门：正则扫描，命中即拦截留痕。</div>
     </div>
     <div class="row" onclick="this.classList.toggle('expanded')">
-      <span class="r-title">🔍 搜索服务</span><span class="badge b-green">已配置</span>
+      <span class="r-title">搜索服务</span><span class="badge b-green">已配置</span>
       <span class="r-main">仅接收搜索词（物料名+品类）</span>
       <span class="r-ext">近30天 12 次</span><span class="chevron">▾</span>
       <div class="detail">搜索词来自脱敏模板，不含任何本地数据。</div>
     </div>
     <div class="row" onclick="this.classList.toggle('expanded')">
-      <span class="r-title">💻 本地 Ollama</span><span class="badge b-amber">可联网</span>
+      <span class="r-title">本地 Ollama</span><span class="badge b-amber">可联网</span>
       <span class="r-main">读全库分析 · 可从设置一键封禁联网</span>
       <span class="r-ext">封禁后仅本机推理</span><span class="chevron">▾</span>
       <div class="detail">封禁后本地模型无法联网；解锁需确认。</div>
@@ -232,31 +343,31 @@
   </div>
 
   <div class="panel">
-    <div class="panel-head"><span class="title">最近云端发送记录（实际发送全文）</span><span class="badge b-green">6 条全部审计 ✓</span></div>
+    <div class="panel-head"><span class="title">最近云端发送记录（实际发送全文）</span><span class="badge b-green">6 条全部审计 <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 12.5l5 5L20 6.5"/></svg></span></div>
     <div class="row" onclick="toggleRow(this)">
-      <span class="r-title">16:30</span><span class="badge b-green">✓</span>
+      <span class="r-title">16:30</span><span class="badge b-green"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 12.5l5 5L20 6.5"/></svg></span>
       <span class="r-main">液晶面板 · 行业洞察</span>
       <span class="r-ext">42s</span><span class="chevron">▾</span>
       <div class="detail"><div class="sent-box">物料名称：液晶面板<br>品类：显示器件<br>查询问题：该物料近期价格走势、供需状况与主要影响因素<br>请基于最新公开行业信息，给出该物料：1) 价格走势方向（近1-3月）2) 幅度区间 3) 供需状况 4) 主要影响因素。只基于公开行业信息回答，不得推断我司成本。</div></div>
     </div>
     <div class="row" onclick="toggleRow(this)">
-      <span class="r-title">16:12</span><span class="badge b-green">✓</span>
+      <span class="r-title">16:12</span><span class="badge b-green"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 12.5l5 5L20 6.5"/></svg></span>
       <span class="r-main">主控芯片 · 行业洞察</span>
       <span class="r-ext">38s</span><span class="chevron">▾</span>
       <div class="detail"><div class="sent-box">物料名称：主控芯片<br>品类：硬件类<br>查询问题：该物料近期价格走势、供需状况与主要影响因素<br>…</div></div>
     </div>
     <div class="row" onclick="toggleRow(this)">
-      <span class="r-title">15:48</span><span class="badge b-blue">♻ 复用</span>
+      <span class="r-title">15:48</span><span class="badge b-blue">复用</span>
       <span class="r-main">DDR3 内存 · 复用 07-12 洞察（判定 中性）</span>
       <span class="r-ext">未重复查询</span><span class="chevron">▾</span>
-      <div class="detail"><div class="sent-box">♻ 复用历史洞察，未调用云端。历史发送内容：物料名称：DDR3 内存…</div></div>
+      <div class="detail"><div class="sent-box">复用历史洞察，未调用云端。历史发送内容：物料名称：DDR3 内存…</div></div>
     </div>
   </div>
 
   <div class="panel">
     <div class="panel-head"><span class="title">审计拦截记录</span><span class="badge b-red">近30天 2 次</span><span class="right">被拦下的内容从未发出</span></div>
     <div class="row" onclick="toggleRow(this)">
-      <span class="r-title">08-12 14:03</span><span class="badge b-red">✗ 拦截</span>
+      <span class="r-title">08-12 14:03</span><span class="badge b-red"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 6l12 12M18 6L6 18"/></svg> 拦截</span>
       <span class="r-main">本地意图含金额/型号</span>
       <span class="r-ext">已阻止</span><span class="chevron">▾</span>
       <div class="detail"><div class="sent-box" style="color:#DC2626">物料名称：液晶面板 M270<br>查询问题：我方采购成本约¥300/片…<br>→ 命中：金额（¥300）· 型号（M270）→ 已阻止发送，本地模型重新生成</div></div>
@@ -266,13 +377,13 @@
   <div class="panel">
     <div class="panel-head"><span class="title">永不发送清单</span><span class="right">两道闸门保障 · 90 个测试守护</span></div>
     <div style="display:flex;flex-wrap:wrap;gap:6px">
-      <span class="badge b-red" style="font-size:11px;padding:3px 10px">✗ 成本金额</span>
-      <span class="badge b-red" style="font-size:11px;padding:3px 10px">✗ 器件型号</span>
-      <span class="badge b-red" style="font-size:11px;padding:3px 10px">✗ 供应商名</span>
-      <span class="badge b-red" style="font-size:11px;padding:3px 10px">✗ 项目代号</span>
-      <span class="badge b-red" style="font-size:11px;padding:3px 10px">✗ 份额/用量</span>
-      <span class="badge b-red" style="font-size:11px;padding:3px 10px">✗ BOM 结构</span>
-      <span class="badge b-red" style="font-size:11px;padding:3px 10px">✗ 目标成本</span>
+      <span class="badge b-red" style="font-size:11px;padding:3px 10px"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 6l12 12M18 6L6 18"/></svg> 成本金额</span>
+      <span class="badge b-red" style="font-size:11px;padding:3px 10px"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 6l12 12M18 6L6 18"/></svg> 器件型号</span>
+      <span class="badge b-red" style="font-size:11px;padding:3px 10px"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 6l12 12M18 6L6 18"/></svg> 供应商名</span>
+      <span class="badge b-red" style="font-size:11px;padding:3px 10px"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 6l12 12M18 6L6 18"/></svg> 项目代号</span>
+      <span class="badge b-red" style="font-size:11px;padding:3px 10px"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 6l12 12M18 6L6 18"/></svg> 份额/用量</span>
+      <span class="badge b-red" style="font-size:11px;padding:3px 10px"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 6l12 12M18 6L6 18"/></svg> BOM 结构</span>
+      <span class="badge b-red" style="font-size:11px;padding:3px 10px"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 6l12 12M18 6L6 18"/></svg> 目标成本</span>
     </div>
   </div>
 </div>
@@ -280,12 +391,12 @@
 <!-- ==================== 建议卡细节 ==================== -->
 <div class="page" id="advice">
   <div class="panel">
-    <div class="panel-head"><span class="title">🤖 建议卡 —— 三步链路每步可见</span><span class="right">能力边界如实呈现</span></div>
+    <div class="panel-head"><span class="title"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="8" width="14" height="10" rx="3"/><circle cx="9" cy="13" r="1.2" fill="currentColor"/><circle cx="15" cy="13" r="1.2" fill="currentColor"/><path d="M12 8V5M9 3h6"/></svg> 建议卡 —— 三步链路每步可见</span><span class="right">能力边界如实呈现</span></div>
     <div class="row" style="cursor:default;flex-wrap:wrap">
-      <span class="r-title" style="font-size:13px">💰 物料「液晶面板」已 120 天未调价</span><span class="badge b-amber">久未调价</span><span class="tag">规则发现</span><span class="tag">AI 润色 16:30</span>
+      <span class="r-title" style="font-size:13px"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M9.5 8.5c0-1 1-1.8 2.5-1.8s2.5.6 2.5 1.6-1 1.5-2.5 1.7-2.5 1-2.5 2 1 1.8 2.5 1.8 2.5-.6 2.5-1.6"/></svg> 物料「液晶面板」已 120 天未调价</span><span class="badge b-amber">久未调价</span><span class="tag">规则发现</span><span class="tag">AI 润色 16:30</span>
       <div class="detail" style="display:block;flex-basis:100%">
-        📋 <b>依据</b>：上次调价 2026-04-16 · 启用供应商 2 家 · 涉及 2 项目 3 件（全部来自库内数据，可跳转核对）<br>
-        🔒 <b>提示词（已脱敏）</b>：你是资深成本经理。针对「液晶面板」品类物料开展议价评估：1) 结合品类近期行情给出合理采购价区间与砍价幅度；2) 给 3 条谈判话术要点；3) 判断是否值得做行业行情洞察。<br>
+        <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2h6v2M9 11h6M9 15h4"/></svg> <b>依据</b>：上次调价 2026-04-16 · 启用供应商 2 家 · 涉及 2 项目 3 件（全部来自库内数据，可跳转核对）<br>
+        <svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg> <b>提示词（已脱敏）</b>：你是资深成本经理。针对「液晶面板」品类物料开展议价评估：1) 结合品类近期行情给出合理采购价区间与砍价幅度；2) 给 3 条谈判话术要点；3) 判断是否值得做行业行情洞察。<br>
         <span style="margin-top:6px;display:inline-block">
           ① 本地意图 <span class="tag">液晶面板 · 价格走势</span> →
           ② 云端行情 <span class="expand-toggle" onclick="toggle(this)">查看本次发送全文 ▾</span>
@@ -296,7 +407,7 @@
     </div>
   </div>
   <div class="panel">
-    <div class="panel-head"><span class="title">🔐 信任四要素</span></div>
+    <div class="panel-head"><span class="title"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><circle cx="12" cy="15.5" r="1.3" fill="currentColor"/></svg> 信任四要素</span></div>
     <div style="font-size:12px;line-height:2.2;color:#475569">
       <div>① <b>运行可见</b>：状态仪表实时显示"上次分析/待处理数/云端调用数"</div>
       <div>② <b>依据可见</b>：每条建议标注数据来源（调价时间/供应商数/项目数）</div>
@@ -307,6 +418,45 @@
 </div>
 
 <script>
+
+  // 入场：区块 stagger fade-up
+  document.querySelectorAll('.panel, .gauges').forEach((el, i) => {
+    el.classList.add('rise');
+    setTimeout(() => el.classList.add('in'), 60 + i * 40);
+  });
+  // 仪表数字 count-up
+  document.querySelectorAll('.g-val').forEach(el => {
+    const text = el.textContent.trim();
+    const num = parseInt(text, 10);
+    if (isNaN(num) || num < 0) return;
+    const suffix = text.replace(String(num), '');
+    let cur = 0; const step = Math.max(1, Math.round(num / 24));
+    const iv = setInterval(() => {
+      cur = Math.min(num, cur + step);
+      el.textContent = cur + suffix;
+      if (cur >= num) clearInterval(iv);
+    }, 24);
+  });
+  // 行展开：弹性过渡（spring 感）
+  document.querySelectorAll('.row').forEach(row => {
+    row.addEventListener('click', () => {
+      const d = row.querySelector('.detail');
+      if (d && d.style.display !== 'block') {
+        d.style.display = 'block';
+        d.style.animation = 'none';
+        d.offsetHeight;
+        d.style.animation = 'fadeSlide 220ms cubic-bezier(.32,.72,0,1)';
+      }
+    });
+  });
+
+  function setTheme(t) {
+    document.body.setAttribute('data-theme', t);
+    document.querySelectorAll('.theme-btn').forEach(b => b.classList.toggle('active', b.dataset.t === t));
+    try { localStorage.setItem('demo_theme', t); } catch {}
+  }
+  try { const saved = localStorage.getItem('demo_theme'); if (saved) setTheme(saved); } catch {}
+  setTheme('a');
   function show(id) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -322,5 +472,14 @@
     el.textContent = show ? '收起 ▲' : '查看本次发送全文 ▾';
   }
 </script>
+
+<!-- 固定悬浮主题切换器（右下角，永远可见） -->
+<div id="themeFloat" style="position: fixed; right: 18px; bottom: 18px; z-index: 9999; background: #1E293B; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; padding: 8px 10px; display: flex; gap: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.25);">
+  <span style="color:#94A3B8;font-size:11px;align-self:center;padding-right:4px">主题</span>
+  <button class="theme-btn" data-t="a" onclick="setTheme('a')" style="background:#fff;color:#6366F1;font-weight:700;border-color:#fff">A 企业蓝</button>
+  <button class="theme-btn" data-t="b" onclick="setTheme('b')">B 极简白</button>
+  <button class="theme-btn" data-t="c" onclick="setTheme('c')">C 深色驾驶舱</button>
+</div>
+
 </body>
 </html>
