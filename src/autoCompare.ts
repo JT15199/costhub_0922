@@ -137,6 +137,8 @@ export function buildInsights(aiGroups: any[], rows: any[], aliases: any[]): any
   });
   buildRuleGroups(rows, aliases).forEach((g: any) => {
     if (g.rows.length < 2) return;
+    // 全部行都已被用户确认归组 → 该组已处理，不再提醒（与 rebuildModuleInsight 过滤一致，防止后台轮询让已确认组重现）
+    if ((g.rows || []).every((r: any) => confirmed.has(partKey(r)))) return;
     const prices = g.rows.map((r: any) => r.cost);
     const min = Math.min(...prices); const max = Math.max(...prices);
     const diff = max - min;
