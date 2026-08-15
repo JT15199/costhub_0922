@@ -151,6 +151,19 @@ async function ensureSchema(d: Database) {
     `CREATE TABLE IF NOT EXISTS sku_diffs (id INTEGER PRIMARY KEY AUTOINCREMENT, sku_id INTEGER NOT NULL, diff_type TEXT NOT NULL, module_name TEXT DEFAULT '', part_name TEXT DEFAULT '', part_model TEXT DEFAULT '', quantity REAL DEFAULT 1, unit_cost REAL DEFAULT 0, remark TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now','localtime')))`,
     `CREATE TABLE IF NOT EXISTS part_aliases (id INTEGER PRIMARY KEY AUTOINCREMENT, module_name TEXT DEFAULT '', alias_name TEXT NOT NULL, alias_model TEXT DEFAULT '', canonical_name TEXT NOT NULL, canonical_model TEXT DEFAULT '', main_category TEXT DEFAULT '', sub_category TEXT DEFAULT '', source TEXT DEFAULT 'user_confirmed', created_at TEXT DEFAULT (datetime('now','localtime')))`,
     `CREATE TABLE IF NOT EXISTS part_compare_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT DEFAULT '', module_name TEXT NOT NULL, fingerprint TEXT NOT NULL, result_json TEXT DEFAULT '', identified_at TEXT DEFAULT (datetime('now','localtime')), UNIQUE(category, module_name))`,
+    `CREATE TABLE IF NOT EXISTS ai_bridge_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      material_key TEXT NOT NULL,
+      material_name TEXT NOT NULL,
+      category TEXT DEFAULT '',
+      question TEXT DEFAULT '',
+      cloud_result TEXT DEFAULT '',
+      local_result TEXT DEFAULT '',
+      verdict TEXT DEFAULT '',
+      reused INTEGER DEFAULT 0,
+      reuse_of INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    )`,
     `CREATE TABLE IF NOT EXISTS ai_advisor_insights (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       insight_type TEXT NOT NULL,

@@ -4,6 +4,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { getSetting } from './db/settings';
 import { logLocalAICall } from './ollama';
+import { saveBridgeLog, getRecentBridgeLog, getBridgeLogsByMaterial, materialKey } from './db/advisor';
 
 // ==================== 敏感审计（纯函数，可测） ====================
 export const SENSITIVE_PATTERNS: { re: RegExp; desc: string }[] = [
@@ -87,10 +88,13 @@ export interface BridgedInsightResult {
   cloudPrompt: string;        // 实际发送云端的脱敏提示词
   audited: boolean;
   usedLocalIntent: boolean;
+  reused?: boolean;           // 是否复用了历史洞察（防重复查询云端）
+  reuseOf?: any;              // 复用的来源记录
 }
 
-// 第一步：本地模型读建议卡上下文（含本地数据）→ 产出脱敏意图（只输出物料名/品类/问题）
-export async function extractLocalIntent(ins: any): Promise<{ material_name: string; category: string; question: string; usedLocal: boolean }> {
+// 第一步：本地模型读建议卡上下文（含本地数据 + 历史洞察）→ 产出脱敏意图（只输出物料名/品类/问题）
+// 历史注入：本地模型能看到上次洞察结论，判断本次是否重复——同题则标记 reuse，避免云端重复查询
+export async function extractLocalIntent(ins: any, history: any[] = []): Promise<{ material_name: string; category: string; question: string; usedLocal: boolean; reuse?: boolean }> {
   const fallback = {
     material_name: ins?.ref_name || '',
     category: '',
@@ -98,10 +102,16 @@ export async function extractLocalIntent(ins: any): Promise<{ material_name: str
     usedLocal: false,
   };
   try {
-    const sys = '你是成本分析助手。以下是本地发现的成本机会点（仅用于理解，绝不外传）。你的任务：判断需要向外部行业知识库查询什么，只输出 JSON：{"material_name":"对外查询的物料名称（可含通用型号，不得含成本/金额/供应商/项目信息）","category":"物料品类","question":"要查询的具体问题（一句话）"}。不得输出任何其他文字。';
-    const user = `本地机会点：${ins?.title || ''}\n详情：${(ins?.detail || '').slice(0, 600)}\n\n请输出查询意图 JSON。`;
+    const sys = '你是成本分析助手。以下是本地发现的成本机会点（仅用于理解，绝不外传）与历史洞察记录。你的任务：判断需要向外部行业知识库查询什么。只输出 JSON：{"reuse":true}（若本次查询问题与历史重复且无需更新）；否则 {"material_name":"对外查询的物料名称（可含通用型号，不得含成本/金额/供应商/项目信息）","category":"物料品类","question":"要查询的具体问题（一句话）"}。不得输出任何其他文字。';
+    const historyBlock = history.length > 0
+      ? '\n历史洞察（同物料，仅参考，判断是否重复）：\n' + history.map(h => `- ${(h.created_at || '').slice(0, 16)}：方向 ${(() => { try { return JSON.parse(h.cloud_result || '{}').trend_direction || '未知'; } catch { return '未知'; } })()}，判定 ${h.verdict || '未知'}`).join('\n')
+      : '';
+    const user = `本地机会点：${ins?.title || ''}\n详情：${(ins?.detail || '').slice(0, 600)}${historyBlock}\n\n请输出查询意图 JSON。`;
     const raw = await localChat(sys, user, 'bridge_intent', ins?.ref_name);
     const parsed = parseJsonObj(raw);
+    if (parsed && parsed.reuse === true) {
+      return { ...fallback, usedLocal: true, reuse: true };
+    }
     if (parsed && typeof parsed.material_name === 'string' && parsed.material_name.trim()) {
       return {
         material_name: parsed.material_name.trim().slice(0, 100),
@@ -145,15 +155,36 @@ export async function summarizeWithLocal(ins: any, cloud: any): Promise<BridgedI
   return fallback;
 }
 
-// 主入口：三步链路（onNeedReview 返回 true=用户确认放行）
+// 主入口：三步链路（onNeedReview 返回 true=用户确认放行；force=true 强制重新洞察）
 export async function runBridgedInsight(
   ins: any,
-  opts: { onProgress?: (m: string) => void; onNeedReview?: (prompt: string) => Promise<boolean> } = {},
+  opts: { onProgress?: (m: string) => void; onNeedReview?: (prompt: string) => Promise<boolean>; force?: boolean } = {},
 ): Promise<BridgedInsightResult> {
-  const { onProgress, onNeedReview } = opts;
-  // 第一步：本地意图（无本地模型时降级规则意图）
+  const { onProgress, onNeedReview, force } = opts;
+  const key = materialKey(ins?.ref_name || '', '');
+  // 复用检查：同一物料近期（7 天）已洞察过且未强制 → 直接复用，不再查云端
+  const recent = await getRecentBridgeLog(key, 7);
+  if (recent && !force) {
+    onProgress?.(`♻ 该物料 ${(recent.created_at || '').slice(0, 16)} 已洞察（判定 ${recent.verdict || '未知'}），直接复用，不再重复查询云端`);
+    let cloud: any = {};
+    try { cloud = JSON.parse(recent.cloud_result || '{}'); } catch { cloud = {}; }
+    let local: BridgedInsightResult['local'] = { verdict: recent.verdict || '中性', target_price: '', risk: '', actions: [], raw: '' };
+    try { const lr = JSON.parse(recent.local_result || '{}'); if (lr) local = { ...local, ...lr }; } catch { /* 保持默认 */ }
+    return { cloud, local, cloudPrompt: '', audited: true, usedLocalIntent: false, reused: true, reuseOf: recent };
+  }
+  // 第一步：本地意图（注入历史洞察，让模型判断是否重复；无本地模型时降级规则意图）
   onProgress?.('① 本地模型判断查询意图…');
-  const intent = await extractLocalIntent(ins);
+  const history = await getBridgeLogsByMaterial(key, 3);
+  const intent = await extractLocalIntent(ins, history);
+  // 本地模型判定"同题无需更新"且存在历史 → 复用
+  if (intent.reuse && recent) {
+    onProgress?.('本地模型判定与上次洞察重复，直接复用');
+    let cloud: any = {};
+    try { cloud = JSON.parse(recent.cloud_result || '{}'); } catch { cloud = {}; }
+    let local: BridgedInsightResult['local'] = { verdict: recent.verdict || '中性', target_price: '', risk: '', actions: [], raw: '' };
+    try { const lr = JSON.parse(recent.local_result || '{}'); if (lr) local = { ...local, ...lr }; } catch { /* 保持默认 */ }
+    return { cloud, local, cloudPrompt: '', audited: true, usedLocalIntent: true, reused: true, reuseOf: recent };
+  }
   // 第二步：脱敏模板 + 发送前审计
   const cloudPrompt = sanitizeForCloud(intent);
   const audit = auditSensitive(cloudPrompt);
@@ -172,6 +203,18 @@ export async function runBridgedInsight(
   // 第三步：本地总结
   onProgress?.('③ 本地模型结合本地数据出最终建议…');
   const local = await summarizeWithLocal(ins, cloud);
+  // 存档（供后续复用 + 历史时间线）
+  try {
+    await saveBridgeLog({
+      material_key: key,
+      material_name: intent.material_name || ins?.ref_name || '',
+      category: intent.category,
+      question: intent.question,
+      cloud_result: JSON.stringify(cloud),
+      local_result: JSON.stringify(local),
+      verdict: local.verdict,
+    });
+  } catch (e) { console.warn('洞察存档失败:', e); }
   onProgress?.('');
   return { cloud, local, cloudPrompt, audited: true, usedLocalIntent: intent.usedLocal };
 }

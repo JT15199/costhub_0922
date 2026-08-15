@@ -8,6 +8,7 @@
 - **开关**：settings ai_bridge_review（auto 自动脱敏 / preview 每次发送前 Modal 预览确认）；设置弹窗「双向 AI 洞察」区 + 与「一键封禁 Ollama 联网」并存
 - **降级**：本地模型未配置 → 规则默认意图 + 云端 + 云端结论；本地总结解析失败 → 云端 suggested_action
 - **测试**：src/__tests__/aiBridge.test.ts 9 用例（脱敏通过/型号长数字不误伤/¥元区间供应商拦截/模板白名单/截断）
+- **防重复洞察（记忆）**：ai_bridge_logs 表存档每次洞察（物料key归一化）；同一物料 7 天内再次洞察 → 复用确认弹窗（复用/强制最新）；本地意图提取注入历史洞察（模型自己判断同题 → reuse 标记跳过云端）；materialKey 纯函数测试
 - 📌 待办：讲解文档（演示文稿/演讲逻辑）加入该亮点页
 ### v2.3.19 自主分析引擎 autoAdvisor（2026-08-14）
 - **机制**：App 级 60 秒轮询（scheduleAppAdvisor）→ 规则发现机会/风险点 → 本地 Ollama 润色（30 分钟节流，失败降级规则文案，logLocalAICall 留痕）→ ai_advisor_insights 表 → LocalAIAssistant「自主建议」区展示

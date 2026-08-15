@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { auditSensitive, sanitizeForCloud, SENSITIVE_PATTERNS } from '../aiBridge';
+import { materialKey } from '../db/advisor';
 
 describe('auditSensitive 发送前审计', () => {
   it('正常脱敏提示词（含型号数字）通过', () => {
@@ -43,6 +44,20 @@ describe('sanitizeForCloud 模板白名单', () => {
   it('超长字段截断', () => {
     const p = sanitizeForCloud({ material_name: 'X'.repeat(300), category: 'Y'.repeat(100), question: 'Z'.repeat(500) });
     expect(p.length).toBeLessThan(600);
+  });
+});
+
+describe('materialKey 物料去重键', () => {
+  it('归一化：全角/大小写/空格横线一致', () => {
+    expect(materialKey('DDR3 512MB', '存储')).toBe(materialKey('ｄｄｒ３ 512-MB', '存储'));
+    expect(materialKey('液晶面板 M270', '显示')).toBe(materialKey('液晶面板M270', '显示'));
+  });
+  it('品类参与区分', () => {
+    expect(materialKey('屏', '显示')).not.toBe(materialKey('屏', '结构'));
+  });
+  it('空值安全', () => {
+    expect(materialKey('', '')).toBe('|');
+    expect(materialKey('屏', '')).toBeTruthy();
   });
 });
 

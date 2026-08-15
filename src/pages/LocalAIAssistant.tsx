@@ -992,6 +992,7 @@ export default function LocalAIAssistant() {
   const [bridgeReviewPrompt, setBridgeReviewPrompt] = useState<string | null>(null); // 云端发送前预览
   const [bridgeReviewResolve, setBridgeReviewResolve] = useState<((ok: boolean) => void) | null>(null);
   const [bridgeReviewMode, setBridgeReviewMode] = useState<'auto' | 'preview'>('auto'); // 云端发送前预览开关
+  const [bridgeReuseInfo, setBridgeReuseInfo] = useState<{ ins: any; recent: any } | null>(null); // 复用确认
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [elapsed, setElapsed] = useState(0); // 生成过程计时（秒）
@@ -1571,29 +1572,43 @@ export default function LocalAIAssistant() {
       message.success(status === 'done' ? '已标记处理 ✓' : '已忽略（该建议数据不变将不再提醒）');
     } catch (e: any) { message.error('操作失败：' + (e?.message || e)); await loadAdvisor(); }
   };
-  const insightForAdvisor = async (ins: any) => {
+  // 洞察执行（force=true 强制重新查询云端）
+  const doBridgedInsight = async (ins: any, force: boolean) => {
     setAdvisorInsightBusy(ins.id);
     setAdvisorProgress('');
-    message.info('双向 AI 洞察：本地判断意图 → 云端行情 → 本地结合数据出建议（约 2-4 分钟）');
     try {
       const { runBridgedInsight } = await import('../aiBridge');
       const reviewMode = (await getSetting('ai_bridge_review', 'auto')) === 'preview';
       const r = await runBridgedInsight(ins, {
+        force,
         onProgress: m => setAdvisorProgress(m),
         onNeedReview: reviewMode ? (prompt) => new Promise<boolean>(resolve => {
           setBridgeReviewPrompt(prompt);
           setBridgeReviewResolve(() => resolve);
         }) : undefined,
       });
-      const extra = `\n\n🔍 行业洞察（${fmtA(new Date().toISOString())}）：方向 ${r.cloud.trend_direction}，置信度 ${r.cloud.confidence_level}${r.cloud.magnitude_min != null ? `，近1-3月幅度约 ${r.cloud.magnitude_min}%~${r.cloud.magnitude_max}%` : ''}\n${r.cloud.summary}\n🧠 本地最终建议（结合本地数据）：判定 ${r.local.verdict}${r.local.target_price ? '；目标：' + r.local.target_price : ''}${r.local.risk ? '；风险：' + r.local.risk : ''}\n行动：${r.local.actions.join('；') || r.cloud.suggested_action}\n🔐 发送云端的提示词仅含物料名/品类/问题（已审计，本地数据不外传）`;
+      const reuseTag = r.reused && r.reuseOf ? `♻ 复用 ${fmtA(r.reuseOf.created_at)} 洞察（判定 ${r.reuseOf.verdict || '未知'}，未重复查询云端）\n` : '';
+      const extra = `\n\n${reuseTag}🔍 行业洞察（${r.reused && r.reuseOf ? fmtA(r.reuseOf.created_at) : fmtA(new Date().toISOString())}）：方向 ${r.cloud.trend_direction}，置信度 ${r.cloud.confidence_level}${r.cloud.magnitude_min != null ? `，近1-3月幅度约 ${r.cloud.magnitude_min}%~${r.cloud.magnitude_max}%` : ''}\n${r.cloud.summary}\n🧠 本地最终建议（结合本地数据）：判定 ${r.local.verdict}${r.local.target_price ? '；目标：' + r.local.target_price : ''}${r.local.risk ? '；风险：' + r.local.risk : ''}\n行动：${r.local.actions.join('；') || r.cloud.suggested_action}\n🔐 发送云端的提示词仅含物料名/品类/问题（已审计，本地数据不外传）`;
       await updateAdvisorStatus(ins.id, 'open', { detail: (ins.detail || '') + extra });
       await loadAdvisor();
-      message.success('双向 AI 洞察完成：云端行情 + 本地建议已回填');
+      message.success(r.reused ? '已复用上次洞察结果（防重复查询），如需最新行情可点「♻ 强制最新」' : '双向 AI 洞察完成：云端行情 + 本地建议已回填');
     } catch (e: any) {
       message.error('洞察失败：' + (e?.message || e) + '（需配置本地模型与云端 LLM Key 或开启原生搜索）');
     }
     setAdvisorInsightBusy(null);
     setAdvisorProgress('');
+  };
+  // 入口：近期已有洞察 → 先确认复用/强制最新（防重复花钱查云端）
+  const insightForAdvisor = async (ins: any) => {
+    try {
+      const { getRecentBridgeLog, materialKey } = await import('../db/advisor');
+      const recent = await getRecentBridgeLog(materialKey(ins.ref_name || '', ''), 7);
+      if (recent) {
+        setBridgeReuseInfo({ ins, recent });
+        return;
+      }
+    } catch { /* 查询失败直接走全链路 */ }
+    await doBridgedInsight(ins, false);
   };
   const ADVISOR_TYPE_META: Record<string, { icon: string; color: string; label: string }> = {
     stale_project_cost: { icon: '🕐', color: '#3B82F6', label: '成本久未变动' },
@@ -1905,7 +1920,35 @@ return (
           </div>
         )}
       </Modal>
-      {/* ===== 云端发送前预览确认（本地-云端桥） ===== */}
+      
+      {/* ===== 复用确认（防重复洞察） ===== */}
+      <Modal title="♻ 近期已洞察过该物料" open={!!bridgeReuseInfo} onCancel={() => setBridgeReuseInfo(null)} footer={null} width={460}>
+        {bridgeReuseInfo && (() => {
+          const { recent } = bridgeReuseInfo;
+          let verdict = recent.verdict || '未知';
+          let direction = '未知';
+          try { direction = JSON.parse(recent.cloud_result || '{}').trend_direction || '未知'; } catch { }
+          return (
+            <div>
+              <div style={{ fontSize: 13, marginBottom: 10 }}>
+                {recent.created_at ? fmtA(recent.created_at) : ''} 已对该物料做过双向 AI 洞察：
+              </div>
+              <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, padding: 10, fontSize: 12, lineHeight: 1.8, marginBottom: 12 }}>
+                行情方向：<b>{direction}</b> · 判定：<b style={{ color: verdict === '机会' ? '#16A34A' : verdict === '风险' ? '#DC2626' : '#64748B' }}>{verdict}</b><br />
+                {recent.question ? '查询问题：' + recent.question : ''}
+              </div>
+              <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12 }}>
+                直接复用可避免重复搜索（云端查询消耗资源）；物料行情 7 天内一般变化不大。需要最新行情可强制重新查询。
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <Button onClick={() => { const i = bridgeReuseInfo.ins; setBridgeReuseInfo(null); doBridgedInsight(i, false); }}>♻ 复用上次结果</Button>
+                <Button type="primary" onClick={() => { const i = bridgeReuseInfo.ins; setBridgeReuseInfo(null); doBridgedInsight(i, true); }}>🔍 强制查询最新行情</Button>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
+{/* ===== 云端发送前预览确认（本地-云端桥） ===== */}
       <Modal title="🔐 发送前确认（脱敏提示词）" open={!!bridgeReviewPrompt} onOk={() => { bridgeReviewResolve?.(true); setBridgeReviewPrompt(null); }} onCancel={() => { bridgeReviewResolve?.(false); setBridgeReviewPrompt(null); }} okText="确认发送" cancelText="取消" width={560}>
         <div style={{ fontSize: 12, color: '#64748B', marginBottom: 8, lineHeight: 1.6 }}>
           以下内容将发送给<b>云端模型</b>，仅含物料名/品类/问题（已通过敏感审计）。本地成本、供应商、项目数据不会包含。
