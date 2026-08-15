@@ -4,7 +4,7 @@ import { Button, Input, Select, Space, Modal, Form, InputNumber, Tag, message, P
 import type { TableRowSelection } from 'antd/es/table/interface';
 import { PlusOutlined, EditOutlined, DeleteOutlined, DownloadOutlined, UploadOutlined, HistoryOutlined, SearchOutlined, ShopOutlined, ToolOutlined, CheckOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
-import { getParts, savePart, deletePart, getCategories, getPriceHistory, getMainCategories, getPartSuppliers, addPartSupplier, updatePartSupplier, deletePartSupplier, getSupplierPriceHistory } from '../db';
+import { getParts, savePart, deletePart, getCategories, getPriceHistory, getMainCategories, getPartSuppliers, addPartSupplier, updatePartSupplier, deletePartSupplier, getSupplierPriceHistory, getPartCostChangeLogs } from '../db';
 import { summarizeSupplierTrend, supplierTrendTag } from '../supplierTrend';
 import { MAIN_CATEGORIES, SUB_CATEGORIES, getCategoryColor } from '../constants';
 import DataTable from '../components/DataTable';
@@ -32,6 +32,7 @@ export default function PartsLibrary() {
   const [supplierForm] = Form.useForm();
   const [editingSupplier, setEditingSupplier] = useState<any>(null);
   const [supplierLoading, setSupplierLoading] = useState(false);
+  const [partChangeLogs, setPartChangeLogs] = useState<any[]>([]);
 
   useEffect(() => { (async () => { try { setMainCats(await getMainCategories()); } catch(e) {} })(); }, []);
   // 驾驶舱 AI 洞察直达：搜索指定物料（costhub-open-part，detail: { search }）
@@ -226,6 +227,7 @@ export default function PartsLibrary() {
       const partSuppliers = await getPartSuppliers(part.id);
       setSuppliers(partSuppliers);
       refreshSupplierTrends(partSuppliers, part);
+      try { setPartChangeLogs(await getPartCostChangeLogs(part.id, 8)); } catch { setPartChangeLogs([]); }
     } catch (e) {
       console.error('Failed to load suppliers:', e);
       message.error('加载供应商失败');
@@ -621,7 +623,25 @@ export default function PartsLibrary() {
             );
           }}
         />
-      </Modal>
+              {partChangeLogs.length > 0 && (
+          <div style={{ marginTop: 14, borderTop: '1px solid #EEF0F3', paddingTop: 10 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6, color: '#1D1D1F' }}>成本变动追溯</div>
+            <DataTable tableId="parts_change_trace" dataSource={partChangeLogs} rowKey="id" size="small" pagination={false}
+              columns={[
+                { title: '时间', dataIndex: 'changed_at', width: 140, render: (v: string) => <span style={{ fontSize: 11.5 }}>{v?.slice(0, 16)}</span> },
+                { title: '类型', dataIndex: 'change_type', width: 120, render: (v: string) => <Tag color={v === 'part_supplier_price' ? 'blue' : 'purple'} style={{ margin: 0, fontSize: 10.5 }}>{v === 'part_supplier_price' ? '供应商报价变动' : '加权成本变化'}</Tag> },
+                { title: '变动', key: 'chg', width: 150, align: 'right' as const, render: (_: any, r: any) => <span style={{ fontSize: 11.5, fontVariantNumeric: 'tabular-nums' }}>¥{Number(r.old_value || 0).toFixed(4)} → <b style={{ color: Number(r.new_value) > Number(r.old_value) ? '#DC2626' : '#16A34A' }}>¥{Number(r.new_value || 0).toFixed(4)}</b></span> },
+                { title: '原因', dataIndex: 'change_reason', ellipsis: true, render: (v: string) => <span style={{ fontSize: 11.5 }}>{v || '-'}</span> },
+                { title: '影响项目', dataIndex: 'impact_scope', width: 130, render: (v: string) => {
+                  let arr: string[] = [];
+                  try { arr = JSON.parse(v || '[]'); } catch { arr = []; }
+                  return arr.length ? <span style={{ fontSize: 11.5 }}>{arr.join('、')}</span> : <span style={{ fontSize: 11.5, color: '#94A3B8' }}>-</span>;
+                } },
+              ]}
+            />
+          </div>
+        )}
+</Modal>
     </div>
   );
 }

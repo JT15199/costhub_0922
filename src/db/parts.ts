@@ -224,3 +224,11 @@ async function logPartCostChange(partId: number, partName: string, oldCost: numb
 export async function getSupplierPriceHistory(partId: number, supplierName: string) {
   return (await getDb()).select<any[]>('SELECT * FROM part_supplier_price_history WHERE part_id = ? AND supplier_name = ? ORDER BY changed_at DESC, id DESC', [partId, supplierName]);
 }
+
+// 成本变动追溯：该器件的 供应商报价变动 + 加权成本变化 日志（含影响项目）
+export async function getPartCostChangeLogs(partId: number, limit = 10) {
+  return (await getDb()).select<any[]>(
+    'SELECT * FROM cost_change_log WHERE ref_type = ? AND ref_id = ? AND change_type IN (?,?) ORDER BY changed_at DESC, id DESC LIMIT ?',
+    ['part', partId, 'part_supplier_price', 'part_cost', limit]
+  );
+}
