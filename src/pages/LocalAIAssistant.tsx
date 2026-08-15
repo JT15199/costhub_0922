@@ -837,7 +837,6 @@ ${itemList}` },
         if (streamErr) throw new Error(streamErr);
         let text = fullText.trim() || reasoningText.trim();
         // 诊断：打印模型原始输出前300字符，便于排查字段缺失
-        console.log('[BOM分类] 模型原始输出:', text.slice(0, 300));
         // 兼容：模型可能输出 ```json 包裹或带说明文字
         // 先剥掉 markdown 代码块
         text = text.replace(/```json/gi, '').replace(/```/g, '');

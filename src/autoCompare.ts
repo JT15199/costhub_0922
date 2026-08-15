@@ -67,7 +67,6 @@ function parseAiGroups(text: string, ungrouped: any[]): any[] {
     if (idxs.length >= 2) groups.push({ name: m[1].trim(), reason: '', rows: idxs.map(i => ungrouped[i]) });
   });
   if (groups.length === 0 && text.trim() && !/无/.test(text)) {
-    console.log('[报价比对] 模型输出未识别出疑似组（视为无）：', text.slice(0, 200).replace(/\n/g, ' '));
   }
   return groups;
 }

@@ -157,9 +157,6 @@ async function callSingleLLMProviderMessages(
   }
 
   // 详细日志：查看完整响应结构
-  console.log('[LLM Response] Provider:', provider.provider_name);
-  console.log('[LLM Response] Status:', res.status);
-  console.log('[LLM Response] Data structure:', JSON.stringify(data, null, 2).slice(0, 1000));
 
   const content = data.choices?.[0]?.message?.content;
   if (typeof content !== 'string' || !content.trim()) {
@@ -466,7 +463,6 @@ function extractJSON(text: string): any {
     }
 
     try {
-      console.log('[extractJSON] 尝试修复后的JSON:', fixed.slice(0, 300));
       return JSON.parse(fixed);
     } catch (e2: any) {
       console.error('[extractJSON] 修复后仍然失败:', e2.message);
@@ -1872,11 +1868,6 @@ export async function createStructuredInsight(
     ),
   ].join('\n\n');
 
-  console.log('[createStructuredInsight] 调用LLM');
-  console.log('[createStructuredInsight] Skill:', skill.name);
-  console.log('[createStructuredInsight] 物料:', materialName);
-  console.log('[createStructuredInsight] 来源数量:', limitedSources.length);
-  console.log('[createStructuredInsight] sourceContext长度:', sourceContext.length);
 
   try {
     const raw = await callLLM(
@@ -1885,9 +1876,6 @@ export async function createStructuredInsight(
       `请为「${materialName}」生成本次洞察的最终结构化结论。`
     );
 
-    console.log('[createStructuredInsight] LLM原始返回长度:', raw.length);
-    console.log('[createStructuredInsight] LLM原始返回内容（前500字符）:', raw.slice(0, 500));
-    console.log('[createStructuredInsight] LLM原始返回内容（最后200字符）:', raw.slice(-200));
 
     const parsed = extractJSON(raw);
     // 兜底对象（解析失败降级）必须显式失败，不能静默存库/展示
@@ -1901,7 +1889,6 @@ export async function createStructuredInsight(
         `原始错误: ${parsed._parse_error}`
       );
     }
-    console.log('[createStructuredInsight] JSON解析成功');
     return normalizeStructuredResult(parsed, skill);
   } catch (e: any) {
     console.error('[createStructuredInsight] 错误详情:', e);

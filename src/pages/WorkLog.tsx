@@ -259,7 +259,6 @@ export default function WorkLog() {
 
       // ===== 第一步：压缩提炼（控制 token 占用，日志再多也不爆） =====
       setSummaryPhase('reading');
-      console.log('[AI总结] 第一步：压缩开始，日志条数:', rows.length, 'logText长度:', logText.length);
       let condensedAcc = '';
       const condensePrompt = `你是工作日志提炼助手。把下面的工作记录压缩成结构化的素材，供后续撰写总结使用。
 
@@ -324,11 +323,9 @@ export default function WorkLog() {
 
       // 流式调用（复用 BOM 分类验证可靠的 startOllamaStream，实时反馈）
       setSummaryPhase('generating');
-      console.log('[AI总结] 第二步开始，模型:', model, '压缩后长度:', condensedText.length);
       let fullText = '';
       let step2Error = '';
       let summaryReasoning = '';
-      console.log('[AI总结] 第二步：调用 startOllamaStream, baseUrl:', baseUrl);
       await new Promise<void>((resolve) => {
         startOllamaStream(
           baseUrl, model,
@@ -339,9 +336,7 @@ export default function WorkLog() {
           (e) => { console.log('[AI总结] 第二步 error:', e); step2Error = e; resolve(); },
           { num_predict: 4000, temperature: 0.3, think: false, endpoint: 'native', json: false },
         );
-        console.log('[AI总结] startOllamaStream 已发起（异步等待事件）');
       });
-      console.log('[AI总结] 第二步流程结束，step2Error:', step2Error || '无', 'fullText长度:', fullText.length);
       setSummarizing(false);
       setSummaryPhase(step2Error ? 'error' : fullText ? 'done' : 'error');
       if (step2Error) {
