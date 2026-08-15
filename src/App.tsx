@@ -26,7 +26,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import {
   BarChartOutlined, ToolOutlined, AppstoreOutlined, ProjectOutlined,
   ShopOutlined, LineChartOutlined, FileTextOutlined, PartitionOutlined, CalendarOutlined,
-  TeamOutlined, SettingOutlined, RobotOutlined, BookOutlined, BulbOutlined
+  TeamOutlined, SettingOutlined, RobotOutlined, BookOutlined, BulbOutlined, LockOutlined
 } from '@ant-design/icons';
 
 // 导航分区（v2.3.19 界面轻量化第一步：12 项平铺 → 驾驶舱 + 三区收敛，页面零改动）
@@ -278,6 +278,13 @@ export default function App() {
         <LoginScreen onUnlock={handleUnlock} onEnterRestricted={handleEnterRestricted} />
       ) : (
         <>
+      {authed === false && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 1200, background: '#FFF7E6', borderBottom: '1px solid #FFD591', padding: '7px 16px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, color: '#874D00' }}>
+          <LockOutlined style={{ color: '#D46B08' }} />
+          <span><b>受限模式</b>：当前未解锁，所有数据不可见、写入已跳过。</span>
+          <a style={{ marginLeft: 'auto', color: '#D46B08', fontWeight: 600, cursor: 'pointer' }} onClick={() => setAuthed(null)}>返回登录页解锁 →</a>
+        </div>
+      )}
       {autoProgress && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 1000, background: '#EEF2FF', borderBottom: '1px solid #C7D2FE', padding: '3px 14px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: '#334155' }}>
           <RobotOutlined className="ai-breathe" style={{ color: '#0A84FF' }} />

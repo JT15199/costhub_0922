@@ -289,6 +289,7 @@
   - **首次使用提示**：登录页显示初始用户名/密码（auth_password_changed 标记，改过密码后不再提示）
   - **密码找回**：登录页双击 Logo 可显示真实密码（明文副本存 auth_password_plain，仅本机；改密码时同步更新）——**界面不提示此功能**，仅作为隐藏的后备手段
   - **密码错误也可进入**（受限模式）：所有数据库查询返回空、写入静默跳过（db.ts Proxy 拦截 getDb），页面不显示任何数据
+  - **受限模式提示条** (v2.3.19, 2026-08-15)：进入受限模式后 App 顶部固定琥珀色提示条「受限模式：当前未解锁，所有数据不可见、写入已跳过」+「返回登录页解锁 →」链接（setAuthed(null) 回登录页）；登录页勾选说明 + 进入后常驻提示双保险，防止误以为数据丢失
   - 受限模式下设置页仍可打开（改密码走 getRawDb 绕过锁）
   - 设置页"安全设置"标签页可修改用户名/密码（验证当前密码，新密码至少 4 位）
   - 认证相关函数：ensureAuthPassword / verifyPassword / changePassword / isFirstUse / getPlainPassword / getUsername / changeUsername / isDataLocked / setDataLocked
