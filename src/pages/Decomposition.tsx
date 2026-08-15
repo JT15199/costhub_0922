@@ -204,6 +204,7 @@ export default function Decomposition(_props: any) {
   // 树交互升级：血缘链高亮 / 聚焦 / 面包屑
   const [focusNodeId, setFocusNodeId] = useState<number | null>(null);
   const [chainPath, setChainPath] = useState<{ id: number; name: string }[]>([]);
+  const chainTimerRef = useRef<any>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [trendItems, setTrendItems] = useState<any[]>([]);
   const [snapshotMap, setSnapshotMap] = useState<Record<number, any>>({});
@@ -2310,11 +2311,20 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                 onNodeClick={onNodeClick}
                 onNodeMouseEnter={(_, node: any) => {
                   if (focusNodeId) return;
-                  const chain = getAncestorChain(Number(node.id));
-                  setChainPath(chain);
-                  applyChainHighlight(new Set(chain.map(c => c.id)), false);
+                  // 防抖：快速扫过多个节点时不反复全量更新
+                  if (chainTimerRef.current) clearTimeout(chainTimerRef.current);
+                  chainTimerRef.current = setTimeout(() => {
+                    const chain = getAncestorChain(Number(node.id));
+                    setChainPath(chain);
+                    applyChainHighlight(new Set(chain.map(c => c.id)), false);
+                  }, 120);
                 }}
-                onNodeMouseLeave={() => { if (!focusNodeId) { setChainPath([]); clearChainHighlight(); } }}
+                onNodeMouseLeave={() => {
+                  if (focusNodeId) return;
+                  if (chainTimerRef.current) { clearTimeout(chainTimerRef.current); chainTimerRef.current = null; }
+                  setChainPath([]);
+                  clearChainHighlight();
+                }}
                 onNodeDoubleClick={(_, node: any) => {
                   if (focusNodeId === Number(node.id)) {
                     setFocusNodeId(null); setChainPath([]); clearChainHighlight();

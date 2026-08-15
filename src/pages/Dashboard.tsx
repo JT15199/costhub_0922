@@ -154,7 +154,16 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           <strong>加载失败，错误信息：</strong><br />{loadError}
         </div>
       )}
-      {!loadError && <div style={{ marginTop: 16, color: '#64748B' }}>暂无数据，请先添加器件或项目。</div>}
+      {!loadError && (
+        <div style={{ marginTop: 24, padding: 32, background: '#fff', border: '1px solid #E8ECF1', borderRadius: 14, textAlign: 'center' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#1D1D1F', marginBottom: 6 }}>开始你的成本管理</div>
+          <div style={{ fontSize: 12.5, color: '#6E6E73', marginBottom: 16 }}>先添加器件和项目，驾驶舱会自动生成成本洞察、报价情报与 AI 建议</div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+            <Button type="primary" onClick={() => onNavigate?.('parts')}>添加器件</Button>
+            <Button onClick={() => onNavigate?.('projects')}>创建项目</Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 
