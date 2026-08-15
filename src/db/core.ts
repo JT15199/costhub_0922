@@ -166,7 +166,7 @@ async function ensureSchema(d: Database) {
       created_at TEXT DEFAULT (datetime('now','localtime')),
       updated_at TEXT DEFAULT (datetime('now','localtime'))
     )`,
-    `CREATE TABLE IF NOT EXISTS part_insights (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT DEFAULT '', module_name TEXT NOT NULL, insight_json TEXT DEFAULT '', status TEXT DEFAULT 'unread', created_at TEXT DEFAULT (datetime('now','localtime')), UNIQUE(category, module_name))`,
+    `CREATE TABLE IF NOT EXISTS part_insights (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT DEFAULT '', module_name TEXT NOT NULL, insight_json TEXT DEFAULT '', status TEXT DEFAULT 'unread', handled_json TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now','localtime')), UNIQUE(category, module_name))`,
     `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT DEFAULT '')`,
     `CREATE TABLE IF NOT EXISTS api_providers (id INTEGER PRIMARY KEY AUTOINCREMENT, provider_type TEXT NOT NULL, provider_name TEXT NOT NULL, api_key TEXT DEFAULT '', base_url TEXT DEFAULT '', model_name TEXT DEFAULT '', is_active INTEGER DEFAULT 0, priority INTEGER DEFAULT 0, is_preset INTEGER DEFAULT 0, monthly_quota_note TEXT DEFAULT '', registration_url TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now','localtime')))`,
     `CREATE TABLE IF NOT EXISTS part_suppliers (id INTEGER PRIMARY KEY AUTOINCREMENT, part_id INTEGER NOT NULL, supplier_name TEXT NOT NULL, price REAL DEFAULT 0, share_ratio REAL DEFAULT 0, is_active INTEGER DEFAULT 1, remark TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`,
@@ -288,7 +288,9 @@ async function ensureSchema(d: Database) {
     console.error('创建 ai_request_logs 表失败:', e);
   }
 
-  // 为 trend_items 表添加缺失的列
+    // part_insights 补 handled_json（已处理组快照，供「已处理」视图查看/撤销）
+  await ignoreSchemaError(d.execute("ALTER TABLE part_insights ADD COLUMN handled_json TEXT DEFAULT ''"));
+// 为 trend_items 表添加缺失的列
   await ignoreSchemaError(d.execute('ALTER TABLE trend_items ADD COLUMN magnitude_min REAL DEFAULT NULL'));
   await ignoreSchemaError(d.execute('ALTER TABLE trend_items ADD COLUMN magnitude_max REAL DEFAULT NULL'));
   await ignoreSchemaError(d.execute("ALTER TABLE trend_items ADD COLUMN magnitude_reference TEXT DEFAULT ''"));

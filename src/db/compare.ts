@@ -64,6 +64,29 @@ export async function upsertInsight(category: string, moduleName: string, insigh
 }
 
 
+// ===== 已处理记录（确认/标记快照，供查看与撤销） =====
+export async function appendHandledInsight(category: string, moduleName: string, item: any) {
+  const d = await getDb();
+  const rows = await d.select<any[]>('SELECT handled_json FROM part_insights WHERE category = ? AND module_name = ?', [category || '', moduleName]);
+  let arr: any[] = [];
+  try { arr = JSON.parse(rows?.[0]?.handled_json || '[]'); } catch { arr = []; }
+  arr.push(item);
+  await d.execute('UPDATE part_insights SET handled_json = ? WHERE category = ? AND module_name = ?', [JSON.stringify(arr), category || '', moduleName]);
+}
+export async function removeHandledInsight(category: string, moduleName: string, index: number) {
+  const d = await getDb();
+  const rows = await d.select<any[]>('SELECT handled_json FROM part_insights WHERE category = ? AND module_name = ?', [category || '', moduleName]);
+  let arr: any[] = [];
+  try { arr = JSON.parse(rows?.[0]?.handled_json || '[]'); } catch { arr = []; }
+  arr.splice(index, 1);
+  await d.execute('UPDATE part_insights SET handled_json = ? WHERE category = ? AND module_name = ?', [JSON.stringify(arr), category || '', moduleName]);
+}
+// 精确删除别名（撤销确认/标记用）
+export async function deletePartAliasExact(moduleName: string, aliasName: string, aliasModel: string, source: string) {
+  const d = await getDb();
+  await d.execute('DELETE FROM part_aliases WHERE module_name = ? AND alias_name = ? AND alias_model = ? AND source = ?', [moduleName || '', aliasName, aliasModel || '', source]);
+}
+
 export async function getInsights() {
   return (await getDb()).select<any[]>('SELECT * FROM part_insights ORDER BY created_at DESC');
 }

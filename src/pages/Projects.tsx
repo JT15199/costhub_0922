@@ -4,7 +4,7 @@ import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOut
 import * as XLSX from 'xlsx';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
-import { getProjects, saveProject, deleteProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, syncProjectModulesToLibrary, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, deleteSku, saveSkuDiff, deleteSkuDiff, getAllSkuDiffs, getAllSkus, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead, markInsightUnread } from '../db';
+import { getProjects, saveProject, deleteProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, syncProjectModulesToLibrary, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, deleteSku, saveSkuDiff, deleteSkuDiff, getAllSkuDiffs, getAllSkus, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead, markInsightUnread, appendHandledInsight, removeHandledInsight, deletePartAliasExact } from '../db';
 import { TIERS, PROJECT_STATUSES, PROJECT_TYPES, SCREEN_SIZES, RESOLUTIONS, REFRESH_RATES, PANEL_TYPES, MAIN_CATEGORIES, SUB_CATEGORIES, MEASURE_STATUSES, getCategoryColor } from '../constants';
 import { getMainCategories, getSetting } from '../db';
 import { startOllamaStream, logLocalAICall } from '../ollama';
@@ -321,7 +321,7 @@ export default function Projects() {
   // ====== 报价情报（后台识别由 App 级驱动：空闲/导入/改价自动扫描，发现问题在此提醒） ======
   const [insightModal, setInsightModal] = useState(false);
   const [insights, setInsights] = useState<any[]>([]);
-  const [insightPendingOnly, setInsightPendingOnly] = useState(true); // 待处理/全部
+  const [insightView, setInsightView] = useState<'pending' | 'all' | 'done'>('pending'); // 待处理/全部/已处理
   const [insightBusyKey, setInsightBusyKey] = useState<string | null>(null); // 正在处理的 模块id|组index
   const [unreadMods, setUnreadMods] = useState<Set<string>>(new Set());
   const loadInsights = async () => {
@@ -400,6 +400,10 @@ export default function Projects() {
       }
       const allDone = await rebuildModuleInsight(ins);
       if (allDone) await markInsightRead(ins.category, ins.module_name); // 全部处理完才归档已读；还有其他组则保持待处理
+      await appendHandledInsight(ins.category, ins.module_name, {
+        name: g.name, type: g.type || 'rule', action: 'confirmed', rows: g.rows, diff: g.diff || 0,
+        handled_at: new Date().toLocaleString('zh-CN', { hour12: false }),
+      });
       window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
       // 潜在节省 = 组内最高单价 - 最低单价（每台），提示下一步动作
       const prices = g.rows.map((r: any) => r.cost || 0);
@@ -425,6 +429,10 @@ export default function Projects() {
       await savePartAlias({ module_name: ins.module_name, alias_name: `#NEG#${keys}`, alias_model: '', canonical_name: '', canonical_model: '', source: 'marked_different' });
       const allDone = await rebuildModuleInsight(ins);
       if (allDone) await markInsightRead(ins.category, ins.module_name); // 全部处理完才归档；还有其他组则保持待处理
+      await appendHandledInsight(ins.category, ins.module_name, {
+        name: g.name, type: g.type || 'rule', action: 'rejected', rows: g.rows, diff: g.diff || 0,
+        handled_at: new Date().toLocaleString('zh-CN', { hour12: false }),
+      });
       window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
       await loadInsights(); // 后台校正
       message.success('已标记不同，AI 不再建议该组合（该组已从情报中消除）');
@@ -445,6 +453,30 @@ export default function Projects() {
     } catch (e: any) {
       console.error('标记已读失败:', e);
       await loadInsights();
+    }
+  };
+  // 撤销已处理：删别名 → 重算 → 组回到待处理
+  const undoHandledInsight = async (ins: any, hi: number) => {
+    let item: any = null;
+    try {
+      const arr = JSON.parse(ins.handled_json || '[]');
+      item = arr[hi];
+      if (!item) return;
+      if (item.action === 'confirmed') {
+        for (const r of item.rows || []) {
+          await deletePartAliasExact(ins.module_name, r.name, r.model || '', 'user_confirmed');
+        }
+      } else {
+        const keys = (item.rows || []).map((r: any) => partKey(r)).sort().join(';');
+        await deletePartAliasExact(ins.module_name, `#NEG#${keys}`, '', 'marked_different');
+      }
+      await removeHandledInsight(ins.category, ins.module_name, hi);
+      await rebuildModuleInsight(ins);
+      await loadInsights();
+      message.success(item.action === 'confirmed' ? '已撤销确认，该组已恢复（回到待处理重新识别）' : '已撤销标记，该组已恢复（AI 可重新建议）');
+    } catch (e: any) {
+      console.error('撤销失败:', e);
+      message.error('撤销失败：' + (e?.message || e));
     }
   };
   // 恢复待处理：从「全部」拉回「待处理」
@@ -2906,15 +2938,53 @@ export default function Projects() {
           确认同一 → 沉淀别名自动归组（组即消除，不再重现）；标记不同 → AI 永不再建议；归档（已读）→ 移出待处理，可在「全部」查看或恢复。
         </div>
         <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Segmented size="small" value={insightPendingOnly ? 'pending' : 'all'} options={[{ label: '待处理', value: 'pending' }, { label: '全部', value: 'all' }]}
-            onChange={(v: any) => setInsightPendingOnly(v === 'pending')} />
-          <span style={{ fontSize: 11.5, color: '#94A3B8' }}>待处理 = 未读情报；归档的可在「全部」查看/恢复</span>
+          <Segmented size="small" value={insightView} options={[{ label: '待处理', value: 'pending' }, { label: '全部', value: 'all' }, { label: '已处理', value: 'done' }]}
+            onChange={(v: any) => setInsightView(v)} />
+          <span style={{ fontSize: 11.5, color: '#94A3B8' }}>待处理 = 未读；「已处理」保留确认/标记记录，可撤销恢复</span>
         </div>
         {(() => {
-          const list = insights.filter(ins => insightPendingOnly ? ins.status === 'unread' : true);
+          if (insightView === 'done') {
+            const doneList = insights.filter(ins => {
+              try { return (JSON.parse(ins.handled_json || '[]') || []).length > 0; } catch { return false; }
+            });
+            if (doneList.length === 0) {
+              return <div style={{ textAlign: 'center', padding: 40, color: '#94A3B8', fontSize: 12 }}>暂无已处理记录——确认同一/标记不同后会记录在这里，可随时撤销</div>;
+            }
+            return doneList.map((ins: any, idx: number) => {
+              let handled: any[] = [];
+              try { handled = JSON.parse(ins.handled_json || '[]'); } catch { handled = []; }
+              return (
+                <div key={idx} style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>
+                    📦 {ins.module_name} <Tag color="green" style={{ marginLeft: 8 }}>已处理 {handled.length} 组</Tag>
+                  </div>
+                  {handled.map((h: any, hi: number) => (
+                    <div key={hi} style={{ border: '1px solid #E8ECF1', borderRadius: 8, marginBottom: 6, padding: '8px 12px', background: '#FAFBFC' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                        <b style={{ fontSize: 12.5, color: h.action === 'confirmed' ? '#16A34A' : '#DC2626' }}>{h.action === 'confirmed' ? '✓' : '✗'} {h.name}</b>
+                        <Tag color={h.action === 'confirmed' ? 'green' : 'red'} style={{ margin: 0 }}>{h.action === 'confirmed' ? '已确认同一' : '已标记不同'}</Tag>
+                        <span style={{ fontSize: 10.5, color: '#94A3B8' }}>{h.handled_at}</span>
+                      </div>
+                      {(h.rows || []).map((r: any, ri: number) => (
+                        <div key={ri} style={{ fontSize: 12, display: 'flex', gap: 10, padding: '1px 0' }}>
+                          <b style={{ width: 70 }}>{r.project}</b>
+                          <span style={{ width: 180, color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name} {r.model}</span>
+                          <span style={{ fontVariantNumeric: 'tabular-nums' }}>¥{r.cost.toFixed(2)} × {r.quantity}</span>
+                        </div>
+                      ))}
+                      <div style={{ marginTop: 6 }}>
+                        <Button size="small" onClick={() => undoHandledInsight(ins, hi)}>↩ 撤销（恢复该组重新识别）</Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            });
+          }
+          const list = insights.filter(ins => insightView === 'pending' ? ins.status === 'unread' : true);
           return list.length === 0
             ? <div style={{ textAlign: 'center', padding: 40, color: '#94A3B8', fontSize: 12 }}>
-                {insightPendingOnly ? '没有待处理的情报（未读）——导入 BOM 或修改报价后会自动后台识别' : '暂无情报——导入 BOM 或修改报价后会自动后台识别'}
+                {insightView === 'pending' ? '没有待处理的情报（未读）——导入 BOM 或修改报价后会自动后台识别' : '暂无情报——导入 BOM 或修改报价后会自动后台识别'}
               </div>
             : list.map((ins, idx) => {
                 let data: any[] = [];
