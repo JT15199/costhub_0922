@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Button, Input, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Badge, Switch } from 'antd';
+import { Button, Input, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Switch, Segmented } from 'antd';
 import {
   SendOutlined, RobotOutlined, PlusOutlined, HistoryOutlined,
   ThunderboltOutlined, TeamOutlined, ClearOutlined,
@@ -982,7 +982,7 @@ export default function LocalAIAssistant() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // ===== 自主建议（后台分析引擎） =====
   const [advisorList, setAdvisorList] = useState<any[]>([]);
-  const [advisorOpen, setAdvisorOpen] = useState(false);
+  const [advisorTab, setAdvisorTab] = useState<'chat' | 'advice'>('chat'); // 主视图：对话 / 自主建议
   const [advisorRunning, setAdvisorRunning] = useState(false);
   const [advisorShowDone, setAdvisorShowDone] = useState(false);
   const [advisorLastRun, setAdvisorLastRun] = useState('');
@@ -1630,74 +1630,7 @@ return (
             <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{connStatus === 'ok' ? model || '已连接' : connStatus === 'fail' ? '连接失败' : '未连接'}</span>
             <Button size="small" type="text" icon={<SyncOutlined />} onClick={testConnection} />
           </div>
-      {/* ===== 自主建议（后台分析引擎） ===== */}
-      <div style={{ margin: '0 12px 10px', border: '1px solid var(--color-border)', borderRadius: 10, background: 'var(--color-surface)', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: 'pointer', userSelect: 'none' }} onClick={() => setAdvisorOpen(!advisorOpen)}>
-          <span style={{ fontSize: 15 }}>🤖</span>
-          <b style={{ fontSize: 13 }}>自主建议</b>
-          {(() => { const n = advisorList.filter((x: any) => x.status === 'open').length; return n > 0 ? <Badge count={n} size="small" /> : null; })()}
-          <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {advisorLastRun ? `上次分析 ${fmtA(advisorLastRun)}` : '尚未运行'}
-          </span>
-          <span style={{ fontSize: 11, color: '#8B5CF6' }}>{advisorOpen ? '收起 ▲' : '展开 ▼'}</span>
-        </div>
-        {advisorOpen && (
-          <div style={{ padding: '0 12px 12px' }}>
-            <div style={{ marginBottom: 8, fontSize: 11.5, color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
-              空闲时自动分析：项目成本长期未变动、大额物料久未调价、领域超目标、单一供应商依赖——以资深成本经理视角找机会/风险点。
-              处理方式：<b>复制提示词</b>交给 AI 执行议价/分析，或 <b>生成行业洞察</b>自动查行情回填结论。
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <Button size="small" type="primary" loading={advisorRunning} onClick={runAdvisorNow}>⚡ 立即分析</Button>
-              <Button size="small" type={advisorShowDone ? 'default' : 'primary'} onClick={() => setAdvisorShowDone(!advisorShowDone)}>
-                {advisorShowDone ? '显示全部' : '仅看待处理'}
-              </Button>
-              {advisorProgress && <span style={{ fontSize: 11, color: '#8B5CF6' }}><Spin size="small" style={{ marginRight: 4 }} />{advisorProgress}</span>}
-            </div>
-            {(() => {
-              const list = advisorShowDone ? advisorList : advisorList.filter((x: any) => x.status === 'open');
-              if (list.length === 0) {
-                return <div style={{ fontSize: 12, color: '#94A3B8', padding: '14px 0', textAlign: 'center' }}>暂无建议——系统空闲时自动分析，或点「立即分析」手动触发</div>;
-              }
-              return list.map((ins: any) => {
-                const meta = ADVISOR_TYPE_META[ins.insight_type] || { icon: '💡', color: '#64748B', label: ins.insight_type };
-                return (
-                  <div key={ins.id} style={{ border: '1px solid ' + meta.color + '33', borderLeft: '3px solid ' + meta.color, borderRadius: 8, padding: '8px 10px', marginBottom: 8, background: ins.status === 'open' ? 'var(--color-surface)' : '#F8FAFC', opacity: ins.status === 'open' ? 1 : 0.75 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                      <span>{meta.icon}</span>
-                      <b style={{ fontSize: 12.5 }}>{ins.title}</b>
-                      <Tag color={meta.color} style={{ margin: 0 }}>{meta.label}</Tag>
-                      {ins.source === 'ai' && <Tag color="purple" style={{ margin: 0 }}>AI 润色</Tag>}
-                      {ins.status !== 'open' && <Tag style={{ margin: 0 }} color={ins.status === 'done' ? 'green' : 'default'}>{ins.status === 'done' ? '已处理' : '已忽略'}</Tag>}
-                      <span style={{ marginLeft: 'auto', fontSize: 10.5, color: '#94A3B8' }}>{fmtA(ins.created_at)}</span>
-                    </div>
-                    <div style={{ fontSize: 12, color: '#475569', marginTop: 4, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{ins.detail}</div>
-                    {ins.prompt && (
-                      advisorShowPrompt === ins.id ? (
-                        <div style={{ marginTop: 6, background: '#F5F7FF', border: '1px dashed #C7D2FE', borderRadius: 6, padding: '6px 8px', fontSize: 11.5, color: '#4F46E5', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-                          💬 提示词：{ins.prompt}
-                          <div style={{ marginTop: 4 }}><Button size="small" type="text" onClick={() => setAdvisorShowPrompt(null)}>收起 ▲</Button></div>
-                        </div>
-                      ) : (
-                        <div style={{ marginTop: 6 }}>
-                          <Button size="small" type="text" onClick={() => setAdvisorShowPrompt(ins.id)} style={{ color: '#4F46E5', padding: 0, fontSize: 11.5 }}>💬 查看可执行提示词 ▾</Button>
-                        </div>
-                      )
-                    )}
-                    <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      <Button size="small" onClick={() => copyPrompt(ins.prompt)}>📋 复制提示词</Button>
-                      {ins.status === 'open' && <Button size="small" loading={advisorInsightBusy === ins.id} onClick={() => insightForAdvisor(ins)}>{advisorInsightBusy === ins.id ? '洞察中…' : '🔍 生成行业洞察'}</Button>}
-                      {ins.status === 'open' && <Button size="small" type="primary" onClick={() => setAdvisorStatus(ins.id, 'done')}>✓ 已处理</Button>}
-                      {ins.status === 'open' && <Button size="small" onClick={() => setAdvisorStatus(ins.id, 'dismissed')}>忽略</Button>}
-                    </div>
-                  </div>
-                );
-              });
-            })()}
-          </div>
-        )}
-      </div>
-          {/* 运行状态栏：让用户始终知道后台在跑 */}
+      {/* 运行状态栏：让用户始终知道后台在跑 */}
           {streaming && (
             <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--color-primary)', background: 'var(--color-accent-blue-bg)', borderRadius: 6, padding: '3px 8px' }}>
               <Spin size="small" style={{ flexShrink: 0 }} />
@@ -1742,6 +1675,16 @@ return (
       </div>
       {/* Chat Area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+        {/* 主视图切换：对话 / 自主建议 */}
+        <div style={{ padding: '10px 16px 4px' }}>
+          <Segmented block size="small" value={advisorTab} onChange={(v: any) => setAdvisorTab(v)}
+            options={[
+              { label: '💬 对话', value: 'chat' },
+              { label: '🤖 自主建议' + (advisorList.filter((x: any) => x.status === 'open').length > 0 ? ' (' + advisorList.filter((x: any) => x.status === 'open').length + ')' : ''), value: 'advice' },
+            ]} />
+        </div>
+        {advisorTab === 'chat' ? (
+        <>
         {/* 启动时若检测到 Ollama 未封禁联网，显示一次性提示条（需等首次状态查询完成，避免闪提示） */}
         {netStatusLoaded && netOllamaFound && !netLocked && !netWarnDismissed && (
           <div style={{ padding: '8px 16px', background: '#FFF7ED', borderBottom: '1px solid #FED7AA', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#9A3412' }}>
@@ -1809,6 +1752,63 @@ return (
           </div>
           <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 4 }}>Shift+Enter 换行 · Enter 发送 · 数据仅在本机处理</div>
         </div>
+        </>
+        ) : (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 16px' }}>
+          <div style={{ fontSize: 11.5, color: 'var(--color-text-secondary)', lineHeight: 1.6, marginBottom: 8 }}>
+            空闲时自动分析项目成本、物料价格、目标达成与供应风险，以资深成本经理视角找机会/风险点。
+            处理方式：<b>复制提示词</b>交给 AI 执行议价/分析，或 <b>生成行业洞察</b>（本地→云端→本地三步，自动防重复查询）。
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Button size="small" type="primary" loading={advisorRunning} onClick={runAdvisorNow}>⚡ 立即分析</Button>
+            <Button size="small" type={advisorShowDone ? 'default' : 'primary'} onClick={() => setAdvisorShowDone(!advisorShowDone)}>
+              {advisorShowDone ? '显示全部' : '仅看待处理'}
+            </Button>
+            <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{advisorLastRun ? `上次分析 ${fmtA(advisorLastRun)}` : '尚未运行'}</span>
+            {advisorProgress && <span style={{ fontSize: 11, color: '#8B5CF6' }}><Spin size="small" style={{ marginRight: 4 }} />{advisorProgress}</span>}
+          </div>
+          {(() => {
+            const list = advisorShowDone ? advisorList : advisorList.filter((x: any) => x.status === 'open');
+            if (list.length === 0) {
+              return <div style={{ fontSize: 12, color: '#94A3B8', padding: '30px 0', textAlign: 'center' }}>暂无建议——系统空闲时自动分析，或点「立即分析」手动触发</div>;
+            }
+            return list.map((ins: any) => {
+              const meta = ADVISOR_TYPE_META[ins.insight_type] || { icon: '💡', color: '#64748B', label: ins.insight_type };
+              return (
+                <div key={ins.id} style={{ border: '1px solid ' + meta.color + '33', borderLeft: '3px solid ' + meta.color, borderRadius: 10, padding: '12px 14px', marginBottom: 10, background: ins.status === 'open' ? 'var(--color-surface)' : '#F8FAFC', opacity: ins.status === 'open' ? 1 : 0.75 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 16 }}>{meta.icon}</span>
+                    <b style={{ fontSize: 14 }}>{ins.title}</b>
+                    <Tag color={meta.color} style={{ margin: 0 }}>{meta.label}</Tag>
+                    {ins.source === 'ai' && <Tag color="purple" style={{ margin: 0 }}>AI 润色</Tag>}
+                    {ins.status !== 'open' && <Tag style={{ margin: 0 }} color={ins.status === 'done' ? 'green' : 'default'}>{ins.status === 'done' ? '已处理' : '已忽略'}</Tag>}
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94A3B8' }}>{fmtA(ins.created_at)}</span>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: '#475569', marginTop: 8, whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{ins.detail}</div>
+                  {ins.prompt && (
+                    advisorShowPrompt === ins.id ? (
+                      <div style={{ marginTop: 8, background: '#F5F7FF', border: '1px dashed #C7D2FE', borderRadius: 6, padding: '8px 10px', fontSize: 12, color: '#4F46E5', whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>
+                        💬 提示词：{ins.prompt}
+                        <div style={{ marginTop: 4 }}><Button size="small" type="text" onClick={() => setAdvisorShowPrompt(null)}>收起 ▲</Button></div>
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 8 }}>
+                        <Button size="small" type="text" onClick={() => setAdvisorShowPrompt(ins.id)} style={{ color: '#4F46E5', padding: 0, fontSize: 12 }}>💬 查看可执行提示词 ▾</Button>
+                      </div>
+                    )
+                  )}
+                  <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <Button size="small" onClick={() => copyPrompt(ins.prompt)}>📋 复制提示词</Button>
+                    {ins.status === 'open' && <Button size="small" loading={advisorInsightBusy === ins.id} onClick={() => insightForAdvisor(ins)}>{advisorInsightBusy === ins.id ? '洞察中…' : '🔍 生成行业洞察'}</Button>}
+                    {ins.status === 'open' && <Button size="small" type="primary" onClick={() => setAdvisorStatus(ins.id, 'done')}>✓ 已处理</Button>}
+                    {ins.status === 'open' && <Button size="small" onClick={() => setAdvisorStatus(ins.id, 'dismissed')}>忽略</Button>}
+                  </div>
+                </div>
+              );
+            });
+          })()}
+        </div>
+        )}
       </div>
 
       {/* Settings Modal */}
