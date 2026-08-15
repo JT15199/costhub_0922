@@ -2076,6 +2076,7 @@ export default function Settings({ embedded }: { embedded?: boolean }) {
                   'general': '通用', 'trend_insight': '趋势洞察', 'decompose': 'AI拆解',
                   'local_ai_chat': '本地AI对话', 'quote_compare': '报价比对', 'project_health': '项目体检',
                   'snapshot_explain': '快照解释', 'global_ask': '全局问询', 'auto_audit': '自主巡检',
+                  'bridge_intent': '云端桥·意图', 'bridge_summary': '云端桥·总结', 'bridge_blocked': '审计拦截', 'local_chat_cloud_tool': '云端工具调用', 'auto_advisor': '自主建议润色',
                 };
                 return (
                   <span style={{ fontSize: 12 }}>
@@ -2087,7 +2088,16 @@ export default function Settings({ embedded }: { embedded?: boolean }) {
               { title: '物料', dataIndex: 'material_name', width: 90, ellipsis: true },
               { title: '请求内容', key: 'prompt', width: 280, render: (_: any, r: any) => {
                 const t = (r.user_prompt || r.system_prompt || '').replace(/\s+/g, ' ');
-                return t ? <Tooltip title={t}><span style={{ fontSize: 11.5 }}>{t.slice(0, 55)}{t.length > 55 ? '…' : ''}</span></Tooltip> : '-';
+                return (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    {r.request_type === 'bridge_blocked'
+                      ? <Tag color="red" style={{ margin: 0, fontSize: 10 }}>拦截</Tag>
+                      : r.success === 0 || r.success === false
+                        ? <Tag color="orange" style={{ margin: 0, fontSize: 10 }}>失败</Tag>
+                        : null}
+                    {t ? <Tooltip title={t}><span style={{ fontSize: 11.5 }}>{t.slice(0, 50)}{t.length > 50 ? '…' : ''}</span></Tooltip> : '-'}
+                  </span>
+                );
               }},
               { title: '响应', dataIndex: 'response_summary', width: 120, ellipsis: true, render: (v: string) => (
                 <Tooltip title={v}><span style={{ fontSize: 11.5 }}>{v ? v.slice(0, 30) + (v.length > 30 ? '…' : '') : '-'}</span></Tooltip>
