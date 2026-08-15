@@ -117,10 +117,23 @@ function DecompNode({ data, selected }: any) {
   const isDraft = data.sourceType === 'ai_draft';
   const isChecked = data.isChecked;
   const isTerminal = data.nodeType === 'terminal';
+  const isQueried = data.insightStatus === 'queried';
+  const ratio = data.costRatio != null ? Number(data.costRatio) : 0;
+  const isBig = ratio >= 15; // 成本大头（≥15%）
+  // 洞察状态点：已洞察=绿 + 方向色；待洞察=灰；大头未洞察=橙（建议优先）
+  const statusDot = !isDraft && (isQueried
+    ? <span title="已洞察" style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#34C759', marginRight: 4, flexShrink: 0 }} />
+    : isBig
+      ? <span title="成本大头未洞察 · 建议优先" style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#FF9500', marginRight: 4, flexShrink: 0 }} />
+      : <span title="待洞察" style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#C7C7CC', marginRight: 4, flexShrink: 0 }} />);
+  // 成本热度：占比越高底色越深（蓝 tint）
+  const heat = isDraft ? 0 : Math.min(0.12, 0.02 + (ratio / 100) * 0.10);
   return (
     <div
       style={{
-        background: isDraft ? 'linear-gradient(135deg, #F8FAFC, #F1F5F9)' : 'var(--card-bg, #FFF)',
+        background: isDraft
+          ? 'linear-gradient(135deg, #F8FAFC, #F1F5F9)'
+          : `linear-gradient(180deg, rgba(0,122,255,${heat.toFixed(3)}), rgba(0,122,255,0) 70%), var(--card-bg, #FFF)`,
         border: `2px solid ${selected ? 'var(--brand, #6366F1)' : trendColor}`,
         borderRadius: 12,
         padding: '9px 12px 8px 30px',
@@ -149,12 +162,12 @@ function DecompNode({ data, selected }: any) {
       >
         {isChecked ? <CheckSquareFilled style={{ fontSize: 14 }} /> : <BorderOutlined style={{ fontSize: 14 }} />}
       </span>
-      <div style={{ fontWeight: 700, color: 'var(--text-primary, #1E293B)', marginBottom: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {data.trendIcon && <span style={{ marginRight: 4 }}>{data.trendIcon}</span>}{data.label}
+      <div style={{ fontWeight: 700, color: 'var(--text-primary, #1E293B)', marginBottom: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
+        {statusDot}{data.trendIcon && <span>{data.trendIcon}</span>}<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{data.label}</span>
       </div>
       <div style={{ display: 'flex', gap: 5, alignItems: 'center', fontSize: 10, marginBottom: 7 }}>
         <Tag color={isTerminal ? 'orange' : 'blue'} style={{ fontSize: 9, margin: 0, padding: '0 5px', lineHeight: '16px' }}>{isTerminal ? '终端物料' : '结构节点'}</Tag>
-        {data.costRatio != null && <span style={{ color: 'var(--text-muted, #64748B)' }}>占比 {data.costRatio}%</span>}
+        {data.costRatio != null && <span style={{ color: isBig && !isQueried ? '#C93400' : 'var(--text-muted, #64748B)', fontWeight: isBig && !isQueried ? 700 : 400 }}>占比 {data.costRatio}%{isBig && !isQueried ? ' · 优先' : ''}</span>}
       </div>
       {!isDraft && (
         <Button
@@ -187,6 +200,9 @@ export default function Decomposition(_props: any) {
   const [loading, setLoading] = useState(false);
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // 树交互升级：血缘链高亮 / 聚焦 / 面包屑
+  const [focusNodeId, setFocusNodeId] = useState<number | null>(null);
+  const [chainPath, setChainPath] = useState<{ id: number; name: string }[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [trendItems, setTrendItems] = useState<any[]>([]);
   const [snapshotMap, setSnapshotMap] = useState<Record<number, any>>({});
@@ -318,6 +334,37 @@ export default function Decomposition(_props: any) {
     );
   }, [checkedIds]);
 
+
+  // ===== 树交互：血缘链 / 聚焦 / 面包屑 =====
+  const getAncestorChain = (nodeId: number): { id: number; name: string }[] => {
+    const chain: { id: number; name: string }[] = [];
+    let cur: any = nodes.find((n: any) => n.id === nodeId);
+    while (cur) {
+      chain.unshift({ id: cur.id, name: cur.component_name || cur.label || String(cur.id) });
+      cur = nodes.find((n: any) => n.id === cur.parent_id);
+    }
+    return chain;
+  };
+  const applyChainHighlight = useCallback((chainIds: Set<number>, focus: boolean) => {
+    setRfNodes((current: any[]) => current.map((n: any) => {
+      const inChain = chainIds.has(Number(n.id));
+      return {
+        ...n,
+        style: { opacity: inChain ? 1 : (focus ? 0.15 : 0.25), transition: 'opacity 200ms ease-out' },
+      };
+    }));
+    setRfEdges((current: any[]) => current.map((e: any) => ({
+      ...e,
+      animated: chainIds.has(Number(e.source)) && chainIds.has(Number(e.target)),
+      style: chainIds.has(Number(e.source)) && chainIds.has(Number(e.target))
+        ? { stroke: '#007AFF', strokeWidth: 2.4, transition: 'stroke 160ms ease-out' }
+        : { stroke: undefined, strokeWidth: undefined },
+    })));
+  }, []);
+  const clearChainHighlight = useCallback(() => {
+    setRfNodes((current: any[]) => current.map((n: any) => ({ ...n, style: undefined })));
+    setRfEdges((current: any[]) => current.map((e: any) => ({ ...e, animated: false, style: undefined })));
+  }, []);
   // ====== 数据加载 ======
   const loadTree = useCallback(async () => {
     setLoading(true);
@@ -2260,7 +2307,24 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onNodeClick={onNodeClick}
-                onPaneClick={() => { setSelectedId(null); setSelectedNode(null); setCanvasHintVisible(true); setRfNodes((current: any[]) => current.map((node: any) => ({ ...node, selected: false }))); }}
+                onNodeMouseEnter={(_, node: any) => {
+                  if (focusNodeId) return;
+                  const chain = getAncestorChain(Number(node.id));
+                  setChainPath(chain);
+                  applyChainHighlight(new Set(chain.map(c => c.id)), false);
+                }}
+                onNodeMouseLeave={() => { if (!focusNodeId) { setChainPath([]); clearChainHighlight(); } }}
+                onNodeDoubleClick={(_, node: any) => {
+                  if (focusNodeId === Number(node.id)) {
+                    setFocusNodeId(null); setChainPath([]); clearChainHighlight();
+                  } else {
+                    const chain = getAncestorChain(Number(node.id));
+                    setFocusNodeId(Number(node.id));
+                    setChainPath(chain);
+                    applyChainHighlight(new Set(chain.map(c => c.id)), true);
+                  }
+                }}
+                onPaneClick={() => { setSelectedId(null); setSelectedNode(null); setCanvasHintVisible(true); setRfNodes((current: any[]) => current.map((node: any) => ({ ...node, selected: false }))); clearChainHighlight(); setFocusNodeId(null); setChainPath([]); }}
                 onInit={setFlowInstance}
                 nodeTypes={nodeTypes}
                 fitView
@@ -2283,7 +2347,22 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                   zoomable
                   style={{ border: '1px solid var(--card-border, #E2E8F0)', borderRadius: 8, background: 'var(--card-bg, #fff)' } as any}
                 />
-                <Panel position="top-left">
+                                <Panel position="top-left" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, background: 'rgba(255,255,255,0.92)', borderRadius: 10, padding: '6px 12px', boxShadow: '0 2px 10px rgba(0,0,0,0.08)', maxWidth: 480, overflow: 'hidden' }}>
+                  <span style={{ color: '#86868B', flexShrink: 0 }}>路径</span>
+                  {chainPath.length > 0
+                    ? chainPath.map((c, i) => (
+                        <span key={c.id} style={{ whiteSpace: 'nowrap' }}>
+                          {i > 0 && <span style={{ color: '#C7C7CC', margin: '0 2px' }}>›</span>}
+                          <b style={{ fontWeight: i === chainPath.length - 1 ? 700 : 500, color: i === chainPath.length - 1 ? '#007AFF' : '#1D1D1F', cursor: 'pointer' }}
+                            onClick={() => { const n = nodes.find((x: any) => x.id === c.id); if (n && setSelectedNode) { setSelectedId(c.id); setSelectedNode(n); } }}>
+                            {c.name}
+                          </b>
+                        </span>
+                      ))
+                    : <span style={{ color: '#C7C7CC' }}>悬停节点看血缘链 · 双击聚焦</span>}
+                  {focusNodeId != null && <span style={{ color: '#FF9500', flexShrink: 0, marginLeft: 4 }}>聚焦中 ✕</span>}
+                </Panel>
+<Panel position="top-left">
                   <div style={{ padding: '8px 10px', borderRadius: 10, background: 'color-mix(in srgb, var(--card-bg, #fff) 92%, transparent)', border: '1px solid var(--card-border, #E2E8F0)', boxShadow: '0 4px 12px rgba(15,23,42,0.08)', fontSize: 11, color: 'var(--text-secondary, #475569)' }}>
                     <div style={{ fontWeight: 700, marginBottom: 3 }}><ApartmentOutlined /> 智能分解画布</div>
                     {canvasHintVisible ? '点击节点查看详情；终端节点可直接洞察，结构节点可继续拆解。' : '拖拽调整布局 · 滚轮缩放 · 点击空白处取消选择'}
