@@ -1109,6 +1109,20 @@ export default function Projects() {
     { title: '单价', dataIndex: 'part_cost', width: 85, align: 'right' as const, render: (v: number) => v?.toFixed(4) },
     { title: '数量', dataIndex: 'quantity', width: 60, align: 'center' as const, render: (v: number) => v != null ? (Number.isInteger(v) ? v : v.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')) : '-' },
     { title: '小计', key: 'sub', width: 90, align: 'right' as const, render: (_: any, r: any) => <b>{((r.part_cost || 0) * r.quantity).toFixed(4)}</b> },
+    // 占整机 %：降本地图（迷你条 + 热力色 + 排序）——大头一眼可见
+    { title: '占整机 %', key: 'pct', width: 96, align: 'right' as const, sorter: (a: any, b: any) => ((a.part_cost || 0) * a.quantity) - ((b.part_cost || 0) * b.quantity), render: (_: any, r: any) => {
+      const sub = (r.part_cost || 0) * (r.quantity || 1);
+      const pct = bomTotal > 0 ? (sub / bomTotal) * 100 : 0;
+      const color = pct >= 10 ? '#FF9500' : pct >= 5 ? '#FFD60A' : '#34C759';
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+          <div style={{ width: 40, height: 4, borderRadius: 2, background: '#F0F1F3', overflow: 'hidden', flexShrink: 0 }}>
+            <div style={{ width: Math.min(100, pct * 2.2) + '%', height: '100%', background: color, borderRadius: 2, transition: 'width 200ms cubic-bezier(.32,.72,0,1)' }} />
+          </div>
+          <b style={{ fontSize: 12, color: pct >= 10 ? '#B93400' : '#1D1D1F', fontVariantNumeric: 'tabular-nums' }}>{pct.toFixed(1)}%</b>
+        </div>
+      );
+    } },
     { title: '操作', width: 120, render: (_: any, r: any) => (
       <Space size="small">
         <Button type="link" size="small" onClick={() => { setBomEdit(r); bomForm.setFieldsValue({ ...r, _part_name: r.part_name, _part_model: r.part_model, _main_category: r.main_category, _sub_category: r.sub_category, _cost: r.part_cost }); setBomModal(true); }}>编辑</Button>

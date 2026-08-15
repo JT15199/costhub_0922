@@ -1,17 +1,18 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+<script src="demo-echarts.min.js"></script>
 <meta charset="UTF-8">
 <title>CostHub 设计方案 Demo v2 — 信息密度整合</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #F5F7FA; color: #1F2937; padding: 24px; }
-  .demo-bar { max-width: 1060px; margin: 0 auto 16px; background: linear-gradient(135deg, #6366F1, #8B5CF6); color: #fff; border-radius: 12px; padding: 12px 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .demo-bar { max-width: 1060px; margin: 0 auto 16px; background: linear-gradient(135deg, #5E5CE6, #86868B); color: #fff; border-radius: 12px; padding: 12px 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .demo-bar h1 { font-size: 15px; font-weight: 700; }
   .demo-bar span { font-size: 12px; opacity: .9; }
   .tabs { max-width: 1060px; margin: 0 auto 14px; display: flex; gap: 8px; }
   .tab { padding: 7px 16px; border-radius: 8px; background: #fff; border: 1px solid #E2E8F0; font-size: 12.5px; cursor: pointer; color: #64748B; }
-  .tab.active { background: #6366F1; color: #fff; border-color: #6366F1; font-weight: 600; }
+  .tab.active { background: #5E5CE6; color: #fff; border-color: #5E5CE6; font-weight: 600; }
   .page { max-width: 1060px; margin: 0 auto; display: none; }
   .page.active { display: block; }
   /* ===== 视觉纪律：颜色只出现在 badge/数字；一行一条；渐进披露 ===== */
@@ -52,16 +53,16 @@
   .row .detail { display: none; }
   .row.expanded .detail { display: block; flex-basis: 100%; font-size: 11.5px; color: #64748B; line-height: 1.7; padding: 6px 2px 2px; }
   .btn { padding: 3px 10px; border-radius: 6px; border: 1px solid #E2E8F0; background: #fff; font-size: 11px; cursor: pointer; color: #475569; }
-  .btn.primary { background: #6366F1; color: #fff; border-color: #6366F1; }
+  .btn.primary { background: #5E5CE6; color: #fff; border-color: #5E5CE6; }
   .btn.mini { font-size: 10px; padding: 1px 7px; }
   /* 两列主区 */
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   @media (max-width: 900px) { .cols, .gauges { grid-template-columns: 1fr 1fr; } }
-  .sent-box { background: #F8FAFC; border: 1px dashed #C7D2FE; border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #4F46E5; font-family: Consolas, monospace; line-height: 1.7; margin-top: 6px; }
+  .sent-box { background: #F8FAFC; border: 1px dashed #C7D2FE; border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #007AFF; font-family: Consolas, monospace; line-height: 1.7; margin-top: 6px; }
   .collapse { border-top: 1px dashed #E2E8F0; margin-top: 10px; padding-top: 8px; }
-  .collapse summary { cursor: pointer; font-size: 12px; color: #6366F1; font-weight: 600; outline: none; }
+  .collapse summary { cursor: pointer; font-size: 12px; color: #5E5CE6; font-weight: 600; outline: none; }
   .chart-ph { background: linear-gradient(180deg,#F8FAFC,#F1F5F9); border: 1px dashed #CBD5E1; border-radius: 8px; height: 120px; display: flex; align-items: center; justify-content: center; color: #64748B; font-size: 11.5px; }
-  .expand-toggle { cursor: pointer; color: #6366F1; font-size: 11px; user-select: none; }
+  .expand-toggle { cursor: pointer; color: #5E5CE6; font-size: 11px; user-select: none; }
   .more { display: none; }
   .more.show { display: block; }
 
@@ -131,23 +132,23 @@
   body[data-theme="c"] .btn.primary { background: #38BDF8; color: #0F172A; border-color: #38BDF8; }
   body[data-theme="c"] .gauge { border-color: rgba(255,255,255,.08); }
   body[data-theme="c"] .gauge .g-name, body[data-theme="c"] .gauge .g-extra { color: #64748B; }
-  body[data-theme="c"] .sent-box { background: #0F172A; border-color: rgba(56,189,248,.3); color: #7DD3FC; }
+  body[data-theme="c"] .sent-box { background: #0F172A; border-color: rgba(56,189,248,.3); color: #86868B; }
   body[data-theme="c"] .status-bar { background: #1E293B; border-color: rgba(255,255,255,.08); }
   body[data-theme="c"] .collapse summary { color: #38BDF8; }
   body[data-theme="c"] .tag { background: rgba(255,255,255,.08); color: #CBD5E1; }
-  body[data-theme="c"] .badge.b-blue { background: rgba(56,189,248,.15); color: #7DD3FC; }
+  body[data-theme="c"] .badge.b-blue { background: rgba(56,189,248,.15); color: #86868B; }
   body[data-theme="c"] .badge.b-green { background: rgba(34,197,94,.15); color: #4ADE80; }
   body[data-theme="c"] .badge.b-red { background: rgba(239,68,68,.15); color: #F87171; }
-  body[data-theme="c"] .badge.b-amber { background: rgba(245,158,11,.15); color: #FBBF24; }
+  body[data-theme="c"] .badge.b-amber { background: rgba(245,158,11,.15); color: #64D2FF; }
   body[data-theme="c"] .badge.b-purple { background: rgba(168,85,247,.15); color: #C084FC; }
   body[data-theme="c"] .gauge.ok .g-val { color: #4ADE80; }
-  body[data-theme="c"] .gauge.warn .g-val { color: #FBBF24; }
+  body[data-theme="c"] .gauge.warn .g-val { color: #64D2FF; }
   body[data-theme="c"] .gauge.bad .g-val { color: #F87171; }
   body[data-theme="c"] .row .r-num { color: #38BDF8; }
   body[data-theme="c"] .chart-ph { background: #16213A; border-color: rgba(255,255,255,.1); color: #64748B; }
 
 .theme-btn { padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,.35); background: rgba(255,255,255,.15); color: #fff; font-size: 11.5px; cursor: pointer; }
-  .theme-btn.active { background: #fff; color: #6366F1; font-weight: 700; border-color: #fff; }
+  .theme-btn.active { background: #fff; color: #5E5CE6; font-weight: 700; border-color: #fff; }
 
   /* ===== v6 质感层：材质 + 高级动效 ===== */
   /* 卡片：分层阴影 + 内高光（质感的关键：阴影有层次，不是一块灰） */
@@ -161,7 +162,7 @@
   }
   /* 主按钮：细腻渐变 + 内高光 + 阴影（press 回压） */
   .btn.primary {
-    background: linear-gradient(180deg, #4F46E5 0%, #4338CA 100%);
+    background: linear-gradient(180deg, #007AFF 0%, #0071E3 100%);
     border: 1px solid rgba(0,0,0,.08);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 1px 2px rgba(67,56,202,.3);
     color: #fff;
@@ -190,9 +191,69 @@
   /* 迷你 sparkline 质感：渐变面积 + 端点 */
   .spark { display: block; width: 100%; height: 64px; }
   .spark .area { fill: url(#gradA); }
-  .spark .line { fill: none; stroke: #4F46E5; stroke-width: 2; stroke-linecap: round; }
-  .spark .dot { fill: #fff; stroke: #4F46E5; stroke-width: 2; }
+  .spark .line { fill: none; stroke: #007AFF; stroke-width: 2; stroke-linecap: round; }
+  .spark .dot { fill: #fff; stroke: #007AFF; stroke-width: 2; }
 
+
+  /* ---- D Apple 风：浅色 #F5F5F7 + 系统蓝 #007AFF + 无边框层级 + 大圆角 + 细腻阴影 ---- */
+  body[data-theme="d"] {
+    background: #F5F5F7;
+    color: #1D1D1F;
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  body[data-theme="d"] .panel, body[data-theme="d"] .gauge, body[data-theme="d"] .channel {
+    background: #FFFFFF;
+    border: none;
+    border-radius: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.05);
+  }
+  body[data-theme="d"] .gauge:hover { transform: translateY(-2px); box-shadow: 0 2px 6px rgba(0,0,0,.08), 0 12px 32px rgba(0,0,0,.09); }
+  body[data-theme="d"] .panel-head .title { color: #1D1D1F; font-weight: 600; letter-spacing: -.01em; }
+  body[data-theme="d"] .panel-head .right, body[data-theme="d"] .panel-head .sub, body[data-theme="d"] .r-ext, body[data-theme="d"] .gauge .g-extra { color: #86868B; }
+  body[data-theme="d"] .gauge .g-name { color: #86868B; }
+  body[data-theme="d"] .gauge .g-val { color: #1D1D1F; }
+  body[data-theme="d"] .gauge.ok .g-val { color: #34C759; }
+  body[data-theme="d"] .gauge.warn .g-val { color: #FF9500; }
+  body[data-theme="d"] .gauge.bad .g-val { color: #FF3B30; }
+  body[data-theme="d"] .row { color: #1D1D1F; border-radius: 10px; }
+  body[data-theme="d"] .row:hover, body[data-theme="d"] .row.expanded { background: #F5F5F7; }
+  body[data-theme="d"] .row .r-main { color: #6E6E73; }
+  body[data-theme="d"] .row .detail { color: #6E6E73; }
+  body[data-theme="d"] .row .r-num { color: #007AFF; }
+  /* Segmented 分段控件：浅灰胶囊 + 白滑块 */
+  body[data-theme="d"] .tab { background: #E9E9EC; border: none; border-radius: 980px; color: #6E6E73; padding: 5px 18px; font-weight: 500; }
+  body[data-theme="d"] .tab.active { background: #FFFFFF; color: #1D1D1F; box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.06); }
+  /* 胶囊按钮 */
+  body[data-theme="d"] .btn { background: #FFFFFF; border: 1px solid #D2D2D7; border-radius: 980px; color: #1D1D1F; font-weight: 500; }
+  body[data-theme="d"] .btn:hover { border-color: #86868B; }
+  body[data-theme="d"] .btn.primary { background: #007AFF; border: none; color: #fff; font-weight: 600; box-shadow: 0 1px 2px rgba(0,122,255,.3); }
+  body[data-theme="d"] .btn.primary:hover { background: #0A84FF; }
+  /* Apple 系统状态色（柔和底） */
+  body[data-theme="d"] .badge { border: none; }
+  body[data-theme="d"] .badge.b-blue { background: rgba(0,122,255,.1); color: #007AFF; }
+  body[data-theme="d"] .badge.b-green { background: rgba(52,199,89,.12); color: #248A3D; }
+  body[data-theme="d"] .badge.b-red { background: rgba(255,59,48,.1); color: #FF3B30; }
+  body[data-theme="d"] .badge.b-amber { background: rgba(255,149,0,.12); color: #C93400; }
+  body[data-theme="d"] .badge.b-purple { background: rgba(175,82,222,.1); color: #AF52DE; }
+  body[data-theme="d"] .sent-box { background: #F5F5F7; border-color: rgba(0,122,255,.25); color: #007AFF; }
+  body[data-theme="d"] .status-bar { background: #EAF2FF; border: none; border-radius: 12px; }
+  body[data-theme="d"] .tag { background: #F2F2F4; color: #6E6E73; }
+  body[data-theme="d"] .collapse summary { color: #007AFF; }
+  body[data-theme="d"] .expand-toggle { color: #007AFF; }
+  body[data-theme="d"] .chart-ph { background: #F8F8FA; border: none; color: #86868B; }
+  /* 分解树 SVG 覆盖（Apple 风） */
+  body[data-theme="d"] .tnode .ncard { fill: #FFFFFF; stroke: #D2D2D7; stroke-width: 1.2; }
+  body[data-theme="d"] .tnode:hover .ncard { fill: #F5F5F7; stroke: #007AFF; }
+  body[data-theme="d"] .tnode.sel .ncard { fill: #F0F7FF; stroke: #007AFF; stroke-width: 2; }
+  body[data-theme="d"] .tlink { stroke: #D1D1D6; }
+  body[data-theme="d"] .tlink:hover, body[data-theme="d"] .tlink.hot { stroke: #007AFF; }
+  body[data-theme="d"] .nname { fill: #1D1D1F; }
+  body[data-theme="d"] .nratio { fill: #86868B; }
+.tnode.dim { opacity: .25; transition: opacity 200ms ease-out; }
+  .tnode.chain .ncard { stroke: #007AFF; stroke-width: 2; }
+  .tnode.chain { transform: translateY(-2px); }
+  .tnode.chain .ncard { filter: drop-shadow(0 3px 6px rgba(0,122,255,.2)); }
+  .tnode.sel .ncard { filter: drop-shadow(0 3px 8px rgba(0,122,255,.3)); }
 </style>
 </head>
 <body>
@@ -206,6 +267,8 @@
   <div class="tab active" onclick="show('dashboard')"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg> 驾驶舱</div>
   <div class="tab" onclick="show('security')"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z"/><path d="M8.5 12l2.5 2.5 4.5-4.5"/></svg> 安全中心</div>
   <div class="tab" onclick="show('advice')"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="8" width="14" height="10" rx="3"/><circle cx="9" cy="13" r="1.2" fill="currentColor"/><circle cx="15" cy="13" r="1.2" fill="currentColor"/><path d="M12 8V5M9 3h6"/></svg> 建议卡细节</div>
+  <div class="tab" onclick="show('charts')"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg> 图表</div>
+  <div class="tab" onclick="show('tree')"><svg class="ic ic-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v6M12 9l-5 6M12 9l5 6M7 15a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM17 15a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg> 分解树</div>
 </div>
 
 <!-- ==================== 驾驶舱 ==================== -->
@@ -277,7 +340,7 @@
         <span class="r-ext">整机</span><span class="chevron">▾</span>
         <div class="detail">依据：最近快照 5月14日。大额物料：液晶面板、主控芯片、背光模组。</div>
       </div>
-      <div style="text-align:right;margin-top:6px;font-size:11px;color:#6366F1;cursor:pointer">查看全部 5 条 →</div>
+      <div style="text-align:right;margin-top:6px;font-size:11px;color:#5E5CE6;cursor:pointer">查看全部 5 条 →</div>
     </div>
   </div>
 
@@ -450,18 +513,246 @@
     });
   });
 
+
+  // ===== ECharts 质感图表（交互：hover tooltip / 十字线 / 高亮 / 入场动画） =====
+  let chartsInited = false;
+  const charts = [];
+  function initCharts() {
+  if (chartsInited) { charts.forEach(c => c.resize()); return; }
+  chartsInited = true;
+  const AXIS = { axisLine: { lineStyle: { color: '#E5E7EB' } }, axisTick: { show: false }, axisLabel: { color: '#9CA3AF', fontSize: 10 } };
+  const SPLIT = { splitLine: { lineStyle: { color: '#F3F4F6' } } };
+  const TIP = {
+    backgroundColor: 'rgba(255,255,255,.97)', borderColor: '#E5E7EB', borderWidth: 1, padding: [8, 12],
+    textStyle: { color: '#1F2937', fontSize: 12 }, extraCssText: 'box-shadow:0 6px 20px rgba(0,0,0,.10);border-radius:8px;',
+    darkMode: true,
+  };
+  function makeChart(el, opt) {
+    const c = echarts.init(el);
+    c.setOption(opt);
+    charts.push(c);
+    return c;
+  }
+  // 1 折线：渐变面积 + 十字线 + 端点脉冲
+  makeChart(document.getElementById('chLine'), {
+    animationDuration: 800, animationEasing: 'cubicOut',
+    grid: { left: 8, right: 14, top: 12, bottom: 6, containLabel: true },
+    tooltip: { ...TIP, trigger: 'axis', axisPointer: { type: 'cross', crossStyle: { color: '#007AFF' }, label: { backgroundColor: '#007AFF', fontSize: 10 } } },
+    xAxis: { type: 'category', data: ['1月','2月','3月','4月','5月','6月','7月','8月','9月'], ...AXIS },
+    yAxis: { type: 'value', ...AXIS, ...SPLIT, axisLabel: { ...AXIS.axisLabel, formatter: '¥{value}' } },
+    series: [{
+      type: 'line', smooth: 0.45, data: [112, 108, 105, 100, 96, 92, 89, 86, 82],
+      symbol: 'circle', symbolSize: 7, showSymbol: false,
+      lineStyle: { width: 3, color: '#007AFF' },
+      itemStyle: { color: '#007AFF', borderColor: '#fff', borderWidth: 2, shadowBlur: 8, shadowColor: 'rgba(0,122,255,.25)' },
+      areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(79,70,229,.25)' }, { offset: 1, color: 'rgba(79,70,229,0)' }]) },
+      emphasis: { scale: 1.6, itemStyle: { shadowBlur: 14, shadowColor: 'rgba(0,122,255,.25)' } },
+      markPoint: { data: [{ type: 'min', name: '最低' }], symbolSize: 34, label: { fontSize: 9, formatter: '低', color: '#fff' }, itemStyle: { color: '#34C759' } },
+    }],
+  });
+  // 2 柱状：渐变 + 圆角 + hover 高亮
+  makeChart(document.getElementById('chBar'), {
+    animationDuration: 800, animationEasing: 'cubicOut',
+    grid: { left: 8, right: 14, top: 16, bottom: 6, containLabel: true },
+    tooltip: { ...TIP, trigger: 'axis', axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(79,70,229,.06)' } } },
+    xAxis: { type: 'category', data: ['M270','M271','P-27','手写笔','鼠标','竞品'], ...AXIS },
+    yAxis: { type: 'value', ...AXIS, ...SPLIT, axisLabel: { ...AXIS.axisLabel, formatter: '¥{value}' } },
+    series: [{
+      type: 'bar', barWidth: '52%', data: [
+        { value: 1150, itemStyle: { color: '#0071E3' } },
+        { value: 980, itemStyle: { color: new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'#5E5CE6'},{offset:1,color:'#64D2FF'}]) } },
+        { value: 860, itemStyle: { color: new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'#5E5CE6'},{offset:1,color:'#64D2FF'}]) } },
+        { value: 720, itemStyle: { color: new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'#5E5CE6'},{offset:1,color:'#64D2FF'}]) } },
+        { value: 640, itemStyle: { color: new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'#5E5CE6'},{offset:1,color:'#64D2FF'}]) } },
+        { value: 1240, itemStyle: { color: new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'#007AFF'},{offset:1,color:'#64D2FF'}]) } },
+      ],
+      itemStyle: { borderRadius: [6, 6, 2, 2] },
+      emphasis: { itemStyle: { shadowBlur: 12, shadowColor: 'rgba(0,122,255,.25)' } },
+      label: { show: true, position: 'top', fontSize: 10, color: '#6B7280', formatter: (p) => p.value >= 1000 ? '¥' + p.value : String(p.value) },
+    }],
+  });
+  // 3 横向条形
+  makeChart(document.getElementById('chHbar'), {
+    animationDuration: 800, animationEasing: 'cubicOut',
+    grid: { left: 8, right: 40, top: 8, bottom: 6, containLabel: true },
+    tooltip: { ...TIP, trigger: 'axis', axisPointer: { type: 'shadow' } },
+    xAxis: { type: 'value', ...AXIS, ...SPLIT, axisLabel: { ...AXIS.axisLabel, formatter: '{value}%' } },
+    yAxis: { type: 'category', data: ['其他','连接件','结构件','电源','显示器件'], ...AXIS, axisLabel: { color: '#64748B', fontSize: 11 } },
+    series: [{
+      type: 'bar', barWidth: 14, data: [
+        { value: 5, itemStyle: { color: '#CBD5E1' } },
+        { value: 9, itemStyle: { color: '#64D2FF' } },
+        { value: 18, itemStyle: { color: '#64D2FF' } },
+        { value: 26, itemStyle: { color: '#5E5CE6' } },
+        { value: 42, itemStyle: { color: new echarts.graphic.LinearGradient(0,0,1,0,[{offset:0,color:'#5E5CE6'},{offset:1,color:'#007AFF'}]) } },
+      ],
+      itemStyle: { borderRadius: [0, 7, 7, 0] },
+      label: { show: true, position: 'right', fontSize: 11, fontWeight: 700, color: '#374151', formatter: '{c}%' },
+      emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,122,255,.25)' } },
+    }],
+  });
+  // 4 环形：渐变 + hover 放大
+  makeChart(document.getElementById('chDonut'), {
+    animationDuration: 800, animationEasing: 'cubicOut',
+    tooltip: { ...TIP, trigger: 'item', formatter: '{b}：{c} 元（{d}%）' },
+    graphic: [
+      { type: 'text', left: 'center', top: '38%', style: { text: '¥1,150', fontSize: 20, fontWeight: 800, fill: '#1F2937', textAlign: 'center' } },
+      { type: 'text', left: 'center', top: '55%', style: { text: '整机成本', fontSize: 10, fill: '#9CA3AF', textAlign: 'center' } },
+    ],
+    series: [{
+      type: 'pie', radius: ['58%', '80%'], center: ['50%', '50%'],
+      itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+      label: { show: false },
+      emphasis: { scaleSize: 6, itemStyle: { shadowBlur: 16, shadowColor: 'rgba(0,122,255,.25)' } },
+      data: [
+        { value: 640, name: '显示器件', itemStyle: { color: '#007AFF' } },
+        { value: 300, name: '电源', itemStyle: { color: '#86868B' } },
+        { value: 130, name: '结构件', itemStyle: { color: '#007AFF' } },
+        { value: 80, name: '其他', itemStyle: { color: '#CBD5E1' } },
+      ],
+    }],
+  });
+  // 5 雷达
+  makeChart(document.getElementById('chRadar'), {
+    animationDuration: 800, animationEasing: 'cubicOut',
+    tooltip: { ...TIP },
+    legend: { bottom: 0, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 10, color: '#64748B' } },
+    radar: {
+      indicator: [['性能',10],['规格',10],['显示',10],['外观',10],['可靠',10],['成本力',10]],
+      radius: '62%', center: ['50%', '48%'],
+      splitArea: { areaStyle: { color: ['rgba(79,70,229,.02)', 'rgba(79,70,229,.05)'] } },
+      axisLine: { lineStyle: { color: '#E5E7EB' } }, splitLine: { lineStyle: { color: '#EEF2F7' } },
+      axisName: { color: '#64748B', fontSize: 10 },
+    },
+    series: [{
+      type: 'radar',
+      data: [
+        { value: [8.6, 8.2, 9.0, 7.5, 8.8, 9.5], name: 'M270', areaStyle: { color: 'rgba(79,70,229,.18)' }, lineStyle: { color: '#007AFF', width: 2 }, symbolSize: 4 },
+        { value: [7.2, 7.8, 6.9, 8.0, 7.4, 8.8], name: '竞品A', areaStyle: { color: 'rgba(245,158,11,.12)' }, lineStyle: { color: '#007AFF', width: 2 }, symbolSize: 4 },
+      ],
+    }],
+  });
+  // 6 迷你趋势组
+  [['chSpark1','液晶面板','¥82','#34C759',[112,108,105,100,96,92,89,86,82]],
+    ['chSpark2','主控芯片','¥18.5','#DC2626',[30,33,36,35,39,42,44,46,48]],
+    ['chSpark3','背光模组','¥86','#94A3B8',[86,88,87,86,87,86,85,86,86]]].forEach(([id, name, val, color, data]) => {
+    makeChart(document.getElementById(id), {
+      animationDuration: 600, animationEasing: 'cubicOut',
+      grid: { left: 2, right: 2, top: 16, bottom: 2 },
+      tooltip: { ...TIP, formatter: name + '：{c}' },
+      title: { text: name + '  ' + val, left: 2, top: 0, textStyle: { fontSize: 9.5, fontWeight: 700, color: '#374151' } },
+      xAxis: { type: 'category', show: false, data: data.map((_, i) => i) },
+      yAxis: { type: 'value', show: false, min: 'dataMin' },
+      series: [{
+        type: 'line', smooth: 0.4, data, symbol: 'none',
+        lineStyle: { width: 2, color }, areaStyle: { color: new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color: color + '33'},{offset:1,color: color + '00'}]) },
+      }],
+    });
+  });
+  }
+  // 主题切换时重绘（暗色下轴/文字换色）
+  function redrawCharts() {
+    const dark = document.body.getAttribute('data-theme') === 'c';
+    const tc = dark ? '#94A3B8' : '#9CA3AF', gl = dark ? 'rgba(255,255,255,.08)' : '#F3F4F6', al = dark ? 'rgba(255,255,255,.15)' : '#E5E7EB';
+    charts.forEach(c => c.setOption({
+      xAxis: { axisLine: { lineStyle: { color: al } }, axisLabel: { color: tc } },
+      yAxis: { axisLine: { lineStyle: { color: al } }, axisLabel: { color: tc }, splitLine: { lineStyle: { color: gl } } },
+      tooltip: dark ? { backgroundColor: 'rgba(24,27,33,.96)', borderColor: 'rgba(201,169,106,.35)', textStyle: { color: '#E8EAED' } } : undefined,
+    }));
+  }
+  const origSetTheme = window.setTheme;
+  window.setTheme = function (t) {
+    origSetTheme(t);
+    setTimeout(redrawCharts, 60);
+  };
+
+
+
+  // ===== 分解树 v2：血缘链 / 面包屑 / 聚焦 =====
+  const treeRoot = document.querySelector('#treeSvg');
+  if (treeRoot) {
+    const nodes = treeRoot.querySelectorAll('.tnode');
+    const links = treeRoot.querySelectorAll('.tlink');
+    const crumb = document.getElementById('breadcrumb');
+    let focused = null;
+    // 热力：成本占比 → 底色深浅（蓝 tint）
+    nodes.forEach(n => {
+      const pct = parseFloat(n.dataset.pct || 0);
+      const rect = n.querySelector('.ncard');
+      if (rect && pct > 0) {
+        rect.style.fill = 'rgba(0,122,255,' + (0.03 + pct / 100 * 0.14) + ')';
+      }
+    });
+    function highlightChain(node, on) {
+      const chain = (node.dataset.chain || '').split(',');
+      nodes.forEach(n => {
+        const inChain = chain.includes(n.id);
+        if (on) {
+          n.classList.toggle('dim', !inChain);
+          if (inChain && n !== node) n.classList.add('chain');
+        } else {
+          n.classList.remove('dim', 'chain');
+        }
+      });
+      links.forEach(l => {
+        const hot = on && [...chain].some(id => l.id.includes(id));
+        l.classList.toggle('hot', !!hot);
+      });
+    }
+    nodes.forEach(node => {
+      node.addEventListener('mouseenter', () => { if (!focused) highlightChain(node, true); });
+      node.addEventListener('mouseleave', () => { if (!focused) highlightChain(node, false); });
+      node.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.querySelectorAll('#treeSvg .tnode').forEach(n => n.classList.remove('sel'));
+        node.classList.add('sel');
+        // 面包屑
+        const chain = (node.dataset.chain || '').split(',');
+        const names = chain.map(id => { const n = treeRoot.querySelector('#' + id); return n ? n.dataset.name : id; });
+        crumb.innerHTML = names.map((nm, i) => '<span style="color:#86868B">' + (i > 0 ? ' › ' : '') + '</span><b style="font-weight:600;color:' + (i === names.length - 1 ? '#007AFF' : '#1D1D1F') + '">' + nm + '</b>').join('');
+      });
+      node.addEventListener('dblclick', () => {
+        focused = focused === node ? null : node;
+        nodes.forEach(n => n.classList.remove('dim', 'chain'));
+        if (focused) {
+          highlightChain(focused, true);
+          document.querySelectorAll('#treeSvg .tnode').forEach(n => { if (n !== focused && !n.classList.contains('chain')) n.classList.add('dim'); });
+        } else {
+          crumb.innerHTML = '整机';
+        }
+      });
+    });
+    // 空白点击取消
+    treeRoot.addEventListener('click', (e) => {
+      if (e.target === treeRoot || e.target.tagName === 'svg') {
+        nodes.forEach(n => n.classList.remove('sel', 'dim', 'chain'));
+        crumb.innerHTML = '整机';
+      }
+    });
+  }
+
+  // ===== 分解树演示交互 =====
+  document.querySelectorAll('#treeSvg .tnode').forEach(node => {
+    node.addEventListener('click', () => {
+      document.querySelectorAll('#treeSvg .tnode').forEach(n => n.classList.remove('sel'));
+      node.classList.add('sel', 'pulse');
+      setTimeout(() => node.classList.remove('pulse'), 320);
+    });
+  });
+
   function setTheme(t) {
     document.body.setAttribute('data-theme', t);
     document.querySelectorAll('.theme-btn').forEach(b => b.classList.toggle('active', b.dataset.t === t));
     try { localStorage.setItem('demo_theme', t); } catch {}
   }
   try { const saved = localStorage.getItem('demo_theme'); if (saved) setTheme(saved); } catch {}
-  setTheme('a');
+  setTheme('d');
   function show(id) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    if (id === 'charts') { setTimeout(() => { if (typeof initCharts === 'function') initCharts(); }, 80); }
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.getElementById(id).classList.add('active');
-    document.querySelectorAll('.tab')[['dashboard','security','advice'].indexOf(id)].classList.add('active');
+    document.querySelectorAll('.tab')[['dashboard','security','advice','charts','tree'].indexOf(id)].classList.add('active');
   }
   function goto(id) { show(id); }
   function toggleRow(el) { el.classList.toggle('expanded'); }
@@ -476,9 +767,336 @@
 <!-- 固定悬浮主题切换器（右下角，永远可见） -->
 <div id="themeFloat" style="position: fixed; right: 18px; bottom: 18px; z-index: 9999; background: #1E293B; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; padding: 8px 10px; display: flex; gap: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.25);">
   <span style="color:#94A3B8;font-size:11px;align-self:center;padding-right:4px">主题</span>
-  <button class="theme-btn" data-t="a" onclick="setTheme('a')" style="background:#fff;color:#6366F1;font-weight:700;border-color:#fff">A 企业蓝</button>
+  <button class="theme-btn" data-t="a" onclick="setTheme('a')" style="background:#fff;color:#5E5CE6;font-weight:700;border-color:#fff">A 企业蓝</button>
   <button class="theme-btn" data-t="b" onclick="setTheme('b')">B 极简白</button>
   <button class="theme-btn" data-t="c" onclick="setTheme('c')">C 深色驾驶舱</button>
+    <button class="theme-btn" data-t="d" onclick="setTheme('d')" style="border-color:rgba(34,211,238,.6);color:#007AFF">D 科技感</button>
+  <button class="theme-btn" data-t="d" onclick="setTheme('d')" style="border-color:rgba(34,211,238,.6);color:#007AFF">D 科技感</button>
+</div>
+
+
+<!-- ==================== 图表展示（ECharts 质感版，真实交互） ==================== -->
+<div class="page" id="charts">
+  <div class="panel">
+    <div class="panel-head"><span class="title">📊 图表质感（ECharts 渲染 · 悬停查看十字线/高亮/数值）</span><span class="right">入场动画 800ms · 交互全开</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div style="border:1px solid #E8ECF1;border-radius:10px;padding:10px 12px;background:#fff">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">折线趋势 · 价格历史</div>
+        <div id="chLine" style="width:100%;height:190px"></div>
+      </div>
+      <div style="border:1px solid #E8ECF1;border-radius:10px;padding:10px 12px;background:#fff">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">柱状对比 · 项目 BOM 成本</div>
+        <div id="chBar" style="width:100%;height:190px"></div>
+      </div>
+      <div style="border:1px solid #E8ECF1;border-radius:10px;padding:10px 12px;background:#fff">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">横向条形 · 品类成本占比</div>
+        <div id="chHbar" style="width:100%;height:190px"></div>
+      </div>
+      <div style="border:1px solid #E8ECF1;border-radius:10px;padding:10px 12px;background:#fff">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">环形 · 整机成本构成</div>
+        <div id="chDonut" style="width:100%;height:190px"></div>
+      </div>
+      <div style="border:1px solid #E8ECF1;border-radius:10px;padding:10px 12px;background:#fff">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">雷达 · 竞品六维对比</div>
+        <div id="chRadar" style="width:100%;height:190px"></div>
+      </div>
+      <div style="border:1px solid #E8ECF1;border-radius:10px;padding:10px 12px;background:#fff">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">迷你趋势组 · 关键物料</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;height:190px">
+          <div id="chSpark1" style="height:100%"></div>
+          <div id="chSpark2" style="height:100%"></div>
+          <div id="chSpark3" style="height:100%"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 物料洞察树（升级演示：洞察覆盖度 + 血缘链） ==================== -->
+<div class="page" id="tree">
+  <div class="panel">
+    <div class="panel-head"><span class="title">🌳 物料洞察树 · 升级演示</span><span class="right">洞察覆盖一目了然 · 悬停看血缘与结果 · 点击选链 · 双击聚焦</span></div>
+    <!-- 洞察统计条 -->
+    <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;font-size:11.5px;flex-wrap:wrap">
+      <span style="color:#86868B">洞察覆盖 <b style="color:#1D1D1F">6 / 12</b> 节点</span>
+      <span style="display:flex;align-items:center;gap:4px"><i style="width:8px;height:8px;border-radius:50%;background:#34C759;display:inline-block"></i><span style="color:#6E6E73">已洞察</span></span>
+      <span style="display:flex;align-items:center;gap:4px"><i style="width:8px;height:8px;border-radius:50%;background:#C7C7CC;display:inline-block"></i><span style="color:#6E6E73">待洞察</span></span>
+      <span style="display:flex;align-items:center;gap:4px"><i style="width:8px;height:8px;border-radius:50%;background:#FF9500;display:inline-block"></i><span style="color:#6E6E73">成本大头未洞察 · 建议优先</span></span>
+      <span style="margin-left:auto;color:#86868B">成本大头覆盖 <b style="color:#1D1D1F">3 / 4</b></span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;color:#86868B">
+      <span style="font-weight:600;color:#1D1D1F">路径</span>
+      <span id="breadcrumb" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">锂电池</span>
+    </div>
+    <div style="border:1px solid #E8ECF1;border-radius:14px;padding:14px;background:#fff;overflow:auto">
+      <svg id="treeSvg" viewBox="0 0 760 440" style="display:block;width:100%;min-width:660px">
+        <style>
+          .tlink { fill: none; stroke: #D1D1D6; stroke-width: 1.6; transition: stroke 160ms ease-out; }
+          .tlink:hover, .tlink.hot { stroke: #007AFF; stroke-width: 2.2; animation: flow 1.2s linear infinite; }
+          @keyframes flow { to { stroke-dashoffset: -18; } }
+          .tnode { cursor: pointer; transition: transform 200ms cubic-bezier(.32,.72,0,1); }
+          .tnode rect { transition: fill 160ms ease-out, stroke 160ms ease-out; }
+          .tnode .ncard { fill: #fff; stroke: #E5E5EA; stroke-width: 1.4; }
+          .tnode:hover .ncard { fill: #F5F7FF; stroke: #007AFF; }
+          .tnode:hover { transform: translateY(-3px); }
+          .tnode.sel .ncard { fill: #F0F7FF; stroke: #007AFF; stroke-width: 2.2; filter: drop-shadow(0 3px 8px rgba(0,122,255,.25)); }
+          .tnode.dim { opacity: .22; transition: opacity 200ms ease-out; }
+          .tnode.chain .ncard { stroke: #007AFF; stroke-width: 2; filter: drop-shadow(0 3px 6px rgba(0,122,255,.2)); }
+          .tnode.chain { transform: translateY(-2px); }
+          .nname { font-size: 12px; font-weight: 600; fill: #1D1D1F; }
+          .nratio { font-size: 10px; fill: #86868B; }
+          .ndir { font-size: 10px; font-weight: 700; }
+          .nbox { animation: nodeIn 420ms cubic-bezier(.32,.72,0,1) backwards; }
+          @keyframes nodeIn { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: scale(1); } }
+        </style>
+        <!-- 连线 -->
+        <path class="tlink" id="l1" d="M380,70 C380,130 185,130 185,185"/>
+        <path class="tlink" id="l2" d="M380,70 C380,130 380,130 380,185"/>
+        <path class="tlink" id="l3" d="M380,70 C380,130 575,130 575,185"/>
+        <path class="tlink" id="l4" d="M185,255 C185,305 95,305 95,360"/>
+        <path class="tlink" id="l5" d="M185,255 C185,305 185,305 185,360"/>
+        <path class="tlink" id="l6" d="M380,255 C380,305 300,305 300,360"/>
+        <path class="tlink" id="l7" d="M380,255 C380,305 470,305 470,360"/>
+        <path class="tlink" id="l8" d="M575,255 C575,305 575,305 575,360"/>
+        <path class="tlink" id="l9" d="M575,255 C575,305 670,305 670,360"/>
+        <!-- 根 -->
+        <g id="n-root" class="tnode" data-name="锂电池" data-chain="n-root" data-pct="100">
+          <g class="nbox"><rect class="ncard" x="312" y="18" width="136" height="52" rx="13"/>
+            <text class="nname" x="380" y="40" text-anchor="middle">锂电池</text>
+            <text class="nratio" x="380" y="58" text-anchor="middle">100% · 已洞察 <tspan class="ndir" fill="#FF9500">▲ 中</tspan></text></g>
+        </g>
+        <!-- 层2 -->
+        <g id="n-cathode" class="tnode" data-name="正极材料" data-chain="n-root,n-cathode" data-pct="35" data-dir="▲" data-conf="中" data-last="8月12日">
+          <g class="nbox" style="animation-delay:80ms"><rect class="ncard" x="125" y="185" width="120" height="70" rx="12"/>
+            <circle cx="145" cy="210" r="5" fill="#34C759"/><text class="nname" x="158" y="214">正极材料</text>
+            <text class="nratio" x="185" y="232" text-anchor="middle">35% · 大头</text>
+            <text class="ndir" x="185" y="248" text-anchor="middle" fill="#FF9500">已洞察 ▲ 置信中</text></g>
+          <g class="ntip"><rect class="tipcard" x="120" y="263" width="150" height="34" rx="6"/><text class="tiptext" x="128" y="277">最近洞察 8月12日 · ▲ 中</text><text class="tiptext" x="128" y="290">碳酸锂价格上行传导</text></g>
+        </g>
+        <g id="n-anode" class="tnode" data-name="负极材料" data-chain="n-root,n-anode" data-pct="28" data-dir="" data-conf="" data-last="">
+          <g class="nbox" style="animation-delay:120ms"><rect class="ncard" x="320" y="185" width="120" height="70" rx="12"/>
+            <circle cx="340" cy="210" r="5" fill="#C7C7CC"/><text class="nname" x="353" y="214">负极材料</text>
+            <text class="nratio" x="380" y="232" text-anchor="middle">28% · 大头</text>
+            <text class="ndir" x="380" y="248" text-anchor="middle" fill="#FF9500">待洞察 · 建议优先</text></g>
+          <g class="ntip"><rect class="tipcard" x="315" y="263" width="150" height="22" rx="6"/><text class="tiptext" x="323" y="277">成本大头未洞察 · 点「洞察行情」</text></g>
+        </g>
+        <g id="n-elec" class="tnode" data-name="电解液" data-chain="n-root,n-elec" data-pct="18" data-dir="▼" data-conf="低" data-last="8月02日">
+          <g class="nbox" style="animation-delay:160ms"><rect class="ncard" x="515" y="185" width="120" height="70" rx="12"/>
+            <circle cx="535" cy="210" r="5" fill="#34C759"/><text class="nname" x="548" y="214">电解液</text>
+            <text class="nratio" x="575" y="232" text-anchor="middle">18%</text>
+            <text class="ndir" x="575" y="248" text-anchor="middle" fill="#34C759">已洞察 ▼ 低</text></g>
+          <g class="ntip"><rect class="tipcard" x="510" y="263" width="150" height="22" rx="6"/><text class="tiptext" x="518" y="277">最近洞察 8月02日 · ▼ 低</text></g>
+        </g>
+        <!-- 层3 -->
+        <g id="n-lfp" class="tnode" data-name="磷酸铁锂" data-chain="n-root,n-cathode,n-lfp" data-pct="20" data-dir="▲" data-conf="中" data-last="8月12日">
+          <g class="nbox" style="animation-delay:200ms"><rect class="ncard" x="49" y="360" width="92" height="44" rx="11"/>
+            <circle cx="65" cy="376" r="4" fill="#34C759"/><text class="nname" x="76" y="379" font-size="11">磷酸铁锂</text>
+            <text class="nratio" x="95" y="395" text-anchor="middle">20%</text></g>
+          <g class="ntip"><rect class="tipcard" x="30" y="330" width="140" height="22" rx="6"/><text class="tiptext" x="38" y="344">▲ 中 · 8月12日</text></g>
+        </g>
+        <g id="n-lco" class="tnode" data-name="碳酸锂" data-chain="n-root,n-cathode,n-lco" data-pct="8" data-dir="" data-conf="" data-last="">
+          <g class="nbox" style="animation-delay:230ms"><rect class="ncard" x="139" y="360" width="92" height="44" rx="11"/>
+            <circle cx="155" cy="376" r="4" fill="#FF9500"/><text class="nname" x="166" y="379" font-size="11">碳酸锂</text>
+            <text class="nratio" x="185" y="395" text-anchor="middle">8%</text></g>
+          <g class="ntip"><rect class="tipcard" x="120" y="330" width="140" height="22" rx="6"/><text class="tiptext" x="128" y="344">待洞察</text></g>
+        </g>
+        <g id="n-graph" class="tnode" data-name="石墨" data-chain="n-root,n-anode,n-graph" data-pct="15" data-dir="▲" data-conf="高" data-last="7月28日">
+          <g class="nbox" style="animation-delay:260ms"><rect class="ncard" x="244" y="360" width="92" height="44" rx="11"/>
+            <circle cx="260" cy="376" r="4" fill="#34C759"/><text class="nname" x="271" y="379" font-size="11">石墨</text>
+            <text class="nratio" x="290" y="395" text-anchor="middle">15%</text></g>
+          <g class="ntip"><rect class="tipcard" x="225" y="330" width="140" height="22" rx="6"/><text class="tiptext" x="233" y="344">▲ 高 · 7月28日</text></g>
+        </g>
+        <g id="n-hf" class="tnode" data-name="六氟磷酸锂" data-chain="n-root,n-elec,n-hf" data-pct="10" data-dir="" data-conf="" data-last="">
+          <g class="nbox" style="animation-delay:290ms"><rect class="ncard" x="424" y="360" width="92" height="44" rx="11"/>
+            <circle cx="440" cy="376" r="4" fill="#C7C7CC"/><text class="nname" x="451" y="379" font-size="11">六氟磷酸锂</text>
+            <text class="nratio" x="470" y="395" text-anchor="middle">10%</text></g>
+          <g class="ntip"><rect class="tipcard" x="405" y="330" width="140" height="22" rx="6"/><text class="tiptext" x="413" y="344">待洞察</text></g>
+        </g>
+        <g id="n-pe" class="tnode" data-name="隔膜" data-chain="n-root,n-elec,n-pe" data-pct="7" data-dir="—" data-conf="低" data-last="7月10日">
+          <g class="nbox" style="animation-delay:320ms"><rect class="ncard" x="529" y="360" width="92" height="44" rx="11"/>
+            <circle cx="545" cy="376" r="4" fill="#34C759"/><text class="nname" x="556" y="379" font-size="11">隔膜</text>
+            <text class="nratio" x="575" y="395" text-anchor="middle">7%</text></g>
+          <g class="ntip"><rect class="tipcard" x="510" y="330" width="140" height="22" rx="6"/><text class="tiptext" x="518" y="344">— 低 · 7月10日</text></g>
+        </g>
+        <g id="n-case" class="tnode" data-name="壳体" data-chain="n-root,n-case" data-pct="7" data-dir="—" data-conf="低" data-last="7月05日">
+          <g class="nbox" style="animation-delay:350ms"><rect class="ncard" x="624" y="360" width="92" height="44" rx="11"/>
+            <circle cx="640" cy="376" r="4" fill="#34C759"/><text class="nname" x="651" y="379" font-size="11">壳体</text>
+            <text class="nratio" x="670" y="395" text-anchor="middle">7%</text></g>
+          <g class="ntip"><rect class="tipcard" x="600" y="330" width="140" height="22" rx="6"/><text class="tiptext" x="608" y="344">— 低 · 7月05日</text></g>
+        </g>
+      </svg>
+    </div>
+    <div style="font-size:11.5px;color:#6E6E73;margin-top:10px;line-height:1.9">
+      <b style="color:#1D1D1F">升级后的价值（不是炫技）：</b><br>
+      ① <b>覆盖度一眼可见</b>：灰点=待洞察 · 绿点=已洞察（带方向/置信度）· 橙色=成本大头未洞察（建议优先）<br>
+      ② <b>血缘链高亮</b>：悬停「碳酸锂」→ 看它到「锂电池」的上游传导路径<br>
+      ③ <b>成本热度</b>：底色深浅=占比（正极 35% 最深）——大头优先洞察<br>
+      ④ <b>面包屑 + 聚焦</b>：深层树不迷路（点击选链、双击聚焦）<br>
+      ⑤ hover 卡片：最近洞察时间/方向/摘要（数据全来自 trend_items 现有字段）
+    </div>
+  </div>
+</div>
+<!-- ==================== 图表展示（ECharts 质感版，真实交互） ==================== -->
+<div class="page" id="charts">
+  <div class="panel">
+    <div class="panel-head"><span class="title">📊 图表质感（ECharts 渲染 · 悬停查看十字线/高亮/数值）</span><span class="right">入场动画 800ms · 交互全开</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div style="border:1px solid #E8ECF1;border-radius:10px;padding:10px 12px;background:#fff">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">折线趋势 · 价格历史</div>
+        <div id="chLine" style="width:100%;height:190px"></div>
+      </div>
+      <div style="border:1px solid #E8ECF1;border-radius:10px;padding:10px 12px;background:#fff">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">柱状对比 · 项目 BOM 成本</div>
+        <div id="chBar" style="width:100%;height:190px"></div>
+      </div>
+      <div style="border:1px solid #E8ECF1;border-radius:10px;padding:10px 12px;background:#fff">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">横向条形 · 品类成本占比</div>
+        <div id="chHbar" style="width:100%;height:190px"></div>
+      </div>
+      <div style="border:1px solid #E8ECF1;border-radius:10px;padding:10px 12px;background:#fff">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">环形 · 整机成本构成</div>
+        <div id="chDonut" style="width:100%;height:190px"></div>
+      </div>
+      <div style="border:1px solid #E8ECF1;border-radius:10px;padding:10px 12px;background:#fff">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">雷达 · 竞品六维对比</div>
+        <div id="chRadar" style="width:100%;height:190px"></div>
+      </div>
+      <div style="border:1px solid #E8ECF1;border-radius:10px;padding:10px 12px;background:#fff">
+        <div style="font-size:12px;font-weight:700;margin-bottom:4px">迷你趋势组 · 关键物料</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;height:190px">
+          <div id="chSpark1" style="height:100%"></div>
+          <div id="chSpark2" style="height:100%"></div>
+          <div id="chSpark3" style="height:100%"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 分解树互动演示 ==================== -->
+<div class="page" id="tree">
+  <div class="panel">
+    <div class="panel-head"><span class="title">🌳 分解树 · 互动与动画演示</span><span class="right">试试：悬停节点 / 点击选中 / 悬停连线</span></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;color:#86868B">
+      <span style="font-weight:600;color:#1D1D1F">路径</span>
+      <span id="breadcrumb" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">整机</span>
+      <span style="margin-left:auto;font-size:11px;color:#86868B">悬停看血缘 · 点击选链 · 双击聚焦</span>
+    </div>
+    <div style="border:1px solid #E8ECF1;border-radius:10px;padding:14px;background:#fff;overflow:auto">
+      <svg id="treeSvg" viewBox="0 0 760 420" style="display:block;width:100%;min-width:640px">
+        <defs>
+          <filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#007AFF" flood-opacity=".35"/></filter>
+        </defs>
+        <style>
+          .tlink { fill: none; stroke: #CBD5E1; stroke-width: 1.8; transition: stroke 160ms ease-out; }
+          .tlink:hover, .tlink.hot { stroke: #007AFF; stroke-width: 2.4; animation: flow 1.2s linear infinite; }
+          @keyframes flow { to { stroke-dashoffset: -18; } }
+          .tnode { cursor: pointer; transition: transform 200ms cubic-bezier(.32,.72,0,1); transform-origin: center; }
+          .tnode rect { transition: fill 160ms ease-out, stroke 160ms ease-out; }
+          .tnode .ncard { fill: #fff; stroke: #D8DEE8; stroke-width: 1.5; }
+          .tnode:hover .ncard { fill: #F5F7FF; stroke: #64D2FF; }
+          .tnode:hover { transform: translateY(-3px); }
+          .tnode.sel .ncard { fill: #EEF2FF; stroke: #007AFF; stroke-width: 2.5; filter: url(#glow); }
+          .tnode.pulse .ncard { animation: nodepulse 300ms cubic-bezier(.32,.72,0,1); }
+          @keyframes nodepulse { 0% { transform: scale(1); } 40% { transform: scale(1.06); } 100% { transform: scale(1); } }
+          .tnode .ntip { opacity: 0; transition: opacity 150ms ease-out; pointer-events: none; }
+          .tnode:hover .ntip { opacity: 1; }
+          .tnode .nbox { animation: nodeIn 420ms cubic-bezier(.32,.72,0,1) backwards; }
+          @keyframes nodeIn { from { opacity: 0; transform: scale(.82); } to { opacity: 1; transform: scale(1); } }
+          .nname { font-size: 12px; font-weight: 700; fill: #1F2937; }
+          .nratio { font-size: 10px; fill: #64748B; }
+          .nstatus { font-size: 9.5px; font-weight: 600; }
+          .tipcard { fill: #1F2937; rx: 6; }
+          .tiptext { font-size: 9.5px; fill: #fff; }
+        </style>
+        <!-- 连线（自下而上：子→父） -->
+        <path class="tlink" id="l1"  d="M380,96 C380,150 235,150 235,196"/>
+        <path class="tlink" id="l2"  d="M380,96 C380,150 525,150 525,196"/>
+        <path class="tlink" id="l3"  d="M380,96 C380,160 655,160 655,196"/>
+        <path class="tlink" id="l4"  d="M235,266 C235,312 120,312 120,358"/>
+        <path class="tlink" id="l5"  d="M235,266 C235,312 235,312 235,358"/>
+        <path class="tlink" id="l6"  d="M235,266 C235,312 350,312 350,358"/>
+        <path class="tlink" id="l7"  d="M525,266 C525,312 455,312 455,358"/>
+        <path class="tlink" id="l8"  d="M525,266 C525,312 605,312 605,358"/>
+        <path class="tlink" id="l9"  d="M655,266 C655,312 655,312 655,358"/>
+        <!-- 根节点 -->
+        <g id="n-root" class="tnode" data-name="M270 整机" data-chain="n-root" data-pct="100" data-info="整机成本 ¥1,150 · 成本率 100%">
+          <g class="nbox"><rect class="ncard" x="312" y="44" width="136" height="52" rx="11"/>
+            <text class="nname" x="380" y="66" text-anchor="middle">M270 整机</text>
+            <text class="nratio" x="380" y="84" text-anchor="middle">100% · ¥1,150</text></g>
+          <g class="ntip"><rect class="tipcard" x="418" y="20" width="120" height="22"/><text class="tiptext" x="426" y="34">整机成本 ¥1,150</text></g>
+        </g>
+        <!-- 二层 -->
+        <g id="n-disp" class="tnode" data-name="显示模块" data-chain="n-root,n-disp" data-pct="45" data-info="成本占比 45% · ¥518 · 已洞察">
+            <g class="nbox" style="animation-delay:80ms"><rect class="ncard" x="115" y="196" width="120" height="70" rx="11"/>
+              <circle cx="129" cy="219" r="9" fill="#007AFF22"/><circle cx="129" cy="219" r="4.5" fill="#007AFF"/>
+              <text class="nname" x="145" y="223" text-anchor="start">显示模块</text>
+              <text class="nratio" x="175" y="242" text-anchor="middle">45% · ¥518</text>
+              <text class="nstatus" x="175" y="257" text-anchor="middle" fill="#34C759">● 已洞察</text></g>
+            <g class="ntip"><rect class="tipcard" x="115" y="274" width="130" height="22"/><text class="tiptext" x="123" y="288">显示模块 · 45% · ¥518</text></g>
+          </g><g class="tnode " data-name="电源模块" data-info="成本占比 28% · ¥322 · 已洞察">
+            <g class="nbox" style="animation-delay:130ms"><rect class="ncard" x="405" y="196" width="120" height="70" rx="11"/>
+              <circle cx="419" cy="219" r="9" fill="#86868B22"/><circle cx="419" cy="219" r="4.5" fill="#86868B"/>
+              <text class="nname" x="435" y="223" text-anchor="start">电源模块</text>
+              <text class="nratio" x="465" y="242" text-anchor="middle">28% · ¥322</text>
+              <text class="nstatus" x="465" y="257" text-anchor="middle" fill="#34C759">● 已洞察</text></g>
+            <g class="ntip"><rect class="tipcard" x="405" y="274" width="130" height="22"/><text class="tiptext" x="413" y="288">电源模块 · 28% · ¥322</text></g>
+          </g><g class="tnode " data-name="结构模块" data-info="成本占比 27% · ¥310 · 已洞察">
+            <g class="nbox" style="animation-delay:180ms"><rect class="ncard" x="535" y="196" width="120" height="70" rx="11"/>
+              <circle cx="549" cy="219" r="9" fill="#007AFF22"/><circle cx="549" cy="219" r="4.5" fill="#007AFF"/>
+              <text class="nname" x="565" y="223" text-anchor="start">结构模块</text>
+              <text class="nratio" x="595" y="242" text-anchor="middle">27% · ¥310</text>
+              <text class="nstatus" x="595" y="257" text-anchor="middle" fill="#34C759">● 已洞察</text></g>
+            <g class="ntip"><rect class="tipcard" x="535" y="274" width="130" height="22"/><text class="tiptext" x="543" y="288">结构模块 · 27% · ¥310</text></g>
+          </g>
+        <!-- 三层 -->
+        <g id="n-screen" class="tnode" data-name="屏" data-chain="n-root,n-disp,n-screen" data-pct="32" data-info="占比 32% · 状态 正常">
+            <g class="nbox" style="animation-delay:180ms"><rect class="ncard" x="74" y="358" width="92" height="46" rx="10"/>
+              <circle cx="86" cy="372" r="6" fill="#007AFF33"/><circle cx="86" cy="372" r="3" fill="#007AFF"/>
+              <text class="nname" x="98" y="376" font-size="11">屏</text>
+              <text class="nratio" x="120" y="391" text-anchor="middle">32%</text></g>
+          </g><g id="n-back" class="tnode" data-name="背光" data-chain="n-root,n-disp,n-back" data-pct="8" data-info="占比 8% · 状态 正常">
+            <g class="nbox" style="animation-delay:220ms"><rect class="ncard" x="189" y="358" width="92" height="46" rx="10"/>
+              <circle cx="201" cy="372" r="6" fill="#64D2FF33"/><circle cx="201" cy="372" r="3" fill="#64D2FF"/>
+              <text class="nname" x="213" y="376" font-size="11">背光</text>
+              <text class="nratio" x="235" y="391" text-anchor="middle">8%</text></g>
+          </g><g id="n-drv" class="tnode" data-name="驱动板" data-chain="n-root,n-disp,n-drv" data-pct="5" data-info="占比 5% · 状态 正常">
+            <g class="nbox" style="animation-delay:260ms"><rect class="ncard" x="304" y="358" width="92" height="46" rx="10"/>
+              <circle cx="316" cy="372" r="6" fill="#64D2FF33"/><circle cx="316" cy="372" r="3" fill="#64D2FF"/>
+              <text class="nname" x="328" y="376" font-size="11">驱动板</text>
+              <text class="nratio" x="350" y="391" text-anchor="middle">5%</text></g>
+          </g><g id="n-ic" class="tnode" data-name="电源IC" data-chain="n-root,n-pwr,n-ic" data-pct="12" data-info="占比 12% · 状态 正常">
+            <g class="nbox" style="animation-delay:300ms"><rect class="ncard" x="409" y="358" width="92" height="46" rx="10"/>
+              <circle cx="421" cy="372" r="6" fill="#86868B33"/><circle cx="421" cy="372" r="3" fill="#86868B"/>
+              <text class="nname" x="433" y="376" font-size="11">电源IC</text>
+              <text class="nratio" x="455" y="391" text-anchor="middle">12%</text></g>
+          </g><g id="n-cap" class="tnode" data-name="电容" data-chain="n-root,n-pwr,n-cap" data-pct="16" data-info="占比 16% · 状态 正常">
+            <g class="nbox" style="animation-delay:340ms"><rect class="ncard" x="559" y="358" width="92" height="46" rx="10"/>
+              <circle cx="571" cy="372" r="6" fill="#AEAEB233"/><circle cx="571" cy="372" r="3" fill="#AEAEB2"/>
+              <text class="nname" x="583" y="376" font-size="11">电容</text>
+              <text class="nratio" x="605" y="391" text-anchor="middle">16%</text></g>
+          </g><g id="n-shell" class="tnode" data-name="外壳" data-chain="n-root,n-str,n-shell" data-pct="18" data-info="占比 18% · 状态 正常">
+            <g class="nbox" style="animation-delay:380ms"><rect class="ncard" x="609" y="358" width="92" height="46" rx="10"/>
+              <circle cx="621" cy="372" r="6" fill="#007AFF33"/><circle cx="621" cy="372" r="3" fill="#007AFF"/>
+              <text class="nname" x="633" y="376" font-size="11">外壳</text>
+              <text class="nratio" x="655" y="391" text-anchor="middle">18%</text></g>
+          </g><g id="n-bkt" class="tnode" data-name="支架" data-chain="n-root,n-str,n-bkt" data-pct="9" data-info="占比 9% · 状态 正常">
+            <g class="nbox" style="animation-delay:420ms"><rect class="ncard" x="609" y="358" width="92" height="46" rx="10"/>
+              <circle cx="621" cy="372" r="6" fill="#64D2FF33"/><circle cx="621" cy="372" r="3" fill="#64D2FF"/>
+              <text class="nname" x="633" y="376" font-size="11">支架</text>
+              <text class="nratio" x="655" y="391" text-anchor="middle">9%</text></g>
+          </g>
+      </svg>
+    </div>
+    <div style="font-size:11.5px;color:#64748B;margin-top:8px;line-height:1.8">
+      <b>演示的交互与动效（将落地到真实分解树）：</b><br>
+      ① 节点悬停：上浮 3px + 边框亮化 + 信息浮层<br>
+      ② 节点点击：脉冲缩放 + 选中发光（品牌色描边 + 投影）<br>
+      ③ 连线悬停：高亮 + 虚线流动动画（表示数据流向）<br>
+      ④ 入场：节点逐层缩放淡入（stagger 40-50ms）<br>
+      ⑤ 状态标识：已洞察绿点 / 草稿半透明 / 成本占比标签
+    </div>
+  </div>
 </div>
 
 </body>
