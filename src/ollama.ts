@@ -36,19 +36,19 @@ export async function startOllamaStream(
   const cleanup = () => { unlisteners.forEach(u => u()); };
 
   const u1 = await listenEvent<string>(`llm-token-${eventId}`, ev => {
-    if (ev.payload) { console.log('[流式] token 事件, 长度:', ev.payload.length, 'eventId:', eventId.slice(0, 12)); onToken(ev.payload); }
+    if (ev.payload) {  onToken(ev.payload); }
   });
   const u2 = await listenEvent<string>(`llm-reasoning-${eventId}`, ev => {
     if (ev.payload) onReasoning(ev.payload);
   });
-  const u3 = await listenEvent<string>(`llm-done-${eventId}`, () => { console.log('[流式] done 事件, eventId:', eventId.slice(0, 12)); cleanup(); onDone(); });
+  const u3 = await listenEvent<string>(`llm-done-${eventId}`, () => {  cleanup(); onDone(); });
   const u4t = await listenEvent<string>(`llm-toolcalls-${eventId}`, ev => {
     if (ev.payload && opts?.onToolCalls) {
       try { const arr = JSON.parse(ev.payload); opts.onToolCalls(Array.isArray(arr) ? arr : []); } catch { /* 忽略 */ }
     }
   });
   unlisteners.push(u4t);
-  const u4 = await listenEvent<string>(`llm-error-${eventId}`, ev => { console.log('[流式] error 事件:', ev.payload, 'eventId:', eventId.slice(0, 12)); cleanup(); onError(ev.payload); });
+  const u4 = await listenEvent<string>(`llm-error-${eventId}`, ev => {  cleanup(); onError(ev.payload); });
   unlisteners.push(u1, u2, u3, u4);
   let body: any;
   if (opts?.endpoint === 'native') {
@@ -85,7 +85,7 @@ export async function startOllamaStream(
     }
   }
 
-  console.log('[流式] 发起 http_stream:', url, 'model:', model, 'eventId:', eventId.slice(0, 12));
+  
   invoke('http_stream', {
     url, eventId,
     headers: { 'Content-Type': 'application/json' },

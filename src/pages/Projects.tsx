@@ -478,7 +478,7 @@ export default function Projects() {
     });
   };
   const clearInsightSelect = () => setInsightSelected(new Set());
-  // 批量归档（已读）：选中模块全部标记已读
+  // 批量归档（已读）：选中模块全部标记已读（带撤销）
   const batchArchiveInsights = async () => {
     const ids = [...insightSelected];
     if (ids.length === 0) return;
@@ -490,7 +490,17 @@ export default function Projects() {
     }
     setInsightSelected(new Set());
     await loadInsights();
-    message.success(`已归档 ${ids.length} 个模块（可在「全部」查看或恢复）`);
+    notification.success({
+      message: `已归档 ${ids.length} 个模块（已读）`,
+      placement: 'bottomRight', duration: 4,
+      btn: <Button size="small" type="link" onClick={async () => {
+        for (const ins of targets) {
+          try { await markInsightUnread(ins.category, ins.module_name); } catch { /* 忽略 */ }
+        }
+        await loadInsights();
+        notification.success({ message: '已恢复 ${ids.length} 个模块为待处理', placement: 'bottomRight', duration: 3 });
+      }}>撤销</Button>,
+    });
   };
   // 批量确认同一：选中模块内所有待处理组逐组确认（汇总结果）
   const batchConfirmInsights = async () => {
@@ -521,7 +531,7 @@ export default function Projects() {
     }
     setInsightSelected(new Set());
     await loadInsights();
-    message.success(`批量确认完成：${confirmed} 个模块、${groups} 组已沉淀别名并消除情报`);
+    message.success(`批量确认完成：${confirmed} 个模块、${groups} 组已沉淀别名并消除情报（如需撤销可在「已处理」中逐组恢复）`);
   };
   // 撤销已处理：删别名 → 重算 → 组回到待处理
   const undoHandledInsight = async (ins: any, hi: number) => {
