@@ -306,9 +306,9 @@ export async function getTokenUsageStats(): Promise<{
   const rows = await d.select<any[]>(
     'SELECT provider_name, model_name, SUM(COALESCE(prompt_tokens,0)) as prompt, SUM(COALESCE(completion_tokens,0)) as completion, SUM(COALESCE(total_tokens,0)) as total, COUNT(*) as cnt FROM ai_request_logs GROUP BY provider_name, model_name ORDER BY total DESC'
   );
-  const totalRow = await d.select<any[]>('SELECT SUM(COALESCE(prompt_tokens,0)) as p, SUM(COALESCE(completion_tokens,0)) as c, SUM(COALESCE(total_tokens,0)) as t, COUNT(*) as cnt FROM ai_request_logs WHERE provider_name NOT LIKE 'Ollama%'');
+  const totalRow = await d.select<any[]>(`SELECT SUM(COALESCE(prompt_tokens,0)) as p, SUM(COALESCE(completion_tokens,0)) as c, SUM(COALESCE(total_tokens,0)) as t, COUNT(*) as cnt FROM ai_request_logs WHERE provider_name NOT LIKE 'Ollama%'`);
   const daily = await d.select<any[]>(
-    "SELECT substr(created_at,1,10) as day, SUM(COALESCE(total_tokens,0)) as total FROM ai_request_logs GROUP BY day ORDER BY day DESC LIMIT 30"
+    "SELECT substr(created_at,1,10) as day, SUM(COALESCE(total_tokens,0)) as total FROM ai_request_logs WHERE provider_name NOT LIKE 'Ollama%' GROUP BY day ORDER BY day DESC LIMIT 30"
   );
   const t = totalRow[0] || { p: 0, c: 0, t: 0, cnt: 0 };
   return {
