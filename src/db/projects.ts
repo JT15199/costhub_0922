@@ -556,7 +556,7 @@ export async function renameLibraryModule(projectId: number, oldName: string, ne
 
 export async function getProjectModuleSummary(projectId: number) {
   const d = await getDb();
-  const boms = await d.select<any[]>(`SELECT pb.module_name, pb.quantity, CASE WHEN pb.part_cost > 0 THEN pb.part_cost ELSE p.cost END as cost FROM project_boms pb JOIN parts p ON pb.part_id = p.id WHERE pb.project_id = ?`, [projectId]);
+  const boms = await d.select<any[]>(`SELECT pb.module_name, pb.quantity, CASE WHEN pb.part_cost > 0 THEN pb.part_cost ELSE p.cost END as cost FROM project_boms pb JOIN parts p ON pb.part_id = p.id WHERE pb.project_id = ? AND COALESCE(pb.is_deleted, 0) = 0`, [projectId]);
   const map: Record<string, number> = {};
   boms.forEach(b => {
     const m = b.module_name || '未归类';
