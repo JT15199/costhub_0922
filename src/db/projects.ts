@@ -165,6 +165,13 @@ export async function recordProjectCostSnapshot(projectId: number, snapshotType 
     }
   }
 
+  // 无实质变化跳过：成本与费率都未变且非手动记录 → 不产生空快照（避免快照泛滥噪音）
+  if (prevSnap && snapshotType !== 'manual_snapshot' && changeDetails === '') {
+    const sameBom = Math.abs(bomCost - Number(prevSnap.bom_cost || 0)) <= 0.01;
+    const sameTotal = Math.abs(totalCost - Number(prevSnap.total_cost || 0)) <= 0.01;
+    if (sameBom && sameTotal) return Number(prevSnap.id);
+  }
+
   const result = await d.execute(
     `INSERT INTO project_cost_snapshots
       (project_id, snapshot_type, change_reason, bom_cost, total_cost, platform_fee_rate, profit_rate, module_count, item_count, change_details)

@@ -3031,7 +3031,7 @@ export default function Projects() {
         </div>
         <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
           <Segmented size="small" value={insightView} options={[{ label: '待处理', value: 'pending' }, { label: '全部', value: 'all' }, { label: '已处理', value: 'done' }]}
-            onChange={(v: any) => setInsightView(v)} />
+            onChange={(v: any) => { setInsightView(v); setInsightSelected(new Set()); }} />
           <span style={{ fontSize: 11.5, color: '#94A3B8' }}>待处理 = 未读；「已处理」保留确认/标记记录，可撤销恢复</span>
           {insightSelected.size > 0 && (
             <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
