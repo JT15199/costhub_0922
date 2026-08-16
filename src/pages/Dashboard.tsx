@@ -51,6 +51,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   // 折叠控制
   const [costOpen, setCostOpen] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
+  const [targetOpen, setTargetOpen] = useState(false);   // 目标成本达成：默认 3 条
+  const [advisorMore, setAdvisorMore] = useState(false); // AI 自主建议：默认 3 条
   // 洞察直达：objects 里匹配项目代号 → 项目页；器件名 → 器件库搜索
   const goToAuditObject = (f: any) => {
     let objs: string[] = [];
@@ -269,7 +271,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
 
         {missedSorted.length > 0 ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10 }}>
-            {missedSorted.map(t => (
+            {missedSorted.slice(0, targetOpen ? missedSorted.length : 3).map(t => (
               <div key={`${t.projectId}-${t.domain}`} onClick={() => goProject(onNavigate, t.projectId)}
                 style={{ border: '1px solid #FECACA', background: '#FFF5F5', borderRadius: 10, padding: '10px 14px', cursor: 'pointer', transition: 'box-shadow 0.2s' }}
                 onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(239,68,68,0.15)'; }}
@@ -291,6 +293,11 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           <div style={{ padding: '6px 2px', fontSize: 13, color: '#10B981' }}>
             {summary.targetedProjects > 0 ? '✓ 所有已设目标的领域均达成（实际 ≤ 目标）' : '尚未设定目标成本'}
           </div>
+        )}
+        {missedSorted.length > 3 && (
+          <a onClick={() => setTargetOpen(o => !o)} style={{ display: 'inline-block', marginTop: 8, fontSize: 12, color: '#0A84FF' }}>
+            {targetOpen ? '收起 ▲' : '展开全部（' + (missedSorted.length - 3) + ' 条）▼'}
+          </a>
         )}
 
         {summary.untargetedProjects > 0 && (
@@ -328,12 +335,19 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
               <div style={{ fontSize: 12, color: '#94A3B8', padding: '8px 0' }}>暂无建议——系统空闲时自动分析成本机会/风险点，有新发现会在这里提醒</div>
             ) : (
               <>
-                {advisorInsights.slice(0, 3).map((a: any) => (
+                {advisorInsights.slice(0, advisorMore ? advisorInsights.length : 3).map((a: any) => (
                   <div key={a.id} style={{ padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: 12 }}>
                     <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.title}</div>
                     <div style={{ color: '#64748B', fontSize: 11.5, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.detail}</div>
                   </div>
                 ))}
+                {advisorInsights.length > 3 && (
+                  <div style={{ marginTop: 6, textAlign: 'center' }}>
+                    <a onClick={() => setAdvisorMore(m => !m)} style={{ fontSize: 12, color: '#0A84FF' }}>
+                      {advisorMore ? '收起 ▲' : '展开全部（' + (advisorInsights.length - 3) + ' 条）▼'}
+                    </a>
+                  </div>
+                )}
                 <div style={{ marginTop: 6, textAlign: 'center' }}>
                   <a onClick={() => onNavigate?.('localAI')} style={{ fontSize: 12, color: '#0A84FF' }}>查看全部（处理 / 洞察 / 复制提示词）→</a>
                 </div>

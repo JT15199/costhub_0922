@@ -18,10 +18,11 @@ const shortDate = (t?: string) => (t || '').slice(5, 10) || '';
 
 export default function KeyMaterialInsights({ onNavigate, compact }: { onNavigate?: (page: string) => void; compact?: boolean }) {
   const [plan, setPlan] = useState<InsightPlanItem[] | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const { identifyKeyMaterials, aggregateMaterials, buildInsightPlan, queryLastInsights } = await import('../autoInsight');
+      const { identifyKeyMaterials, aggregateMaterials, buildInsightPlan, queryLastInsights, buildMaterialSuggestion } = await import('../autoInsight');
       const { getProjects, getProjectBOMs, getSetting } = await import('../db');
       const projects = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted && (p.project_type || '') === '在研');
       if (projects.length === 0) { setPlan([]); return; }
@@ -32,7 +33,17 @@ export default function KeyMaterialInsights({ onNavigate, compact }: { onNavigat
       const aggregates = aggregateMaterials(identifyKeyMaterials(projects, bomsByProject));
       const intervalDays = Math.max(1, Number(await getSetting('ai_insight_interval_days', '30')) || 30);
       const p = buildInsightPlan(aggregates, await queryLastInsights(), { intervalDays, now: new Date() });
-      setPlan(p.slice(0, 8));
+      // 机会点置顶（2026-08-16 用户要求）：opportunity > risk > info > 其他，同级别保持原顺序
+      const levelOf = (item: InsightPlanItem): number => {
+        const s = buildMaterialSuggestion(item.aggregate, {
+          direction: item.lastDirection, confidence: item.lastConfidence, summary: item.lastSummary,
+          suggested_action: item.lastAction, magnitudeMin: item.lastMagnitudeMin, magnitudeMax: item.lastMagnitudeMax,
+        });
+        return s?.level === 'opportunity' ? 0 : s?.level === 'risk' ? 1 : s?.level === 'info' ? 2 : 3;
+      };
+      const sorted = [...p].sort((a, b) => levelOf(a) - levelOf(b));
+      setPlan(sorted);
+      setExpanded(false);
     } catch { setPlan([]); }
   }, []);
 
@@ -55,7 +66,7 @@ export default function KeyMaterialInsights({ onNavigate, compact }: { onNavigat
         <a style={{ fontSize: 12 }} onClick={() => onNavigate?.('decomposition')}>全部洞察 <ArrowRightOutlined /></a>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {plan.map((item, i) => {
+        {plan.slice(0, expanded ? plan.length : 4).map((item, i) => {
           const agg = item.aggregate;
           const top = agg.projects[0];
           const dir = DIRECTION_META[item.lastDirection || ''] || null;
@@ -113,6 +124,11 @@ export default function KeyMaterialInsights({ onNavigate, compact }: { onNavigat
           );
         })}
       </div>
+      {plan.length > 4 && (
+        <a onClick={() => setExpanded(e => !e)} style={{ display: 'inline-block', marginTop: 8, fontSize: 12, color: '#0A84FF' }}>
+          {expanded ? '收起 ▲' : '展开全部（' + (plan.length - 4) + ' 条）▼'}
+        </a>
+      )}
     </div>
   );
 }
