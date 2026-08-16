@@ -1032,6 +1032,10 @@ export default function LocalAIAssistant() {
   const [bridgeReuseInfo, setBridgeReuseInfo] = useState<{ ins: any; recent: any } | null>(null); // 复用确认
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
+  // ===== Agent 模式（P1：工具注册表 + 计划-执行-总结） =====
+  const [agentMode, setAgentMode] = useState(false);       // 输入框模式：普通对话 / Agent 任务
+  const [agentTrace, setAgentTrace] = useState<any[]>([]); // 工具执行轨迹（[{name,argsText,status,result}]）
+  const [agentTraceOpen, setAgentTraceOpen] = useState(true);
   const [elapsed, setElapsed] = useState(0); // 生成过程计时（秒）
   const [streamRate, setStreamRate] = useState(0); // 生成速度（字符/秒）
   const [contextEntries, setContextEntries] = useState<ContextEntry[]>([]);
@@ -1504,6 +1508,102 @@ export default function LocalAIAssistant() {
     await sendMessage(`${dataCtx}\n\n${prompt}`);
   }, [sendMessage]);
 
+  // ===== Agent 任务（P1）：计划-执行-总结，工具轨迹可见 =====
+  const sendAgentTask = useCallback(async (userContent: string) => {
+    if (!userContent.trim() || streaming) return;
+    if (!model) { message.warning('请先连接Ollama并选择模型'); return; }
+    let sid = sessionId;
+    if (!sid) {
+      sid = await newSession(userContent.slice(0, 20));
+      setSessions(await loadSessions()); setSessionId(sid);
+    }
+    setMessages(prev => [...prev, { role: 'user', content: userContent }]);
+    await saveMsg(sid, 'user', userContent);
+    setInput('');
+    setStreaming(true);
+    setPhase('thinking');
+    setAgentTrace([]);
+    setAgentTraceOpen(true);
+    setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+    const currentSid = sid;
+    const ollamaBase = ollamaUrl.replace(/\/$/, '');
+    let full = '', reasoning = '';
+
+    try {
+      // ① 计划：本地模型输出工具调用序列（非流式）
+      setPhase('fetching');
+      const { buildToolsPrompt, buildPlanSystemPrompt, parseAgentPlan, unknownTools, runAgentPlan, buildAnswerSystemPrompt } = await import('../aiAgent');
+      const { listTools } = await import('../aiTools');
+      const planPrompt = buildPlanSystemPrompt(buildToolsPrompt(listTools()));
+      const planResp = await invoke<{ status: number; body: string; success: boolean }>('http_post', {
+        request: {
+          url: ollamaBase + '/api/chat',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, messages: [{ role: 'system', content: planPrompt }, { role: 'user', content: userContent }], stream: false, options: { temperature: 0.1 } }),
+        },
+      });
+      if (!planResp.success) throw new Error('HTTP ' + planResp.status);
+      const planBody = JSON.parse(planResp.body);
+      const planText: string = planBody?.message?.content || '';
+      await logLocalAICall({ request_type: 'agent_plan', system_prompt: planPrompt.slice(0, 3000), user_prompt: userContent.slice(0, 3000), response_summary: planText.slice(0, 1500), success: true, model_name: model });
+      const plan = parseAgentPlan(planText);
+      // 无有效计划或无需工具 → 降级普通对话
+      if (!plan || plan.steps.length === 0) {
+        setAgentTraceOpen(false);
+        setStreaming(false);
+        message.info('这个任务不需要工具执行，已按普通对话处理');
+        await sendMessage(userContent);
+        return;
+      }
+      // ② 执行：顺序跑工具，轨迹实时更新
+      const unknown = unknownTools(plan);
+      const steps = plan.steps.filter(s => !unknown.includes(s.tool));
+      if (steps.length === 0) throw new Error('计划中的工具不可用');
+      const { report } = await runAgentPlan({ steps }, (trace) => {
+        setAgentTrace(prev => {
+          const arr = [...prev];
+          const idx = arr.findIndex(x => x.tool === trace.tool && x.argsText === trace.argsText && x.status === 'running');
+          if (idx >= 0) arr[idx] = { ...trace };
+          else arr.push({ ...trace });
+          return arr;
+        });
+        window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: 'Agent：' + trace.name + (trace.status === 'running' ? '…' : ' ✓') } }));
+      });
+      setPhase('thinking');
+      // ③ 总结：基于执行报告流式生成最终回答
+      const ansSystem = buildAnswerSystemPrompt() + '\n\n【工具执行报告】\n' + report.slice(0, 6000);
+      const apiMessages = [
+        { role: 'system', content: ansSystem },
+        { role: 'user', content: userContent },
+      ];
+      await new Promise<void>((resolve, reject) => {
+        startOllamaStream(
+          ollamaUrl, model, apiMessages,
+          (token) => {
+            setPhase('streaming');
+            full += token;
+            setMessages(prev => { const arr = [...prev]; arr[arr.length - 1] = { role: 'assistant', content: full, reasoning }; return arr; });
+          },
+          (token) => { reasoning += token; setPhase('thinking'); },
+          () => resolve(),
+          (err) => reject(new Error(err)),
+          { endpoint: 'native', think: false },
+        ).then(c => { cleanupRef.current = c; }).catch(() => { /* 错误走 onError */ });
+      });
+      await logLocalAICall({ request_type: 'agent_answer', system_prompt: ansSystem.slice(0, 3000), user_prompt: userContent.slice(0, 3000), response_summary: (full || '').slice(0, 2000), success: true, model_name: model });
+      if (full) await saveMsg(currentSid, 'assistant', full, reasoning);
+    } catch (e: any) {
+      const err = e?.message || String(e);
+      await logLocalAICall({ request_type: 'agent_answer', system_prompt: '', user_prompt: userContent.slice(0, 3000), response_summary: '', success: false, error_message: String(err).slice(0, 500), model_name: model });
+      setMessages(prev => { const arr = [...prev]; arr[arr.length - 1] = { role: 'assistant', content: 'Agent 任务执行失败：' + err + '\n\n可切换回「普通对话」重试。', reasoning }; return arr; });
+      await saveMsg(currentSid, 'assistant', 'Agent 任务执行失败：' + err, reasoning);
+      playChime('error');
+    } finally {
+      setStreaming(false);
+      setPhase('idle');
+    }
+  }, [streaming, model, sessionId, ollamaUrl, sendMessage]);
+
   // 智能导入：更新某行分类字段
   const updateImportRow = useCallback((idx: number, field: string, value: any) => {
     setImportRows(prev => {
@@ -1915,14 +2015,54 @@ return (
           </div>
         )}
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+          {agentTrace.length > 0 && (
+            <div style={{ marginBottom: 8, borderRadius: 8, border: '1px solid var(--color-border)', background: 'rgba(99,102,241,0.04)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', cursor: 'pointer', fontSize: 11.5, color: 'var(--color-text-secondary)' }} onClick={() => setAgentTraceOpen(!agentTraceOpen)}>
+                <RobotOutlined style={{ color: '#6366F1' }} />
+                <b>Agent 执行过程（{agentTrace.filter(x => x.status !== 'running').length}/{agentTrace.length}）</b>
+                <span style={{ flex: 1 }} />
+                <span>{agentTraceOpen ? '▾' : '▸'}</span>
+              </div>
+              {agentTraceOpen && (
+                <div style={{ padding: '0 10px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {agentTrace.map((tr, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 11.5 }}>
+                      <span style={{ color: tr.status === 'ok' ? '#16A34A' : tr.status === 'fail' ? '#DC2626' : '#6366F1', flexShrink: 0 }}>
+                        {tr.status === 'ok' ? '✅' : tr.status === 'fail' ? '❌' : '⏳'}
+                      </span>
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <b>{tr.name}</b>
+                        {tr.argsText !== '无参数' && <span style={{ color: '#94A3B8' }}>（{tr.argsText}）</span>}
+                        {tr.status !== 'running' && (
+                          <div style={{ color: 'var(--color-text-secondary)', fontSize: 11, lineHeight: 1.5, whiteSpace: 'pre-wrap', marginTop: 1 }}>
+                            {tr.result.slice(0, 220)}{tr.result.length > 220 ? '…' : ''}
+                          </div>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8 }}>
-            <Input.TextArea value={input} onChange={e => setInput(e.target.value)} placeholder="输入问题，或使用左侧工具注入数据分析…" autoSize={{ minRows: 1, maxRows: 5 }} onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); sendMessage(input); } }} style={{ borderRadius: 10 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ marginBottom: 4 }}>
+                <Segmented size="small" value={agentMode ? 'agent' : 'chat'} disabled={streaming} onChange={(v: any) => setAgentMode(v === 'agent')}
+                  options={[
+                    { label: '💬 普通对话', value: 'chat' },
+                    { label: '🤖 Agent 任务', value: 'agent' },
+                  ]} />
+                {agentMode && <span style={{ fontSize: 10.5, color: '#94A3B8', marginLeft: 6 }}>AI 自动调用工具完成多步任务（全部只读，数据不出本机）</span>}
+              </div>
+              <Input.TextArea value={input} onChange={e => setInput(e.target.value)} placeholder={agentMode ? '例如：分析 M270 成本结构，找出 top3 风险物料并洞察行情，最后总结 200 字' : '输入问题，或使用左侧工具注入数据分析…'} autoSize={{ minRows: 1, maxRows: 5 }} onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); agentMode ? sendAgentTask(input) : sendMessage(input); } }} style={{ borderRadius: 10 }} />
+            </div>
             {streaming
               ? <Button danger icon={<ClearOutlined />} onClick={() => { stoppedRef.current = true; cleanupRef.current?.(); setStreaming(false); }} style={{ alignSelf: 'flex-end' }}>停止</Button>
-              : <Button type="primary" icon={<SendOutlined />} onClick={() => sendMessage(input)} disabled={!input.trim()} style={{ alignSelf: 'flex-end' }}>发送</Button>
+              : <Button type="primary" icon={<SendOutlined />} onClick={() => agentMode ? sendAgentTask(input) : sendMessage(input)} disabled={!input.trim()} style={{ alignSelf: 'flex-end' }}>{agentMode ? '执行' : '发送'}</Button>
             }
           </div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 4 }}>Shift+Enter 换行 · Enter 发送 · 数据仅在本机处理</div>
+          <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 4 }}>Shift+Enter 换行 · Enter 发送 · 数据仅在本机处理{agentMode ? ' · Agent 只读执行，计划与结果可审查' : ''}</div>
         </div>
         </>
         ) : (

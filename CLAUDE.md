@@ -52,6 +52,15 @@
 - **已处理建议在"已处理"视图消失（用户反馈）**：排查三层——①库里 16 条建议全 open 无 done：UPDATE SQL 层验证正常（rowcount=1）②根因一（真实 bug）：autoAdvisor enhanceWithAI 的 AI 润色用 updateAdvisorStatus(existing.id, 'open', ...) 覆盖用户已处理状态——findAdvisorByFingerprint 把 done 也视为"已存在"，30 分钟后润色把 done 改回 open → 已处理记录消失。修复：润色前查 status，非 open 跳过（不覆盖用户选择）③根因二（交互）：setAdvisorStatus 乐观移除（点击立即消失）依赖 loadAdvisor 恢复，任一步失败则列表空 → 改乐观标记（条目保留并立即显示新状态）+ 失败回滚 + 报错；「仅看待处理」按钮加"（已处理 N）"计数，处理成功提示"切「显示全部」可查看"
 - **验证**：tsc -b 0 错；118 vitest 全过
 
+### v2.3.19 P1 Agent 工作台：工具注册表 + 复合任务对话（2026-08-16，用户确认先做 P1）
+- **目标**：把本地 AI 对话升级成"指挥 AI 干活"的工作台——一句话完成多步成本分析（DSH 式体验的第一步）
+- **工具注册表**（src/aiTools.ts，12 个只读工具）：query_projects / query_project_bom / query_project_cost（模块成本结构）/ query_part_suppliers / query_supplier_trend（复用 supplierTrend）/ query_target_status（复用 computeTargetStatuses）/ query_cost_snapshots / query_price_insights / query_advisor_insights / query_worklog / query_todos / insight_material_trend（走 agentSearchLoop，外发=物料通用名+品类）；统一 AiTool 结构（id/name/desc/params/execute），validateArgs 参数校验 + executeTool 结果截断 2000 字；⚠️ **第一版无任何写操作工具**（安全边界）
+- **Agent 循环**（src/aiAgent.ts）：计划-执行-总结——①本地模型读工具清单（buildToolsPrompt）输出 JSON 计划（buildPlanSystemPrompt 约束：steps 数组/依赖顺序/最多 6 步/无需工具输出空 steps）②parseAgentPlan 容错解析（代码块围栏/中文引号/单引号/尾逗号/杂文本/别名映射 query_bom→query_project_bom 等）③runAgentPlan 顺序执行（onStep 轨迹回调）④基于执行报告流式生成最终回答（buildAnswerSystemPrompt：禁止编造/只依据结果）
+- **UI**（LocalAIAssistant）：输入框上方 Segmented「💬 普通对话 / 🤖 Agent 任务」；Agent 模式下输入区上方显示**执行轨迹卡**（✅/❌/⏳ 工具中文名 + 参数 + 结果摘要，可折叠）；发送走 sendAgentTask：计划→执行→流式总结，失败/无需工具自动降级普通对话；Agent 过程广播 costhub-ai-task
+- **审计**：logLocalAICall('agent_plan'/'agent_answer') 留痕（计划与回答全文可查）
+- **测试**：aiTools.test.ts 7 用例（元数据/参数校验/未知工具）+ aiAgent.test.ts 12 用例（容错解析 7/未知工具/提示词）——**139 vitest 全过**
+- **下一步（P2 讨论中）**：MCP 桥 / 写操作工具（按用户确认后逐步放开）/ 更多工具（SKU/ODM/报告生成）
+
 # CostHub - 成本管理平台 v2.3.19
 
 ## 项目概述
