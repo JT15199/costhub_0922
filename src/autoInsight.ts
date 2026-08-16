@@ -6,23 +6,23 @@ import { getProjects, getProjectBOMs, getSetting } from './db';
 import { getDb } from './db/core';
 import { materialKey } from './db/advisor';
 
-// ==================== ① 关键物料识别（纯本地规则） ====================
+// ==================== ① 关键物料识别（纯本地规则，按子类聚合） ====================
+// 2026-08-16（用户要求）：洞察对象从"具体物料"改为"子类"——子类一般是物料的通用名称（如"液晶面板"），
+// 行情洞察对通用名称更有意义，且避免具体型号外发。sub_category 为空的行回退用物料名（part_name）。
 
 export interface KeyMaterial {
   projectId: number;
   projectCode: string;
-  partId: number;
-  name: string;
-  model: string;
-  category: string;   // main_category
-  unitCost: number;
-  quantity: number;
-  subtotal: number;   // 单价×数量（原始值）
-  ratio: number;      // 项目内成本占比 0-1
+  name: string;        // 子类名（通用名称；sub_category 为空时回退物料名）
+  models: string[];    // 该子类涉及的具体型号（UI 展示用，最多 5 个）
+  category: string;    // main_category
+  subtotal: number;    // 子类小计（Σ 单价×数量，原始值）
+  ratio: number;       // 项目内成本占比 0-1
 }
 
 /**
- * 帕累托识别：每个项目按物料小计降序，累计占比 ≥80% 或 top5（先到者，至少 2 个才触发帕累托截断）
+ * 帕累托识别（按子类分组）：每个项目内先把 BOM 行按 sub_category（为空回退 part_name）分组，
+ * 组小计降序，累计占比 ≥80% 或 top5（先到者，至少 2 个才触发帕累托截断）
  * 数量为 0 / 无单价 / 总成本为 0 的项目跳过（占位物料不算关键料）
  */
 export function identifyKeyMaterials(
@@ -38,30 +38,36 @@ export function identifyKeyMaterials(
       (b: any) => !b.is_deleted && b.part_id && (b.quantity ?? 0) > 0
     );
     const cost = (b: any) => (b.part_cost ?? b.cost ?? 0) * (b.quantity ?? 1);
-    const total = boms.reduce((s, b) => s + cost(b), 0);
+    // 按子类分组
+    const groups = new Map<string, { rows: any[]; subtotal: number; category: string }>();
+    for (const b of boms) {
+      const gname = String(b.sub_category || '').trim() || String(b.part_name || '').trim();
+      if (!gname) continue;
+      let g = groups.get(gname);
+      if (!g) { g = { rows: [], subtotal: 0, category: b.main_category || '未分类' }; groups.set(gname, g); }
+      g.rows.push(b);
+      g.subtotal += cost(b);
+    }
+    const total = [...groups.values()].reduce((s, g) => s + g.subtotal, 0);
     if (total <= 0) continue;
-    const sorted = [...boms].sort((a, b) => cost(b) - cost(a));
-    const picked: any[] = [];
+    const sorted = [...groups.entries()].sort((a, b) => b[1].subtotal - a[1].subtotal);
+    const picked: [string, { rows: any[]; subtotal: number; category: string }][] = [];
     let acc = 0;
-    for (const b of sorted) {
+    for (const entry of sorted) {
       if (picked.length >= maxPerProject) break;
-      picked.push(b);
-      acc += cost(b);
+      picked.push(entry);
+      acc += entry[1].subtotal;
       if (picked.length >= 2 && acc / total >= cumRatio) break;
     }
-    for (const b of picked) {
-      const sub = cost(b);
+    for (const [gname, g] of picked) {
       out.push({
         projectId: p.id,
-        projectCode: p.code || "",
-        partId: b.part_id,
-        name: b.part_name || "",
-        model: b.part_model || "",
-        category: b.main_category || "未分类",
-        unitCost: b.part_cost ?? b.cost ?? 0,
-        quantity: b.quantity ?? 1,
-        subtotal: sub,
-        ratio: total > 0 ? sub / total : 0,
+        projectCode: p.code || '',
+        name: gname,
+        models: [...new Set(g.rows.map(r => String(r.part_model || '').trim()).filter(Boolean))].slice(0, 5),
+        category: g.category,
+        subtotal: g.subtotal,
+        ratio: total > 0 ? g.subtotal / total : 0,
       });
     }
   }
@@ -72,8 +78,8 @@ export function identifyKeyMaterials(
 
 export interface MaterialAggregate {
   key: string;          // materialKey(name, category)
-  name: string;
-  model: string;
+  name: string;         // 子类名（通用名称）
+  models: string[];     // 涉及的具体型号（跨项目合并去重）
   category: string;
   projects: { projectId: number; projectCode: string; ratio: number; subtotal: number }[];
   totalSubtotal: number;
@@ -85,9 +91,11 @@ export function aggregateMaterials(materials: KeyMaterial[]): MaterialAggregate[
     const key = materialKey(m.name, m.category);
     let a = map.get(key);
     if (!a) {
-      a = { key, name: m.name, model: m.model, category: m.category, projects: [], totalSubtotal: 0 };
+      a = { key, name: m.name, models: [], category: m.category, projects: [], totalSubtotal: 0 };
       map.set(key, a);
     }
+    for (const md of m.models || []) { if (!a.models.includes(md)) a.models.push(md); }
+    if (a.models.length > 5) a.models = a.models.slice(0, 5);
     if (!a.projects.some(x => x.projectId === m.projectId)) {
       a.projects.push({ projectId: m.projectId, projectCode: m.projectCode, ratio: m.ratio, subtotal: m.subtotal });
     }

@@ -154,7 +154,7 @@ export default function App() {
         window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: '关键物料洞察', done: true } }));
         window.dispatchEvent(new CustomEvent('costhub-insight-done'));
         if (r && r.insights > 0) {
-          message.success(`关键物料洞察完成：本轮洞察 ${r.insights} 个物料行情（共 ${r.planned} 个关键物料，见驾驶舱「关键物料洞察」）`);
+          message.success(`关键物料洞察完成：本轮洞察 ${r.insights} 类物料行情（共 ${r.planned} 个关键子类，见驾驶舱「关键物料洞察」）`);
         }
       } catch { /* 静默：识别/洞察失败不打扰 */ }
       insightRunningRef.current = false;

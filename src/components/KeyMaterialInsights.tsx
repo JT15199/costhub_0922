@@ -49,7 +49,7 @@ export default function KeyMaterialInsights({ onNavigate }: { onNavigate?: (page
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
         <BulbOutlined style={{ color: '#D97706' }} />
         <b style={{ fontSize: 13 }}>关键物料洞察</b>
-        <Tag style={{ margin: 0, fontSize: 10.5, lineHeight: '18px' }} color="orange">自动 · 30 天周期</Tag>
+        <Tag style={{ margin: 0, fontSize: 10.5, lineHeight: '18px' }} color="orange">按子类 · 30 天周期</Tag>
         <span style={{ flex: 1 }} />
         <a style={{ fontSize: 12 }} onClick={() => onNavigate?.('decomposition')}>全部洞察 <ArrowRightOutlined /></a>
       </div>
@@ -66,7 +66,9 @@ export default function KeyMaterialInsights({ onNavigate }: { onNavigate?: (page
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 12.5, fontWeight: 600 }}>{agg.name}</span>
-                  {agg.model && <span style={{ fontSize: 10.5, color: '#94A3B8' }}>{agg.model}</span>}
+                  {agg.models && agg.models.length > 0 && (
+                    <span style={{ fontSize: 10.5, color: '#94A3B8' }}>{'含 ' + agg.models.length + ' 种型号'}</span>
+                  )}
                   <Tag style={{ margin: 0, fontSize: 10, lineHeight: '16px' }}>{agg.category}</Tag>
                   <span style={{ fontSize: 10.5, color: '#94A3B8' }}>
                     占 {top.projectCode} {Math.round(top.ratio * 100)}%{agg.projects.length > 1 ? ' · 共 ' + agg.projects.length + ' 项目' : ''}
