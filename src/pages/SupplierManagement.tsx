@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { EmojiIcon } from '../iconMap';
 import { Card, Button, Input, Select, Tag, Space, Modal, Form, message, Tabs, Row, Col, Statistic, Table, Popconfirm, Empty, InputNumber, Radio, Upload } from 'antd';
 import { ShopOutlined, AppstoreOutlined, UnorderedListOutlined, EditOutlined, DeleteOutlined, HistoryOutlined, HomeOutlined, BuildOutlined, ToolOutlined, BarChartOutlined, SearchOutlined, CameraOutlined } from '@ant-design/icons';
-import { getAllPartSuppliers, getParts, addPartSupplier, updatePartSupplier, deletePartSupplier, getSupplierPriceHistory, getProjects, getProjectSuppliers, getSupplierProfiles, saveSupplierProfile } from '../db';
+import { getAllPartSuppliers, getParts, addPartSupplier, updatePartSupplier, deletePartSupplier, getSupplierPriceHistory, getProjects, getProjectSuppliers, getProjectSupplierPriceHistory, getSupplierProfiles, saveSupplierProfile } from '../db';
 import { getCategoryColor } from '../constants';
 import DataTable from '../components/DataTable';
 import type { PartSupplier, ProjectSupplier } from '../types';
@@ -257,6 +257,18 @@ export default function SupplierManagement() {
     }
   };
 
+  // 查看整机供应商（ODM）报价历史
+  const showProjectPriceHistory = async (supplierId: number) => {
+    try {
+      const history = await getProjectSupplierPriceHistory(supplierId);
+      setPriceHistory(history);
+      setPriceHistoryOpen(true);
+    } catch (e) {
+      console.error(e);
+      message.error('加载报价历史失败');
+    }
+  };
+
   // 详细列表表格数据
   const detailListData = allSuppliers
     .map(s => {
@@ -270,6 +282,7 @@ export default function SupplierManagement() {
 
       return {
         id: s.id,
+        partId: part.id,
         mainCategory: part.main_category,
         subCategory: part.sub_category || '-',
         partName: part.name,
@@ -614,7 +627,7 @@ export default function SupplierManagement() {
                     width: 120,
                     render: (_: any, record: any) => (
                       <Space size="small">
-                        <Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => showPriceHistory(record.part_id, record.supplier_name)} />
+                        <Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => showPriceHistory(record.partId, record.supplierName)} />
                         <Button type="link" size="small" icon={<EditOutlined />} onClick={() => {
                           const relation = allSuppliers.find(s => s.id === record.id);
                           if (relation) openEditModal(relation);
@@ -646,7 +659,7 @@ export default function SupplierManagement() {
                     width: 80,
                     render: (_: any, record: any) => (
                       <Space size="small">
-                        <Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => showPriceHistory(record.part_id, record.supplier_name)} />
+                        <Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => showProjectPriceHistory(record.supplierId)} />
                       </Space>
                     )
                   }

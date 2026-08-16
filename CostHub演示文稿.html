@@ -720,7 +720,53 @@
   </section>
 
 
-  <!-- 14 AI 演示生成 -->
+  <!-- 14 AI 双向洞察 · 本地-云端桥 -->
+  <section class="slide">
+    <div class="slide-body">
+      <div class="kicker">AI BRIDGE</div>
+      <h2>AI 双向洞察 · 本地算、云端查，数据不出门</h2>
+      <p class="lead">单条物料想判断行情，但不想把成本数据发出去——<b>三步链路</b>把"读数据"和"查行情"分开：本地模型读你的数据，云端只收到三个字段。</p>
+      <div style="display:flex; align-items:stretch; gap:8px; margin-top:14px;">
+        <div class="card" style="margin-top:0; flex:1;">
+          <h3>① 本地读数据</h3>
+          <p style="font-size:13px; line-height:1.7;">本地模型读取建议卡上下文（成本 / 项目都在本机）→ 判断查询意图，只输出 <b>物料名 / 品类 / 问题</b> 三个字段</p>
+        </div>
+        <div style="display:flex; align-items:center; color:#A5A8F0; font-weight:700;">→</div>
+        <div class="card" style="margin-top:0; flex:1;">
+          <h3>② 云端查行情</h3>
+          <p style="font-size:13px; line-height:1.7;">固定脱敏模板发送 → 联网搜索行情；发送前自动审计，命中敏感词直接拦截</p>
+        </div>
+        <div style="display:flex; align-items:center; color:#A5A8F0; font-weight:700;">→</div>
+        <div class="card" style="margin-top:0; flex:1;">
+          <h3>③ 本地给结论</h3>
+          <p style="font-size:13px; line-height:1.7;">本地模型结合<b>本地成本数据 + 云端行情</b> → 机会 / 风险 / 目标 / 行动建议，落回建议卡</p>
+        </div>
+      </div>
+      <div class="two-col" style="margin-top:14px;">
+        <div class="card" style="margin-top:0;">
+          <h3>🔐 安全：不是靠信任，是靠结构</h3>
+          <ul class="check-list">
+            <li>云端提示词是<b>固定模板</b>，只有三个字段位——成本 / 供应商 / 项目代号在结构上无处可传</li>
+            <li>发送前正则审计兜底：金额 / 型号 / 供应商 / 代号命中即拦截</li>
+            <li>每次云端调用全程留痕，外发内容随时可审查</li>
+            <li>每日云端用量阈值可设，超限自动改走本地</li>
+          </ul>
+        </div>
+        <div class="card" style="margin-top:0;">
+          <h3>♻️ 不重复烧调用</h3>
+          <p style="font-size:13px; line-height:1.7;">同一物料 <b>7 天内</b>再次洞察 → 先弹出历史结论供复用确认，选"强制最新"才重新查——省调用，也保留判断的连续性</p>
+          <div style="margin-top:12px; font-size:12px; color:#8A857E; line-height:1.6;">开箱即用：未配置本地模型时自动降级为"规则意图 + 云端结论"</div>
+        </div>
+      </div>
+      <div class="banner">
+        <h3>发给外面的每一句话，都经得起检查</h3>
+        <p>本地模型负责"看懂你的数据"，云端模型负责"知道市场行情"——<b>两边各干各的，交接处只有三个字段</b>。</p>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- 15 AI 演示生成 -->
   <section class="slide">
     <div class="slide-body">
       <div class="kicker">LOCAL AI GENERATION</div>
@@ -756,7 +802,7 @@
   </section>
 
 
-  <!-- 15 AI 的边界（实事求是） -->
+  <!-- 16 AI 的边界（实事求是） -->
   <section class="slide">
     <div class="slide-body">
       <div class="kicker">AI LIMITS</div>
@@ -788,7 +834,7 @@
   </section>
 
 
-  <!-- 16 配置教程：本地模型（Ollama） -->
+  <!-- 17 配置教程：本地模型（Ollama） -->
   <section class="slide">
     <div class="slide-body">
       <div class="kicker">SETUP · 本地模型</div>
@@ -819,7 +865,7 @@
   </section>
 
 
-  <!-- 17 配置教程：API Key -->
+  <!-- 18 配置教程：API Key -->
   <section class="slide">
     <div class="slide-body">
       <div class="kicker">SETUP · API KEY</div>
@@ -846,7 +892,7 @@
   </section>
 
 
-  <!-- 18 后续规划 + 结尾 -->
+  <!-- 19 后续规划 + 结尾 -->
   <section class="slide">
     <div class="slide-body">
       <div class="kicker">ROADMAP</div>
