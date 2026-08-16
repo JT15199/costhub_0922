@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CostHub 运行逻辑 · AI 能力流程图</title>
+<style>
+  :root{
+    --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --bg:#f1f5f9; --card:#ffffff;
+    --primary:#2563eb; --radius:14px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.6;
+  }
+  .wrap{max-width:1240px; margin:0 auto; padding:24px 20px 60px;}
+
+  /* ---------- 顶栏 ---------- */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+    background:linear-gradient(120deg,#1e3a8a,#2563eb 55%,#3b82f6);
+    color:#fff; border-radius:var(--radius); padding:22px 26px; box-shadow:0 10px 30px rgba(37,99,235,.25);
+  }
+  .topbar h1{font-size:24px; font-weight:700; letter-spacing:.5px;}
+  .topbar .ver{background:rgba(255,255,255,.2); border:1px solid rgba(255,255,255,.45); padding:2px 10px; border-radius:999px; font-size:14px; font-weight:600; margin-left:8px;}
+  .topbar .sub{font-size:13px; opacity:.85; margin-top:4px;}
+  .topbar-actions{display:flex; align-items:center; gap:12px;}
+  .topbar-actions .updated{font-size:13px; opacity:.9; background:rgba(255,255,255,.15); padding:6px 12px; border-radius:8px;}
+  .topbar button{
+    background:#fff; color:#1d4ed8; border:none; padding:8px 16px; border-radius:10px;
+    font-size:14px; font-weight:600; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,.15);
+  }
+  .topbar button:hover{transform:translateY(-1px);}
+
+  /* ---------- 图例 ---------- */
+  .legend{
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:18px 0 6px;
+    background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:12px 16px;
+  }
+  .legend .l-title{font-size:13px; color:var(--muted); margin-right:4px; font-weight:600;}
+  .lg{display:inline-flex; align-items:center; gap:6px; font-size:12.5px; padding:4px 12px; border-radius:999px; border:1px solid var(--line); background:#f8fafc;}
+  .lg i{width:10px; height:10px; border-radius:3px; display:inline-block;}
+
+  /* ---------- 锚点导航 ---------- */
+  .toc{display:flex; flex-wrap:wrap; gap:8px; margin:14px 0 6px;}
+  .toc a{
+    text-decoration:none; font-size:13px; color:#1d4ed8; background:#eff6ff; border:1px solid #bfdbfe;
+    padding:5px 12px; border-radius:999px;
+  }
+  .toc a:hover{background:#dbeafe;}
+
+  /* ---------- 章节 ---------- */
+  .sec{margin-top:34px;}
+  .sec-head{display:flex; align-items:baseline; gap:12px; margin-bottom:14px;}
+  .sec-no{
+    font-size:13px; font-weight:800; color:#fff; background:var(--primary); border-radius:8px;
+    padding:3px 10px; letter-spacing:1px;
+  }
+  .sec-head h2{font-size:20px; font-weight:700;}
+  .sec-head p{font-size:13px; color:var(--muted);}
+
+  /* ---------- 主线（spine） ---------- */
+  .spine{display:flex; flex-direction:column; align-items:stretch;}
+  .spine-card{
+    display:flex; gap:16px; background:var(--card); border:1px solid var(--line); border-left:5px solid var(--sc,#64748b);
+    border-radius:var(--radius); padding:16px 20px; box-shadow:0 2px 8px rgba(15,23,42,.05);
+  }
+  .spine-card.kind-start{--sc:#16a34a; background:linear-gradient(90deg,#f0fdf4,#fff 40%);}
+  .spine-card.kind-decision{--sc:#d97706; background:linear-gradient(90deg,#fffbeb,#fff 40%);}
+  .spine-card.kind-process{--sc:#2563eb; background:linear-gradient(90deg,#eff6ff,#fff 40%);}
+  .spine-card.kind-cloud{--sc:#dc2626; background:linear-gradient(90deg,#fef2f2,#fff 40%);}
+  .spine-card.kind-data{--sc:#64748b;}
+  .spine-card.kind-ui{--sc:#7c3aed; background:linear-gradient(90deg,#f5f3ff,#fff 40%);}
+  .sc-icon{font-size:28px; line-height:1.2;}
+  .sc-body{flex:1;}
+  .sc-title{font-size:16px; font-weight:700; display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .sc-file{font-size:12px; color:var(--muted); background:#f1f5f9; border:1px solid var(--line); padding:1px 8px; border-radius:6px; font-weight:400;}
+  .sc-body ul{margin-top:6px; padding-left:20px;}
+  .sc-body li{font-size:13.5px; color:#334155; margin-top:2px;}
+  .branches{display:flex; gap:12px; margin-top:10px; flex-wrap:wrap;}
+  .branch{
+    flex:1; min-width:220px; border:1px dashed #fbbf24; background:#fffbeb; border-radius:10px; padding:8px 12px;
+  }
+  .branch-label{font-size:13px; font-weight:700; color:#b45309; display:block;}
+  .branch-note{font-size:12.5px; color:#78350f; opacity:.85;}
+  .arrow-v{display:flex; justify-content:center; padding:2px 0;}
+
+  /* ---------- 调度器 ---------- */
+  .sched-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:18px;}
+  .sched-card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px 18px; box-shadow:0 2px 8px rgba(15,23,42,.05);}
+  .sched-head{display:flex; align-items:center; gap:10px; margin-bottom:10px;}
+  .sched-icon{font-size:22px;}
+  .sched-name{font-size:15px; font-weight:700;}
+  .sched-file{font-size:12px; color:var(--muted);}
+  .badge{margin-left:auto; font-size:12px; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:2px 10px; border-radius:999px; white-space:nowrap;}
+  .sched-triggers{display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:10px;}
+  .lbl{font-size:12px; color:var(--muted); font-weight:700; margin-right:2px;}
+  .trig{font-size:12px; background:#fffbeb; color:#92400e; border:1px solid #fde68a; padding:2px 9px; border-radius:999px;}
+  .sched-steps{display:flex; flex-direction:column; gap:8px; margin-bottom:10px;}
+  .sstep{display:flex; gap:10px; align-items:flex-start; background:#f8fafc; border:1px solid var(--line); border-radius:10px; padding:8px 12px;}
+  .sstep .dot{width:10px; height:10px; border-radius:50%; margin-top:6px; flex-shrink:0;}
+  .sstep-label{font-size:13.5px; font-weight:600;}
+  .sstep-detail{font-size:12.5px; color:#475569; margin-top:1px;}
+  .sched-out{font-size:13px; color:#334155; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:8px 12px;}
+  .sched-out .lbl{color:#15803d;}
+
+  /* ---------- 子系统 ---------- */
+  .sub-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(520px,1fr)); gap:18px;}
+  .sub-card{background:var(--card); border:1px solid var(--line); border-top:4px solid var(--pc,#2563eb); border-radius:var(--radius); padding:16px 18px; box-shadow:0 2px 8px rgba(15,23,42,.05);}
+  .sub-head{display:flex; gap:10px; align-items:flex-start; margin-bottom:8px;}
+  .sub-icon{font-size:24px;}
+  .sub-name{font-size:15.5px; font-weight:700;}
+  .sub-file{font-size:12px; color:var(--muted);}
+  .sub-summary{font-size:13px; color:#475569; margin:2px 0 10px;}
+  .flow{display:flex; flex-wrap:wrap; gap:6px; align-items:stretch; margin-bottom:10px;}
+  .chip{
+    --c:#64748b; --bg:#f8fafc; --bd:#e2e8f0;
+    background:var(--bg); border:1px solid var(--bd); border-left:4px solid var(--c);
+    border-radius:10px; padding:7px 10px; min-width:110px; max-width:230px;
+  }
+  .chip-label{font-size:12.8px; font-weight:600; color:var(--ink);}
+  .chip-detail{font-size:11.5px; color:var(--muted); margin-top:2px; line-height:1.45;}
+  .flow-arrow{align-self:center; color:#94a3b8; font-size:16px; font-weight:700; flex-shrink:0;}
+  .sub-out{font-size:12.8px; color:#334155; background:#f5f3ff; border:1px solid #ddd6fe; border-radius:10px; padding:7px 12px;}
+  .sub-out b{color:#6d28d9;}
+
+  /* ---------- 云端通道 ---------- */
+  .channels{display:grid; grid-template-columns:1fr 1fr; gap:18px;}
+  .chan{border-radius:var(--radius); padding:16px 18px; border:2px solid;}
+  .chan.local{background:#eff6ff; border-color:#93c5fd;}
+  .chan.cloud{background:#fef2f2; border-color:#fca5a5;}
+  .chan h4{font-size:15px; font-weight:700; margin-bottom:6px;}
+  .chan.local h4{color:#1d4ed8;} .chan.cloud h4{color:#b91c1c;}
+  .chan ul{padding-left:18px;}
+  .chan li{font-size:13px; color:#334155; margin-top:3px;}
+  .wall{
+    margin-top:14px; background:#0f172a; color:#e2e8f0; border-radius:var(--radius); padding:12px 18px;
+    display:flex; gap:10px; align-items:flex-start; font-size:13px;
+  }
+  .wall b{color:#fbbf24;}
+  .pipeline{display:flex; flex-wrap:wrap; gap:8px; align-items:stretch; margin-top:14px; background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px;}
+  .pipeline .chip{flex:1; min-width:150px; max-width:none;}
+
+  /* ---------- 数据与事件 ---------- */
+  .two-col{display:grid; grid-template-columns:1fr 1fr; gap:18px;}
+  .panel{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px 18px;}
+  .panel h4{font-size:14.5px; font-weight:700; margin-bottom:10px; display:flex; align-items:center; gap:8px;}
+  .kv{display:flex; flex-direction:column; gap:6px;}
+  .kv .row{font-size:13px; display:flex; gap:8px; align-items:baseline;}
+  .kv .k{font-family:Consolas, "Cascadia Code", monospace; font-size:12.3px; background:#f1f5f9; border:1px solid var(--line); border-radius:6px; padding:1px 7px; white-space:nowrap; color:#0f172a;}
+  .kv .v{color:#475569;}
+  .kv .row .arrow{color:#94a3b8;}
+
+  /* ---------- 呈现 ---------- */
+  .ui-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px;}
+  .ui-card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px; box-shadow:0 2px 8px rgba(15,23,42,.05);}
+  .ui-card h5{font-size:14px; font-weight:700; margin-bottom:6px;}
+  .ui-card li{font-size:12.8px; color:#475569; margin-left:16px; margin-top:2px;}
+
+  /* ---------- 更新日志 ---------- */
+  .log-item{display:flex; gap:14px; background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:12px 16px; margin-top:10px;}
+  .log-date{font-size:12.5px; font-weight:700; color:#1d4ed8; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:2px 10px; height:fit-content; white-space:nowrap;}
+  .log-text{font-size:13.5px; color:#334155;}
+  .guide{background:#fffbeb; border:1px solid #fde68a; border-radius:var(--radius); padding:16px 20px; margin-top:16px;}
+  .guide h4{color:#92400e; font-size:15px; margin-bottom:8px;}
+  .guide ol{padding-left:20px;}
+  .guide li{font-size:13.5px; color:#78350f; margin-top:4px;}
+  .guide code{background:#fff7ed; border:1px solid #fed7aa; border-radius:5px; padding:0 6px; font-size:12.5px;}
+
+  footer{margin-top:30px; text-align:center; font-size:12px; color:var(--muted);}
+
+  @media (max-width:900px){
+    .channels, .two-col{grid-template-columns:1fr;}
+    .sub-grid{grid-template-columns:1fr;}
+  }
+  @media print{
+    body{background:#fff;}
+    .no-print{display:none !important;}
+    .spine-card, .sched-card, .sub-card, .chan, .panel, .ui-card, .log-item, .legend, .wall, .pipeline{break-inside:avoid; box-shadow:none;}
+    .sec{break-inside:avoid-page;}
+    .topbar{background:#1e3a8a !important; -webkit-print-color-adjust:exact; print-color-adjust:exact;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="topbar">
+    <div>
+      <h1>CostHub 运行逻辑 · AI 能力流程图<span class="ver" id="hdr-ver">v2.3.19</span></h1>
+      <div class="sub" id="hdr-sub">数据驱动流程图 —— 全部内容在文件内 FLOWDATA 数据中，工具迭代后改数据即可更新</div>
+    </div>
+    <div class="topbar-actions">
+      <span class="updated" id="hdr-updated">更新：2026-08-16</span>
+      <button onclick="window.print()">🖨 打印 / 导出 PDF</button>
+    </div>
+  </header>
+
+  <div class="legend" id="legend"></div>
+
+  <nav class="toc no-print" id="toc"></nav>
+
+  <main id="app"></main>
+
+  <footer>CostHub · 成本管理平台 · 本图与源码保持同步，由 FLOWDATA 数据驱动</footer>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════════════════════════
+   ★★★ 更新本流程图的方法（重要，工具每次迭代后按此更新） ★★★
+
+   1. 本图 100% 由下方 FLOWDATA 数据驱动，页面布局与连线全部自动生成，
+      更新时【只改数据，不要动渲染代码】。
+   2. 新版本发布后：
+      ① 改 meta.version（右上角版本号）与 meta.updated（更新时间）
+      ② 新增/修改后台引擎 → 编辑 schedulers 数组
+      ③ 新增/修改 AI 能力 → 编辑 subsystems 数组
+      ④ 修改启动/主线/边界 → 编辑 spine / cloud / storage / presentation
+      ⑤ 在 changelog 数组【最前面】追加一条记录
+      ⑥ 刷新浏览器即生效
+   3. 步骤的颜色分类见 KIND 常量；如需新类型，在 KIND 加一行即可。
+   4. 每条数据的中文字段含义：
+      label = 步骤名 ｜ detail = 步骤说明 ｜ kind = 颜色分类（local 本地AI / cloud 云端 /
+      rule 本地规则 / data 数据 / ui 界面 / event 事件 / gate 闸门）
+   ════════════════════════════════════════════════════════════════════ */
+
+const FLOWDATA = {
+
+  meta: {
+    version: 'v2.3.19',
+    updated: '2026-08-16',
+    subtitle: '运行逻辑总览：启动 → 门禁 → 初始化 → 后台调度 → AI 引擎群（双通道）→ 落库留痕 → 呈现',
+  },
+
+  /* ─────────── ① 总体运行主线（自上而下） ─────────── */
+  spine: [
+    {
+      icon: '🚀', kind: 'start', title: '应用启动', file: 'main.tsx → App.tsx',
+      desc: [
+        'Tauri 启动 → React 挂载，主题 / 缩放 / 低特效模式加载',
+        '连接 SQLite（costhub.db，exe 同目录，Rust get_db_url 提供路径）',
+        '首次运行初始化默认账号（admin / 666666，SHA-256 存 settings）',
+      ],
+    },
+    {
+      icon: '🔐', kind: 'decision', title: '登录门禁', file: 'LoginScreen.tsx + db.ts 数据锁',
+      desc: [
+        '用户名 + 密码校验（verifyPassword）；成本数据机密保护',
+        '密码错误也允许进入 → 受限模式：查询返回空、写入静默跳过、顶部琥珀提示条（双保险防误以为数据丢失）',
+      ],
+      branches: [
+        { label: '✅ 解锁进入', note: '数据全部可见、写入生效；解锁后同步模块库与 parts.projects 关联' },
+        { label: '⚠️ 受限模式', note: '数据不可见、写入跳过；设置页仍可打开（改密码走 getRawDb 绕过锁）' },
+      ],
+    },
+    {
+      icon: '⚙️', kind: 'process', title: '初始化与数据准备',
+      desc: [
+        'ensureSchema 自动补齐缺失表/列（错误容忍：已存在时静默失败）',
+        '解锁后：syncProjectModulesToLibrary / syncPartsProjectsField 历史数据修复',
+        '首次 AI 能力引导（localStorage costhub-ai-guide-seen，只展示一次）',
+      ],
+    },
+    {
+      icon: '🔁', kind: 'process', title: '启动后台调度（App 级）',
+      desc: [
+        '三大引擎均「打开应用立即一轮 + 每 60 秒轮询」，各自独立防重入',
+        '① 自主分析 runAutoAdvisor　② 报价比对 runAutoCompare　③ 关键物料洞察 runAutoInsight',
+        'AI 状态条 30 秒自检 Ollama（127.0.0.1 优先，绕过公司代理直连铁律）',
+        '任务进度统一广播 costhub-ai-task → 状态条实时显示“本地 AI 正在做什么”',
+      ],
+    },
+    {
+      icon: '🖱️', kind: 'process', title: '用户操作与事件触发',
+      desc: [
+        'Excel 导入 / 供应商改价 / BOM 增删改 → dispatch costhub-compare-request → 立即触发报价比对扫描',
+        '打开驾驶舱 → 触发 AI 今日速览；打开项目页 → 触发一次报价比对',
+        '对话与 👍/👎 反馈 → 学习引擎沉淀（关注主题统计 / 逻辑偏好规则）',
+        'Ctrl+K 全局搜索、导航切换、数据维护等常规操作',
+      ],
+    },
+    {
+      icon: '🤖', kind: 'process', title: 'AI 引擎群（双通道架构）',
+      desc: [
+        '本地 Ollama 通道：可读本地库，承载 对话 / Agent / 润色 / 意图提取 / 总结',
+        '云端通道：仅 agentSearchLoop 洞察链路，外发 = 脱敏白名单（物料通用名 / 品类 / 问题）',
+        '所有 AI 调用 logLocalAICall 留痕 → ai_request_logs（含 token 用量统计）',
+      ],
+    },
+    {
+      icon: '🌐', kind: 'cloud', title: '云端洞察链路 agentSearchLoop', file: 'trendService.ts',
+      desc: [
+        '① DeepSeek 原生联网搜索优先（Responses API web_search，一轮“搜索+分析”，返回真实来源）',
+        '② 失败 / 未启用 → Serper / Tavily / Bing 搜索 API，Skill 决定多轮迭代（maxSearchRounds）',
+        '③ 无搜索 API → LLM 训练知识分析（明确标注时效性不足）',
+        '输出归一化：方向-幅度一致性校验、超 ±30% 异常幅度拦截、时效分级（3月/6月）、反幻觉约束',
+      ],
+    },
+    {
+      icon: '💾', kind: 'data', title: '落库与留痕（SQLite）',
+      desc: [
+        'trend_items / trend_snapshots（洞察对象与历史批次）、part_insights（报价情报）',
+        'ai_advisor_insights（自主建议）、ai_bridge_logs（桥洞察存档）、part_compare_cache / part_aliases',
+        'ai_request_logs 全量 AI 审计 + token 用量；settings 存节流与开关配置',
+      ],
+    },
+    {
+      icon: '🖥️', kind: 'ui', title: '呈现层（UI 触点）',
+      desc: [
+        '驾驶舱：AI 状态条 + 今日速览 + 目标成本达成 + 自主建议 + 关键物料洞察（机会点置顶）',
+        '项目页：AI 体检条 / 报价情报（未读 Badge）/ 模块头跨项目比对',
+        '本地 AI 助手页：对话 / Agent 切换、执行轨迹卡、AI 活动记录、AI 学习档案',
+        '物料趋势洞察页：快捷洞察区（含“自动”Tag）+ 洞察详情（历史时间轴 / 分 Skill / 追问）',
+      ],
+    },
+  ],
+
+  /* ─────────── ② 三大后台调度引擎（60 秒轮询详解） ─────────── */
+  schedulers: [
+    {
+      icon: '⚙️', name: '自主分析引擎 runAutoAdvisor', file: 'src/autoAdvisor.ts', tag: '60s 轮询 + 启动立即一轮',
+      triggers: ['打开应用立即一轮', '每 60 秒轮询（防重入）'],
+      steps: [
+        { label: '读取全量本地数据', detail: '项目 / BOM / 成本快照 / 物料 / 供应商 / 目标成本（全部本地，零外部调用）', kind: 'rule' },
+        { label: '纯规则发现机会/风险', detail: 'buildRuleCandidates 四类：①项目成本≥60 天未变动 ②大额物料≥¥10 且≥90 天未调价 ③领域超目标≥5% ④大额物料单一供应商', kind: 'rule' },
+        { label: '指纹去重 + 降噪', detail: 'spc|pid / spp|partId / tg|pid|domain / ss|partId；dismissed 后不重提，数据变化（指纹变）才重新提醒', kind: 'rule' },
+        { label: '规则文案先入库', detail: 'ai_advisor_insights（source=rule），建议立即可见', kind: 'data' },
+        { label: '本地 AI 润色（节流）', detail: '30 分钟节流；润色 prompt 必须脱敏（auditPromptStrict 命中丢弃）；不覆盖用户已处理状态；失败静默降级规则文案', kind: 'local' },
+        { label: '完成广播与提示', detail: '新建议才 message 提示；广播 costhub-advisor-done / costhub-ai-task', kind: 'event' },
+      ],
+      outputs: 'ai_advisor_insights → 驾驶舱「AI 自主建议」区 + 本地 AI 助手页（待处理 / 已处理 / 忽略；存量建议轮询自动清理非脱敏 prompt）',
+    },
+    {
+      icon: '🔍', name: '报价比对后台识别 runAutoCompare', file: 'src/autoCompare.ts', tag: '60s 轮询 + 事件触发',
+      triggers: ['打开应用立即一轮', '每 60 秒轮询', '数据变更事件 costhub-compare-request（导入 / 改价 / BOM 增删改）'],
+      steps: [
+        { label: 'Ollama 探测', detail: '127.0.0.1 优先（本地直连 no_proxy 铁律，避免被公司代理转发 504）；未配置/未运行 → 静默跳过', kind: 'rule' },
+        { label: '全品类串行扫描', detail: '同品类 ≥2 项目的模块生成任务；每轮最多识别 3 个模块（分批渐进，60 秒后自动续批）', kind: 'rule' },
+        { label: '指纹缓存命中秒过', detail: 'part_compare_cache 按 品类+模块 存指纹（project|name|model|cost|qty），变化才调模型', kind: 'data' },
+        { label: '规则分组（免费）', detail: '归一化 normalizePartName（全角转半角/小写/去空格横线）+ 已确认别名映射 → 直接归组', kind: 'rule' },
+        { label: 'AI 疑似识别', detail: '本地模型流式识别；单模块 60s 超时跳过、偶发错误自动重试一次；robustJsonParse 中文引号/单引号/尾逗号逐级降级', kind: 'local' },
+        { label: '情报判定', detail: 'AI 疑似组必报 + 规则组价差 ≥¥10 且 ≥10% → part_insights（变化才重置未读）', kind: 'rule' },
+        { label: '人工确认沉淀', detail: '确认同一 → part_aliases 永久归组；标记不同 → #NEG# 否定组合 AI 不再建议；AI 只建议、不认定', kind: 'event' },
+      ],
+      outputs: 'part_insights 报价情报（未读 Badge）+ part_compare_cache + part_aliases；项目页模块头「跨项目比对」弹窗',
+    },
+    {
+      icon: '🧭', name: '关键物料自动洞察 runAutoInsight', file: 'src/autoInsight.ts', tag: '60s 轮询 + 启动立即一轮',
+      triggers: ['打开应用立即一轮（闸门免费判断）', '每 60 秒轮询（独立防重入）'],
+      steps: [
+        { label: '关键物料识别（免费）', detail: 'BOM 按子类分组（空回退物料名）→ 帕累托：累计占比 ≥80% 或 top5 → 跨项目 materialKey 聚合去重（同子类只洞察一次）', kind: 'rule' },
+        { label: '四道闸门 buildInsightPlan', detail: '首次 → 立即洞察；7 天内 → 复用历史结论；30 天周期内（ai_insight_interval_days 可调）→ 等待；超期 → 洞察', kind: 'gate' },
+        { label: '预算闸门', detail: '与云端每日上限共用（ai_usage_cloud_daily_limit 默认 50），超限 → wait“明日自动继续”', kind: 'gate' },
+        { label: '洞察执行', detail: 'agentSearchLoop(price-trend)（外发=子类通用名+品类，与快捷洞察同链路同安全边界）→ trend_items + trend_snapshots（source_type=auto），每轮最多 3 个', kind: 'cloud' },
+        { label: '机会点/风险点引擎', detail: '行情下行+置信度高/中 → 🎯机会（降价谈判/重新询价）；上行 → ⚠️风险（锁价/备货）；幅度≥10% 强化；占比≥30% 追加“优先处理”', kind: 'rule' },
+        { label: '完成广播', detail: 'costhub-insight-done + message（有洞察才提示）；驾驶舱卡片按 机会点>风险点>info 排序', kind: 'event' },
+      ],
+      outputs: 'trend_items / trend_snapshots（auto）→ 驾驶舱「关键物料洞察」卡（含 N 种型号 / 占项目 X% / 下次日期）+ Decomposition 快捷洞察区（「自动」Tag）',
+    },
+  ],
+
+  /* ─────────── ③ AI 能力全景（交互式与主动能力） ─────────── */
+  subsystems: [
+    {
+      icon: '💬', pc: '#2563eb', name: '本地 AI 对话', file: 'LocalAIAssistant.tsx + ollama.ts',
+      summary: '日常对话入口：学习注入 → 流式回答 → 反馈沉淀，越用越懂你',
+      steps: [
+        { label: '用户输入', detail: '普通对话模式', kind: 'event' },
+        { label: '关注主题统计', detail: 'trackUserFocus：6 大主题关键词分类，每次对话自动累计（旧数据衰减一半 ≈30 天窗口）', kind: 'rule' },
+        { label: '偏好注入', detail: 'buildPreferenceContext：近期关注重点（优先覆盖）+ 已学逻辑偏好（必须遵守）→ system prompt', kind: 'local' },
+        { label: 'Ollama 流式回答', detail: 'startOllamaStream（native /api/chat，think 关闭，经 Rust http_stream 代理）', kind: 'local' },
+        { label: '👍/👎 反馈', detail: '👎 弹窗选原因（太泛泛/没结合本地数据/逻辑不对/没优先关注 + 自定义）→ addLearnedRule 沉淀（≤20 条）', kind: 'rule' },
+        { label: '审计留痕', detail: 'logLocalAICall(local_chat) → AI 活动记录（最近 15 条，类型中文映射+成功/失败）', kind: 'data' },
+      ],
+      outputs: '<b>对话回答</b> + 🧠 AI 学习档案（关注 TOP 条形图 / 已学规则列表）',
+    },
+    {
+      icon: '🤖', pc: '#7c3aed', name: 'Agent 工作台（计划-执行-总结）', file: 'aiAgent.ts + aiTools.ts',
+      summary: '一句话指令 → 本地模型规划 → 13 个只读工具执行 → 结果总结（DSH 式体验第一步）',
+      steps: [
+        { label: '用户任务', detail: '输入框上方切换「🤖 Agent 任务」', kind: 'event' },
+        { label: '本地模型读工具清单', detail: 'buildToolsPrompt 13 只读工具（query_projects / query_project_bom / query_project_cost / query_part_suppliers / query_supplier_trend / query_target_status / query_cost_snapshots / query_price_insights / query_advisor_insights / query_worklog / query_todos / compare_subcategory_cost / insight_material_trend）', kind: 'local' },
+        { label: '输出 JSON 计划', detail: 'buildPlanSystemPrompt 约束：steps 数组 / 依赖顺序 / 最多 6 步 / 无需工具输出空 steps', kind: 'local' },
+        { label: '容错解析', detail: 'parseAgentPlan：代码块围栏/中文引号/单引号/尾逗号/杂文本 + 别名映射（query_bom→query_project_bom 等）', kind: 'rule' },
+        { label: '降级保护', detail: '未知工具 / 解析失败 / 无需工具 → 自动降级为普通对话', kind: 'rule' },
+        { label: '顺序执行', detail: 'runAgentPlan 逐工具执行（onStep 轨迹回调 ✅/❌/⏳，结果截断 2000 字）；全链路只读，无写操作', kind: 'rule' },
+        { label: '流式总结', detail: '基于执行报告生成最终回答（buildAnswerSystemPrompt：禁止编造、只依据结果）', kind: 'local' },
+        { label: '审计', detail: 'agent_plan / agent_answer 全文留痕；过程广播 costhub-ai-task', kind: 'data' },
+      ],
+      outputs: '<b>执行轨迹卡</b>（可折叠：工具中文名+参数+结果摘要）+ 总结回答',
+    },
+    {
+      icon: '🌉', pc: '#dc2626', name: '本地-云端桥（双向 AI 洞察）', file: 'aiBridge.ts',
+      summary: '三步链路：本地意图 → 脱敏云端查询 → 本地结合数据出最终建议（工具亮点）',
+      steps: [
+        { label: '入口', detail: '自主建议卡「生成行业洞察」；项目类建议不适用（洞察对象不明确+代号不外传）', kind: 'event' },
+        { label: '复用闸门', detail: '同物料 7 天内已洞察（ai_bridge_logs）→ 确认弹窗（复用 / 强制最新）', kind: 'gate' },
+        { label: '① 本地意图提取', detail: '脱敏上下文（只含建议类型描述+通用名）+ 历史洞察注入 → 输出 {material_name, category, question}；模型判定同题 → reuse 跳过云端；无本地模型降级规则意图', kind: 'local' },
+        { label: '② 脱敏模板', detail: 'sanitizeForCloud 只留 物料名/品类/问题 三个字段位（成本/供应商/项目代号结构上无位置可传）', kind: 'rule' },
+        { label: '发送前审计', detail: 'auditPromptStrict：¥元/价格区间/成本数字/供应商项目/公司名/器件型号/规格/短码 全拦；拦截即抛错 + bridge_blocked 留痕', kind: 'gate' },
+        { label: '预览确认', detail: '开关 ai_bridge_review：auto 自动脱敏放行 / preview 每次发送前 Modal 预览确认', kind: 'event' },
+        { label: '云端行情', detail: 'agentSearchLoop(price-trend)（外发=物料通用名/品类/问题，约 1-3 分钟）', kind: 'cloud' },
+        { label: '③ 本地总结', detail: '本地模型结合本地数据+云端行情 → 最终建议（判定机会/风险/目标谈判策略/行动清单）', kind: 'local' },
+        { label: '存档', detail: 'ai_bridge_logs（供 7 天复用 + 历史时间线）；bridge_intent / bridge_summary 全程留痕', kind: 'data' },
+      ],
+      outputs: '<b>建议卡回填</b>：机会/风险判定 + 目标价策略 + 风险要点 + 行动清单',
+    },
+    {
+      icon: '📋', pc: '#0d9488', name: 'AI 今日速览 + 状态条', file: 'dailyBrief.ts + aiStatus.ts + AIStatusBar.tsx',
+      summary: '打开驾驶舱就有“本地 AI 在工作”的感觉：主动汇报当天重点',
+      steps: [
+        { label: '触发', detail: '打开驾驶舱 → 触发速览；AI 状态条 30 秒自检（detectOllama：127.0.0.1 优先）', kind: 'event' },
+        { label: '收集当天事实', detail: 'collectBriefFacts 纯本地规则：项目/器件/大额物料/AI 建议/报价情报/待办，任一失败不阻断', kind: 'rule' },
+        { label: '指纹缓存', detail: 'settings ai_daily_brief 存 {date, hash, text, model}：同日同指纹复用，数据变化自动重生成', kind: 'data' },
+        { label: '本地润色', detail: 'Ollama 非流式 /api/chat，temperature 0.3，3-5 句自然语言（只依据摘要数据，禁止编造）', kind: 'local' },
+        { label: '降级', detail: '失败静默降级规则文案（buildRuleBrief）；「重新生成」按钮强制', kind: 'rule' },
+        { label: '呈现', detail: '驾驶舱顶部速览卡 + AI 状态条三态（连接中呼吸/已连接绿点+模型名/未连接灰点）+ costhub-ai-task 实时任务 + “刚刚完成 X”', kind: 'ui' },
+      ],
+      outputs: '<b>今日速览卡</b> + AI 活动记录（AI 今天都做了什么，可回溯可审查）',
+    },
+    {
+      icon: '📈', pc: '#059669', name: '物料趋势洞察', file: 'trendService.ts + Decomposition.tsx',
+      summary: 'Skill 方法论 + 搜索循环 + 结构化结论 + 历史留档，行情洞察主链路',
+      steps: [
+        { label: '物料/子类', detail: '分解树终端物料 or 快捷洞察区直接添加（source_type=quick / auto）', kind: 'event' },
+        { label: '选择 Skill', detail: '9 内置方法论：价格趋势（四因子）/供应链/竞争格局（五力）/deep-research（五看三定）/SWOT/PEST/风险矩阵/TCO/供应链韧性，各配时效性规则', kind: 'rule' },
+        { label: 'agentSearchLoop', detail: 'DeepSeek 原生 web_search 优先 → Serper/Tavily/Bing 多轮迭代 → 无搜索降级 LLM 知识（标注时效不足）', kind: 'cloud' },
+        { label: '结构化归一化', detail: '方向/置信度/幅度（仅近 1-3 月口径，超 ±30% 拦截）+ 时效分级（3月内有效/3-6月参考/超6月过期）+ 反幻觉（只许用来源数据）', kind: 'rule' },
+        { label: '差异化呈现', detail: 'SWOT 2×2 / PEST 四宫格 / 五力强度条 / 风险矩阵卡 / 韧性评分条；方向冲突黄色警告条', kind: 'ui' },
+        { label: '历史时间轴', detail: 'trend_snapshots 批次节点可切换/删除；层级 Rollup（成本占比加权汇总）；基于洞察结论追问（携带上下文）', kind: 'data' },
+      ],
+      outputs: '<b>洞察快照</b>（方向/置信度/幅度/建议动作 + 真实来源）→ 快捷洞察区卡片 + 历史对比',
+    },
+    {
+      icon: '🧠', pc: '#b45309', name: 'AI 学习引擎', file: 'aiLearning.ts',
+      summary: '不微调模型，用“规则注入”实现行为修正——务实、可审查、全本地',
+      steps: [
+        { label: '① 关注主题统计', detail: 'classifyUserQuestion：6 大主题（项目成本/物料行情/供应商/目标达成/成本结构/工作安排）×关键词表，命中排序 → settings ai_user_focus（旧数据衰减一半）', kind: 'rule' },
+        { label: '② 反馈沉淀规则', detail: '👍 轻提示；👎 弹窗选原因 → addLearnedRule 沉淀为“必须遵守的逻辑偏好”（最多 20 条，可删）', kind: 'rule' },
+        { label: '③ 偏好注入', detail: 'buildPreferenceContext 注入：普通对话 system prompt、Agent 任务计划/总结 prompt（sendMessage/sendAgentTask）', kind: 'local' },
+        { label: 'UI', detail: '对话反馈行（👍/👎 + “教 AI 理解你的偏好”）+ 🧠 AI 学习档案弹窗（关注 TOP 条形图 + 规则管理）', kind: 'ui' },
+      ],
+      outputs: '<b>行为修正</b>：后续所有 AI 输出优先覆盖关注重点、遵守已学逻辑偏好',
+    },
+    {
+      icon: '💡', pc: '#4f46e5', name: '嵌入式 AI 能力（工作流内）', file: 'projectHealth.ts / GlobalAI.tsx / supplierTrend.ts / targetInsight.ts / projectStatus.ts',
+      summary: '不打扰式的规则 + AI 小能力，嵌入各业务页面',
+      steps: [
+        { label: '项目 AI 体检条', detail: '4 类规则检查（BOM 缺单价/数量0、目标超支→analysis、快照异动→snapshots、同品类模块报价价差≥¥10 且≥10%→比对）+ AI 小结（未配置静默）', kind: 'rule' },
+        { label: '供应商价格趋势小结', detail: '供应商价格历史 → 规则一句话趋势（持续上涨/下降/波动/平稳 + 复合累计幅度 + 最近原因）', kind: 'rule' },
+        { label: '快照对比 AI 解释', detail: 'BOM 详细对比弹窗「生成解释」：差异清单 top8 → Ollama 流式 2-3 句原因说明', kind: 'local' },
+        { label: '全局 AI 问询', detail: 'GlobalAI：侧边栏入口，上下文=localStorage costhub-ctx（选中项目写 BOM 摘要/目标），回答一键 saveWorkLog 记手账；只有本地模型可读项目数据（云端不接）', kind: 'local' },
+        { label: '驾驶舱目标预警', detail: '达成率=(2-实际/目标)×100，未达标红色卡片 + 跨页直达 costhub-open-project；AI 今日洞察区（报价情报+快照异动≥1%）', kind: 'rule' },
+        { label: '项目状态点', detail: '● 目标超支红 / 报价情报与快照异动橙（Tooltip 原因），纯逻辑 projectStatus.ts', kind: 'ui' },
+      ],
+      outputs: '<b>业务页面内的轻量 AI 触点</b>，全部可降级、不阻断主流程',
+    },
+    {
+      icon: '🎬', pc: '#0891b2', name: '生成类工具（演示 + 总结）', file: 'DemoGenerator.tsx / WorkLog.tsx / pptxExtract.ts',
+      summary: '本地 AI 产出内容型成果',
+      steps: [
+        { label: '演示生成器', detail: '本地 AI 生成 HTML / PPTX + 习惯库（演示结构 / 风格描述 / 素材模板，local_ai_context 分类）', kind: 'local' },
+        { label: 'PPTX 大纲提取', detail: 'pptxExtract：jszip 解包提取大纲作为素材', kind: 'rule' },
+        { label: '工作手账 AI 总结', detail: '两步流程：①压缩提炼（流式实时）②正式总结（流式逐字，四维度组织+项目标签归组+串联成文，禁止罗列）', kind: 'local' },
+        { label: '独立模型配置', detail: '总结模型 local_ai_summary_model（默认同对话模型）', kind: 'data' },
+      ],
+      outputs: '<b>演示文件 / 工作总结</b>（保存 / 复制 / 历史列表全文查看）',
+    },
+  ],
+
+  /* ─────────── ④ 云端通道与安全边界 ─────────── */
+  cloud: {
+    channels: [
+      {
+        cls: 'local', title: '🟦 本地通道（Ollama）—— 可读本地库',
+        items: [
+          '一切本地数据只进本地模型：对话 / Agent / 润色 / 意图提取 / 总结 / 体检 AI 小结',
+          '流式经 Rust http_stream 代理；非流式 http_post /api/chat',
+          '调用全程 logLocalAICall 留痕 —— 可审查“发给了本地模型什么数据”',
+          '本地直连铁律：127.0.0.1 优先（reqwest 必须显式 no_proxy，防止被公司代理转发 504）',
+        ],
+      },
+      {
+        cls: 'cloud', title: '🟥 云端通道（外部 LLM / 搜索）—— 只有 HTTP 代理',
+        items: [
+          'Rust http_stream / http_post / http_get 纯转发，外部服务没有任何读取本地数据库的通道（硬边界）',
+          '数据只能由前端主动拼进 prompt，外部永远无法反向访问数据库',
+          '可外发内容：物料通用名 / 品类 / 查询问题（脱敏白名单）',
+          '可发送业务字段：成本占比 / 分类（用户确认可接受）；洞察请求有预览确认机制',
+        ],
+      },
+    ],
+    wall: '⚠️ **提示词脱敏铁律**：可外传的提示词（建议卡 prompt / AI 润色输出）严禁含 器件型号 / 厂家 / 成本金额 / 供应商名 / 项目代号 / 任何数字 —— 本地模型能读库，提示词只描述任务不携带数据；生成后 auditPromptStrict 校验，命中丢弃；存量建议每次轮询自动清理。',
+    pipeline: [
+      { label: '输入', detail: '物料通用名 / 品类 / 查询问题（或 Skill 洞察请求）', kind: 'rule' },
+      { label: '脱敏模板', detail: 'sanitizeForCloud 只留 名称/品类/问题 三个字段位', kind: 'rule' },
+      { label: '发送前审计', detail: 'auditPromptStrict：¥元/区间/成本数字/供应商/项目/公司名/型号/规格/短码 → 拦截抛错+留痕', kind: 'gate' },
+      { label: '预览确认', detail: 'ai_bridge_review=preview 时弹窗人工确认；auto 自动放行', kind: 'gate' },
+      { label: 'agentSearchLoop', detail: 'DeepSeek 原生 web_search 优先 → Serper/Tavily/Bing 回退 → 无 key 降级 LLM 知识', kind: 'cloud' },
+      { label: '归一化校验', detail: '方向-幅度一致性、超 ±30% 拦截、时效分级、反幻觉约束', kind: 'rule' },
+      { label: '落库留痕', detail: 'trend_snapshots / ai_bridge_logs / ai_request_logs（token 用量）', kind: 'data' },
+    ],
+  },
+
+  /* ─────────── ⑤ 数据与事件 ─────────── */
+  storage: {
+    tables: [
+      { k: 'trend_items / trend_snapshots', v: '洞察对象与历史批次（quick / auto 来源），详情页时间轴' },
+      { k: 'part_insights', v: '报价情报（未读 / 已读，内容变化才重置未读）' },
+      { k: 'part_compare_cache', v: '比对指纹缓存（品类+模块唯一，指纹失效重跑）' },
+      { k: 'part_aliases', v: '别名沉淀（user_confirmed 归组 / #NEG# 否定组合）' },
+      { k: 'ai_advisor_insights', v: '自主建议（open / done / dismissed + 指纹去重）' },
+      { k: 'ai_bridge_logs', v: '桥洞察存档（7 天复用 + 历史时间线）' },
+      { k: 'ai_request_logs', v: '全部 AI 调用审计 + provider/model/token 用量统计' },
+      { k: 'settings', v: '节流与开关：ai_insight_interval_days / ai_usage_cloud_daily_limit / ai_bridge_review / ai_native_search / ai_user_focus / ai_learned_rules / ai_daily_brief…' },
+      { k: 'project_boms + cost_change_log', v: 'BOM 快照列（快照优先、parts 兜底）+ 成本变动追溯链' },
+    ],
+    events: [
+      { k: 'costhub-ai-task', v: '任务进度 {task, done} → AI 状态条实时显示“正在做什么”' },
+      { k: 'costhub-compare-request', v: '数据变更（导入/改价/BOM 增删改）→ 立即触发报价比对扫描' },
+      { k: 'costhub-compare-done', v: '比对完成 → 刷新情报未读红点' },
+      { k: 'costhub-insight-done', v: '关键物料洞察完成 → 驾驶舱卡片刷新' },
+      { k: 'costhub-advisor-done', v: '自主分析完成 → 建议列表刷新' },
+      { k: 'costhub-insights-changed', v: '情报变化 → 未读数刷新' },
+    ],
+  },
+
+  /* ─────────── ⑥ 呈现层 ─────────── */
+  presentation: [
+    {
+      icon: '🛰️', title: '驾驶舱（AIWorkspace）',
+      items: [
+        'AI 状态条 + 今日速览合并卡（虚线分隔）',
+        '目标成本达成（默认 3 条，展开全部）+ AI 今日洞察区',
+        'AI 自主建议（默认 3 条）+ 关键物料洞察（默认 4 条，机会点置顶）',
+        '最近成本变动 / 巡检发现（原有展开保留）',
+        '两个 BOM 成本柱状图：按值降序 + 统一主色系（最高值深蓝高亮）',
+      ],
+    },
+    {
+      icon: '📁', title: '项目页（Projects）',
+      items: [
+        'AI 体检条（4 类检查 + AI 小结）',
+        '报价情报按钮 + 未读 Badge + 弹窗列表（确认同一/标记不同/已读）',
+        '模块头「跨项目比对」（未读角标；规则分组 + AI 疑似 + 人工确认）',
+        'BOM 导入预览（总价/小计/异常高亮）；参照项目测算；SKU 变体 Excel 式对比',
+      ],
+    },
+    {
+      icon: '💬', title: '本地 AI 助手页',
+      items: [
+        '💬 普通对话 / 🤖 Agent 任务切换；Agent 执行轨迹卡（可折叠）',
+        'AI 活动记录（顶部折叠条，最近 15 条）',
+        'AI 自主建议区（待处理/已处理/忽略 + 生成行业洞察）',
+        '🧠 AI 学习档案弹窗（关注 TOP 条形图 + 规则管理）',
+        '演示生成器入口',
+      ],
+    },
+    {
+      icon: '📊', title: '物料趋势洞察页（Decomposition）',
+      items: [
+        '物料分解树（AI 起草/批量拆解）+ 快捷洞察区（自动洞察带橙色「自动」Tag）',
+        '洞察详情：历史时间轴（可删批次）+ 分 Skill 差异化卡片 + 建议动作',
+        '基于洞察结论追问（携带快照上下文）；层级 Rollup 汇总',
+        '关注物料列表（器件库标记 → 快速洞察行情）',
+      ],
+    },
+    {
+      icon: '🌍', title: '全局',
+      items: [
+        '首次 AI 引导（一次性，5 项能力 + 配置就绪度）',
+        '设置页：AI 服务（模型/搜索/原生搜索开关）/ 分析框架（9 Skill 方法论编辑）/ 安全设置（桥开关/封禁联网）',
+        'AI 活动记录入口（审计日志分区：总用量/按供应商/近 30 天趋势）',
+        'Ctrl+K 全局搜索；7 主题 × 深浅 × 色温 × 低特效模式',
+      ],
+    },
+  ],
+
+  /* ─────────── ⑦ 更新日志（新版本在最前面追加） ─────────── */
+  changelog: [
+    { date: '2026-08-16', text: 'AI 工作台：状态条+今日速览+活动记录；关键物料洞察（帕累托+四道闸门+机会点/风险点建议）；AI 学习引擎（关注统计/反馈沉淀/偏好注入）；P1 Agent 工作台（13 只读工具，计划-执行-总结）；Agent 子类对比工具；桥洞察 7 天复用+本地 reuse 判定；已处理建议可见性修复；驾驶舱清爽化+图表优化；演示文稿 19 页版' },
+    { date: '2026-08-15', text: '双向 AI 洞察·本地-云端桥 aiBridge（意图提取→脱敏审计→云端行情→本地总结；9 用例测试）；受限模式提示条（防误以为数据丢失）' },
+    { date: '2026-08-14', text: '自主分析引擎 autoAdvisor（4 规则+AI 润色 30 分钟节流+指纹去重）；AI 能力嵌入工作流（驾驶舱预警/项目体检条/快照对比解释/全局问询/首次引导/供应商趋势小结/导航四区收敛/项目状态点）' },
+    { date: '2026-08-12', text: '器件报价比对三层流程（规则分组+AI 疑似+人工确认沉淀别名）；后台自动识别引擎 runAutoCompare（轮询+变更触发+指纹缓存）；SKU 变体；低特效模式；演示文稿 AI 叙事重构' },
+  ],
+};
+
+/* ══════════════════════ 渲染层（一般无需修改） ══════════════════════ */
+const KIND = {
+  local:  { label: '本地 AI（Ollama，可读库）', color: '#2563eb', bg: '#eff6ff', bd: '#bfdbfe' },
+  cloud:  { label: '云端（脱敏外发）',          color: '#dc2626', bg: '#fef2f2', bd: '#fecaca' },
+  rule:   { label: '本地规则（免费）',          color: '#16a34a', bg: '#f0fdf4', bd: '#bbf7d0' },
+  gate:   { label: '闸门 / 审计',               color: '#0d9488', bg: '#f0fdfa', bd: '#99f6e4' },
+  data:   { label: '数据 / 存储',               color: '#64748b', bg: '#f8fafc', bd: '#e2e8f0' },
+  ui:     { label: 'UI 呈现',                   color: '#7c3aed', bg: '#f5f3ff', bd: '#ddd6fe' },
+  event:  { label: '事件 / 调度',               color: '#d97706', bg: '#fffbeb', bd: '#fde68a' },
+};
+const kindOf = k => KIND[k] || KIND.data;
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function el(tag, cls, html){ const d=document.createElement(tag); if(cls) d.className=cls; if(html!=null) d.innerHTML=html; return d; }
+const arrowV = '<svg class="arrow-v" width="16" height="26" viewBox="0 0 16 26" aria-hidden="true"><line x1="8" y1="0" x2="8" y2="21" stroke="#94a3b8" stroke-width="2"/><polyline points="2.5,16.5 8,22.5 13.5,16.5" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const arrowR = '<span class="flow-arrow">→</span>';
+function chip(st){
+  const k = kindOf(st.kind);
+  return '<div class="chip" style="--c:'+k.color+';--bg:'+k.bg+';--bd:'+k.bd+'">'
+    + '<div class="chip-label">'+esc(st.label)+'</div>'
+    + (st.detail ? '<div class="chip-detail">'+esc(st.detail)+'</div>' : '')
+    + '</div>';
+}
+
+/* ① 主线 */
+function buildSpine(){
+  const wrap = el('div','spine');
+  FLOWDATA.spine.forEach((it, i) => {
+    const card = el('div','spine-card kind-'+it.kind, [
+      '<div class="sc-icon">'+it.icon+'</div>',
+      '<div class="sc-body">',
+        '<div class="sc-title">'+esc(it.title)+(it.file?'<span class="sc-file">'+esc(it.file)+'</span>':'')+'</div>',
+        '<ul>'+it.desc.map(d=>'<li>'+esc(d)+'</li>').join('')+'</ul>',
+        it.branches ? '<div class="branches">'+it.branches.map(b=>
+          '<div class="branch"><span class="branch-label">'+esc(b.label)+'</span><span class="branch-note">'+esc(b.note)+'</span></div>'
+        ).join('')+'</div>' : '',
+      '</div>',
+    ].join(''));
+    wrap.appendChild(card);
+    if (i < FLOWDATA.spine.length - 1) wrap.appendChild(el('div','arrow-v-wrap', arrowV));
+  });
+  return wrap;
+}
+
+/* ② 调度引擎 */
+function buildSchedulers(){
+  const grid = el('div','sched-grid');
+  FLOWDATA.schedulers.forEach(sc => {
+    const card = el('div','sched-card', [
+      '<div class="sched-head"><span class="sched-icon">'+sc.icon+'</span>',
+        '<div><div class="sched-name">'+esc(sc.name)+'</div><div class="sched-file">'+esc(sc.file)+'</div></div>',
+        '<span class="badge">'+esc(sc.tag)+'</span></div>',
+      '<div class="sched-triggers"><span class="lbl">触发</span>'+sc.triggers.map(t=>'<span class="trig">'+esc(t)+'</span>').join('')+'</div>',
+      '<div class="sched-steps">'+sc.steps.map(s=>
+        '<div class="sstep"><span class="dot" style="background:'+kindOf(s.kind).color+'"></span><div>'
+        +'<div class="sstep-label">'+esc(s.label)+'</div><div class="sstep-detail">'+esc(s.detail)+'</div></div></div>'
+      ).join('')+'</div>',
+      '<div class="sched-out"><span class="lbl">输出</span>'+esc(sc.outputs)+'</div>',
+    ].join(''));
+    grid.appendChild(card);
+  });
+  return grid;
+}
+
+/* ③ AI 能力全景 */
+function buildSubsystems(){
+  const grid = el('div','sub-grid');
+  FLOWDATA.subsystems.forEach(ss => {
+    const flow = ss.steps.map(chip).join(arrowR);
+    const card = el('div','sub-card', [
+      '<div class="sub-head"><span class="sub-icon">'+ss.icon+'</span><div>',
+        '<div class="sub-name">'+esc(ss.name)+'</div><div class="sub-file">'+esc(ss.file)+'</div></div></div>',
+      '<div class="sub-summary">'+esc(ss.summary)+'</div>',
+      '<div class="flow">'+flow+'</div>',
+      '<div class="sub-out">'+ss.outputs+'</div>',
+    ].join(''));
+    card.style.setProperty('--pc', ss.pc || '#2563eb');
+    grid.appendChild(card);
+  });
+  return grid;
+}
+
+/* ④ 云端与安全边界 */
+function buildCloud(){
+  const wrap = el('div');
+  const chans = el('div','channels');
+  FLOWDATA.cloud.channels.forEach(c => {
+    chans.appendChild(el('div','chan '+c.cls, '<h4>'+esc(c.title)+'</h4><ul>'+c.items.map(i=>'<li>'+esc(i)+'</li>').join('')+'</ul>'));
+  });
+  wrap.appendChild(chans);
+  wrap.appendChild(el('div','wall', esc(FLOWDATA.cloud.wall).replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')));
+  const pipe = el('div','pipeline');
+  FLOWDATA.cloud.pipeline.forEach((s,i)=>{ pipe.appendChild(el('div',null,chip(s))); if(i<FLOWDATA.cloud.pipeline.length-1) pipe.appendChild(el('div',null,arrowR)); });
+  wrap.appendChild(pipe);
+  return wrap;
+}
+
+/* ⑤ 数据与事件 */
+function buildStorage(){
+  const two = el('div','two-col');
+  const t = el('div','panel','<h4>🗄 核心数据表（SQLite）</h4><div class="kv">'
+    + FLOWDATA.storage.tables.map(r=>'<div class="row"><span class="k">'+esc(r.k)+'</span><span class="v">'+esc(r.v)+'</span></div>').join('')+'</div>');
+  const e = el('div','panel','<h4>📡 全局事件（window CustomEvent）</h4><div class="kv">'
+    + FLOWDATA.storage.events.map(r=>'<div class="row"><span class="k">'+esc(r.k)+'</span><span class="arrow">→</span><span class="v">'+esc(r.v)+'</span></div>').join('')+'</div>');
+  two.appendChild(t); two.appendChild(e);
+  return two;
+}
+
+/* ⑥ 呈现层 */
+function buildPresentation(){
+  const grid = el('div','ui-grid');
+  FLOWDATA.presentation.forEach(p => {
+    grid.appendChild(el('div','ui-card','<h5>'+p.icon+' '+esc(p.title)+'</h5><ul>'+p.items.map(i=>'<li>'+esc(i)+'</li>').join('')+'</ul>'));
+  });
+  return grid;
+}
+
+/* ⑦ 更新日志 + 维护指南 */
+function buildChangelog(){
+  const wrap = el('div');
+  FLOWDATA.changelog.forEach(c => {
+    wrap.appendChild(el('div','log-item','<span class="log-date">'+esc(c.date)+'</span><span class="log-text">'+esc(c.text)+'</span>'));
+  });
+  wrap.appendChild(el('div','guide', [
+    '<h4>📝 如何更新这张流程图（工具每次迭代后）</h4><ol>',
+    '<li>打开本文件，找到 <code>&lt;script&gt;</code> 中的 <code>FLOWDATA</code> —— 全图内容的数据源，布局与连线自动生成，<b>只改数据即可</b>；</li>',
+    '<li>新版本：改 <code>meta.version</code> 与 <code>meta.updated</code>；</li>',
+    '<li>新增后台引擎 → 在 <code>schedulers</code> 数组追加对象（icon / name / triggers / steps / outputs）；</li>',
+    '<li>新增 AI 能力 → 在 <code>subsystems</code> 数组追加对象（icon / pc 主色 / name / summary / steps / outputs）；</li>',
+    '<li>主线 / 云端边界 / 数据表 / 呈现层分别改 <code>spine</code> / <code>cloud</code> / <code>storage</code> / <code>presentation</code>；</li>',
+    '<li>在 <code>changelog</code> 数组<b>最前面</b>追加一条 {date, text}，刷新浏览器即生效。</li>',
+    '</ol>',
+  ].join('')));
+  return wrap;
+}
+
+/* 组装 */
+(function render(){
+  document.getElementById('hdr-ver').textContent = FLOWDATA.meta.version;
+  document.getElementById('hdr-updated').textContent = '更新：' + FLOWDATA.meta.updated;
+  document.getElementById('hdr-sub').textContent = FLOWDATA.meta.subtitle;
+
+  const legend = document.getElementById('legend');
+  legend.appendChild(el('span','l-title','图例'));
+  Object.entries(KIND).forEach(([k, v]) => {
+    legend.appendChild(el('span','lg','<i style="background:'+v.color+'"></i>'+esc(v.label)));
+  });
+
+  const toc = document.getElementById('toc');
+  const anchors = [
+    ['sec-spine','① 总体运行主线'], ['sec-sched','② 后台调度引擎'], ['sec-sub','③ AI 能力全景'],
+    ['sec-cloud','④ 云端通道与安全边界'], ['sec-storage','⑤ 数据与事件'], ['sec-ui','⑥ 呈现层'], ['sec-log','⑦ 更新日志'],
+  ];
+  anchors.forEach(([id, t]) => { const a = el('a', null, t); a.href = '#' + id; toc.appendChild(a); });
+
+  const app = document.getElementById('app');
+  const mkSec = (no, id, title, p, body) => {
+    const s = el('section','sec', '<div class="sec-head"><span class="sec-no">'+no+'</span><div><h2>'+title+'</h2><p>'+esc(p)+'</p></div></div>');
+    s.id = id;
+    s.appendChild(body);
+    app.appendChild(s);
+  };
+  mkSec('01','sec-spine','总体运行主线','从启动到呈现的完整链路（含登录门禁分支与受限模式）', buildSpine());
+  mkSec('02','sec-sched','后台调度引擎（60 秒轮询 ×3）','打开应用立即一轮 + 每 60 秒轮询；规则免费、AI 节流、失败静默', buildSchedulers());
+  mkSec('03','sec-sub','AI 能力全景','每个子系统为一条独立流程：本地 AI / 云端 / 规则 / 闸门按颜色区分', buildSubsystems());
+  mkSec('04','sec-cloud','云端通道与安全边界','双通道架构：本地可读库、云端只有 HTTP 代理；脱敏铁律与发送前审计', buildCloud());
+  mkSec('05','sec-storage','数据与事件','SQLite 表与全局事件，AI 全链路留痕可审计', buildStorage());
+  mkSec('06','sec-ui','呈现层（UI 触点）','AI 能力在界面上的落点', buildPresentation());
+  mkSec('07','sec-log','更新日志与维护指南','每次工具迭代在此追加记录；更新方法见底部指南', buildChangelog());
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><title>CostHub 本地AI助手 · Demo A 三栏工作台</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;background:#F5F6F8;color:#1F2937;height:100vh;overflow:hidden}
+.banner{background:linear-gradient(90deg,#6366F1,#8B5CF6);color:#fff;padding:8px 20px;font-size:12.5px;display:flex;gap:16px;align-items:center}
+.banner b{font-size:13px}.banner span{opacity:.85}
+.app{display:flex;height:calc(100vh - 34px)}
+/* 左侧会话列表 */
+.sessions{width:200px;min-width:200px;background:#fff;border-right:1px solid #EDF0F4;display:flex;flex-direction:column}
+.sessions .head{padding:14px 12px 8px;display:flex;align-items:center;gap:8px}
+.sessions .head .dot{width:8px;height:8px;border-radius:50%;background:#22C55E;box-shadow:0 0 6px #22C55E88}
+.sessions .head b{font-size:13.5px}
+.sessions .head .tag{margin-left:auto;font-size:10px;color:#6366F1;background:#EEF2FF;border-radius:20px;padding:2px 8px}
+.new-btn{margin:8px 12px;padding:7px;border-radius:9px;border:1px solid #E5E9F0;background:#FAFBFF;color:#4F46E5;font-size:12.5px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;font-weight:500}
+.new-btn:hover{border-color:#C7D2FE;background:#EEF2FF}
+.slist{flex:1;overflow:auto;padding:4px 6px}
+.sitem{padding:9px 10px;border-radius:9px;font-size:12.5px;cursor:pointer;color:#4B5563;margin-bottom:2px;display:flex;align-items:center;gap:6px}
+.sitem .t{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sitem.active{background:#EEF2FF;color:#4338CA;font-weight:600}
+.sitem .x{opacity:0;font-size:10px;color:#9CA3AF;cursor:pointer}
+.sitem:hover .x{opacity:1}
+/* 中间对话区 */
+.chat{flex:1;display:flex;flex-direction:column;background:#fff}
+.ctoolbar{padding:10px 18px;border-bottom:1px solid #EDF0F4;display:flex;align-items:center;gap:10px}
+.seg{display:inline-flex;background:#F1F3F7;border-radius:9px;padding:3px;gap:2px}
+.seg div{padding:5px 14px;font-size:12.5px;border-radius:7px;cursor:pointer;color:#6B7280}
+.seg div.on{background:#fff;color:#4338CA;font-weight:600;box-shadow:0 1px 3px #00000014}
+.ctoolbar .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+.model-pill{font-size:11px;color:#16A34A;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:20px;padding:3px 10px;display:flex;align-items:center;gap:5px}
+.msgs{flex:1;overflow:auto;padding:20px 0}
+.msg{max-width:780px;margin:0 auto 16px;display:flex;gap:10px;padding:0 18px}
+.msg .ava{width:28px;height:28px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px;margin-top:2px}
+.msg.ai .ava{background:linear-gradient(135deg,#6366F1,#8B5CF6);color:#fff}
+.msg.me{justify-content:flex-end}
+.msg.me .bubble{background:#6366F1;color:#fff;border-radius:14px 14px 4px 14px}
+.msg .bubble{padding:11px 15px;border-radius:14px 14px 14px 4px;background:#F7F8FB;border:1px solid #EEF0F5;font-size:13.5px;line-height:1.7;max-width:82%}
+.msg .fb{display:flex;gap:6px;margin-top:6px;font-size:11px;color:#9CA3AF}
+.msg .fb span{cursor:pointer;padding:2px 6px;border-radius:6px}
+.msg .fb span:hover{background:#F1F3F7}
+.opp{border-left:3px solid #16A34A;background:#F3FBF5;padding:9px 12px;border-radius:0 10px 10px 0;font-size:12.5px;line-height:1.7;margin-top:8px}
+.opp b{color:#15803D}
+.trace{background:#FAFBFF;border:1px solid #E4E9F8;border-radius:10px;padding:8px 12px;font-size:12px;color:#4B5563;margin-top:8px;line-height:1.8}
+.trace b{color:#6366F1}
+/* 输入区 */
+.input-area{padding:12px 18px 16px;border-top:1px solid #EDF0F4}
+.input-row{max-width:780px;margin:0 auto;display:flex;gap:8px;align-items:flex-end}
+.input-row .box{flex:1;border:1px solid #E5E9F0;border-radius:12px;padding:10px 14px;font-size:13.5px;outline:none;background:#fff;box-shadow:0 1px 4px #00000008}
+.input-row .box:focus{border-color:#A5B4FC;box-shadow:0 0 0 3px #EEF2FF}
+.send{background:linear-gradient(135deg,#6366F1,#8B5CF6);color:#fff;border:none;border-radius:11px;padding:10px 18px;font-size:13px;cursor:pointer;font-weight:600}
+.hint{max-width:780px;margin:6px auto 0;font-size:10.5px;color:#B0B7C3;display:flex;gap:10px}
+/* 右侧功能坞 */
+.dock{width:52px;min-width:52px;background:#fff;border-left:1px solid #EDF0F4;display:flex;flex-direction:column;align-items:center;padding-top:12px;gap:4px}
+.dock .ic{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;color:#6B7280;position:relative}
+.dock .ic:hover{background:#F3F4F8}
+.dock .ic.on{background:#EEF2FF;color:#4338CA}
+.dock .ic .bdg{position:absolute;top:2px;right:2px;background:#EF4444;color:#fff;font-size:8.5px;border-radius:8px;padding:1px 4px}
+.dock .div{width:24px;height:1px;background:#EDF0F4;margin:4px 0}
+.panel{width:300px;background:#FAFBFF;border-left:1px solid #EDF0F4;padding:14px;overflow:auto}
+.panel h4{font-size:13px;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.pcard{border:1px solid #E8ECF3;border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:12.5px;background:#fff}
+.pcard .t{font-weight:600;margin-bottom:3px}
+.pcard .d{color:#6B7280;font-size:11.5px;line-height:1.6}
+.tip{position:absolute;left:56px;background:#1F2937;color:#fff;font-size:10.5px;padding:3px 7px;border-radius:6px;white-space:nowrap;opacity:0;pointer-events:none;transition:.12s;z-index:9}
+.dock .ic:hover .tip{opacity:1}
+</style>
+</head>
+<body>
+<div class="banner"><b>Demo A · 三栏工作台</b><span>会话列表 | 对话区 | 右侧功能坞——功能不再堆在左下角，鼠标悬停功能坞图标有名称提示，点击滑出面板</span></div>
+<div class="app">
+  <!-- 左：会话列表（精简） -->
+  <div class="sessions">
+    <div class="head"><span class="dot"></span><b>AI 助手</b><span class="tag">qwythos-9b</span></div>
+    <button class="new-btn">＋ 新对话</button>
+    <div class="slist">
+      <div class="sitem active"><span class="t">💬 M270 成本结构分析</span><span class="x">✕</span></div>
+      <div class="sitem"><span class="t">📊 液晶面板行情洞察</span><span class="x">✕</span></div>
+      <div class="sitem"><span class="t">🤝 供应商议价策略</span><span class="x">✕</span></div>
+      <div class="sitem"><span class="t">🎯 目标达成预警查看</span><span class="x">✕</span></div>
+      <div class="sitem"><span class="t">📝 本周工作手账</span><span class="x">✕</span></div>
+      <div class="sitem"><span class="t">🔍 元器件通用名对比</span><span class="x">✕</span></div>
+    </div>
+  </div>
+  <!-- 中：对话区 -->
+  <div class="chat">
+    <div class="ctoolbar">
+      <div class="seg"><div class="on">💬 对话</div><div>🤖 自主建议 <b style="color:#D97706">(3)</b></div></div>
+      <div class="right">
+        <span class="model-pill">● 本地模型已连接</span>
+      </div>
+    </div>
+    <div class="msgs">
+      <div class="msg ai"><div class="ava">🤖</div><div><div class="bubble">
+        好的，我分析了 <b>M270</b> 的成本结构，按模块成本占比排序如下：<br>
+        · 显示模块 42% · 电源模块 18% · 结构模块 15% · 驱动模块 12% · 其他 13%<br>
+        <div class="opp">🎯 <b>机会点：</b>「液晶面板」行情下行（幅度约 -8%~-12%），占 M270 BOM 45%——建议向当前供应商发起降价谈判，成本影响大，优先处理。</div>
+        <div class="trace">🔧 <b>Agent 执行过程：</b>✅ 查询项目成本结构 → ✅ 子类成本跨项目对比 → ✅ 物料行情洞察「液晶面板」→ ✅ 生成结论</div>
+        <div class="fb"><span>👍</span><span>👎</span><span style="color:#C7CBD1">教 AI 理解你的偏好</span></div>
+      </div></div></div>
+      <div class="msg me"><div class="bubble">很好，把面板模块也对比一下其他项目的成本差异</div></div>
+      <div class="msg ai"><div class="ava">🤖</div><div><div class="bubble">
+        好的，按子类「液晶面板」对比了全部在研项目：<br>
+        <b>M270：¥450</b>（占 45%）· M320：¥470（占 43%）· A001：¥520（占 51%）<br>
+        成本最高 <b>A001</b>，最低 <b>M270</b>，差额 ¥70。A001 的面板成本偏高，建议复核供应商报价。<br>
+        <div class="fb"><span>👍</span><span>👎</span></div>
+      </div></div></div>
+    </div>
+    <div class="input-area">
+      <div class="input-row">
+        <div class="box" contenteditable="true">分析 M270 与 A001 的成本差异，找出可降本的机会点…</div>
+        <button class="send">发送</button>
+      </div>
+      <div class="hint"><span>Shift+Enter 换行</span><span>🤖 Agent 模式（自动调用工具）</span><span style="margin-left:auto">数据仅在本机处理 🔒</span></div>
+    </div>
+  </div>
+  <!-- 右：功能坞（收起为图标条，可滑出面板） -->
+  <div class="dock">
+    <div class="ic on" style="background:#EEF2FF;color:#4338CA">📋<span class="tip">自主建议 (3)</span></div>
+    <div class="ic">🛠<span class="tip">数据分析工具</span></div>
+    <div class="ic">📚<span class="tip">背景知识库</span></div>
+    <div class="ic">🧠<span class="tip">AI 学习档案</span></div>
+    <div class="div"></div>
+    <div class="ic">📄<span class="tip">演示生成</span></div>
+    <div class="ic">🗂<span class="tip">分类规则</span></div>
+    <div class="ic">📥<span class="tip">智能 BOM 导入</span></div>
+  </div>
+  <div class="panel">
+    <h4>📋 自主建议 <span style="font-size:11px;color:#D97706">3 条待处理</span></h4>
+    <div class="pcard"><div class="t">🎯 行情下行，存在降价谈判空间</div><div class="d">「液晶面板」近 1-3 月行情下行，建议重询价。<span style="color:#16A34A;font-weight:600">机会点</span></div></div>
+    <div class="pcard"><div class="t">⚠️ 大额物料 90 天未调价</div><div class="d">「驱动板」≥¥10 且 ≥90 天未变价，建议结合行情主动谈判。</div></div>
+    <div class="pcard"><div class="t">🎯 单一供应商风险</div><div class="d">「电源适配器」仅一家供应商，建议引入备选。</div></div>
+  </div>
+</div>
+</body>
+</html>

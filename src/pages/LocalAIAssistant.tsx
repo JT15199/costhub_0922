@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Button, Input, InputNumber, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Switch, Segmented, Radio, notification } from 'antd';
+import { Button, Input, InputNumber, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Switch, Segmented, Radio, Dropdown, Drawer, notification } from 'antd';
 import { CopyOutlined, RadarChartOutlined } from '@ant-design/icons';
 import {
   SendOutlined, RobotOutlined, PlusOutlined, HistoryOutlined,
@@ -8,7 +8,7 @@ import {
   BookOutlined, DeleteOutlined, ApartmentOutlined, SettingOutlined, ArrowDownOutlined,
   UploadOutlined, FileExcelOutlined, EditOutlined, FilePptOutlined,
   WarningOutlined, BulbOutlined, CheckOutlined, ArrowRightOutlined,
-  LikeOutlined, DislikeOutlined, ExperimentOutlined,
+  LikeOutlined, DislikeOutlined, ExperimentOutlined, ToolOutlined,
 } from '@ant-design/icons';
 import { message } from 'antd';
 import { invoke } from '@tauri-apps/api/core';
@@ -1052,6 +1052,7 @@ export default function LocalAIAssistant() {
   const [feedbackReason, setFeedbackReason] = useState('vague');
   const [feedbackCustom, setFeedbackCustom] = useState('');
   const [showLearn, setShowLearn] = useState(false);       // 学习档案弹窗
+  const [toolsOpen, setToolsOpen] = useState(false);       // 数据分析工具抽屉（Demo B 重构）
   const [learnRules, setLearnRules] = useState<any[]>([]);
   const [learnFocus, setLearnFocus] = useState<{ topic: string; weight: number }[]>([]);
   const loadLearnData = async () => {
@@ -1900,70 +1901,77 @@ export default function LocalAIAssistant() {
 return (
     <div className="local-ai-root" style={{ display: 'flex', height: '100%', gap: 0, overflow: 'hidden' }}>
       {/* Left Panel */}
-      <div className="local-ai-left" style={{ width: 220, minWidth: 220, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
-        <div style={{ padding: '12px 10px 8px', borderBottom: '1px solid var(--color-border)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-            <RobotOutlined style={{ color: '#6366F1', fontSize: 16 }} />
-            <span style={{ fontWeight: 700, fontSize: 14 }}>本地AI助手</span>
-            <Tooltip title="设置"><Button size="small" type="text" icon={<SettingOutlined />} onClick={() => { setShowSettings(true); refreshNetStatus(); }} style={{ marginLeft: 'auto' }} /></Tooltip>          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {connStatus === 'ok' ? <CheckCircleOutlined style={{ color: '#16A34A' }} /> : connStatus === 'fail' ? <CloseCircleOutlined style={{ color: '#DC2626' }} /> : <div style={{ width: 14, height: 14, borderRadius: '50%', background: '#D1D5DB' }} />}
-            <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{connStatus === 'ok' ? model || '已连接' : connStatus === 'fail' ? '连接失败' : '未连接'}</span>
-            <Button size="small" type="text" icon={<SyncOutlined />} onClick={testConnection} />
+      {/* 左：简洁会话列（Demo B 方案 2026-08-16 重构） */}
+      <div className="local-ai-left" style={{ width: 180, minWidth: 180, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--color-border)', background: '#fff' }}>
+        <div style={{ padding: '14px 12px 8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: connStatus === 'ok' ? '#22C55E' : connStatus === 'fail' ? '#EF4444' : '#D1D5DB', boxShadow: connStatus === 'ok' ? '0 0 6px #22C55E88' : undefined }} />
+            <b style={{ fontSize: 13 }}>会话</b>
+            <span style={{ marginLeft: 'auto', fontSize: 10, color: '#6366F1', background: '#EEF2FF', borderRadius: 20, padding: '2px 8px', maxWidth: 84, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{model || (connStatus === 'ok' ? '已连接' : '未连接')}</span>
           </div>
-      {/* 运行状态栏：让用户始终知道后台在跑 */}
           {streaming && (
-            <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--color-primary)', background: 'var(--color-accent-blue-bg)', borderRadius: 6, padding: '3px 8px' }}>
+            <div style={{ marginTop: 7, display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: 'var(--color-primary)', background: 'var(--color-accent-blue-bg)', borderRadius: 6, padding: '3px 8px' }}>
               <Spin size="small" style={{ flexShrink: 0 }} />
-              <span style={{ flex: 1, fontWeight: 600 }}>
-                {phase === 'fetching' ? '读取数据'
-                  : phase === 'querying' ? '查询数据'
-                  : phase === 'thinking' ? '思考分析'
-                  : '生成回答'}
-              </span>
+              <span style={{ flex: 1, fontWeight: 600 }}>{phase === 'fetching' ? '读取数据' : phase === 'querying' ? '查询数据' : phase === 'thinking' ? '思考分析' : '生成回答'}</span>
               <b>{elapsed}s</b>
-              {phase === 'streaming' && streamRate > 0 && <span style={{ color: 'var(--color-text-tertiary)' }}>{streamRate}字/s</span>}
             </div>
           )}
         </div>
-        <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--color-border)' }}>
-          <Button size="small" block icon={<PlusOutlined />} onClick={() => startSession()}>新对话</Button>
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+        <Button size="small" block icon={<PlusOutlined />} onClick={() => startSession()} style={{ margin: '2px 12px 8px', width: 'auto', borderRadius: 9, borderColor: '#E5E9F0', background: '#FAFBFF', color: '#4338CA', fontWeight: 500 }}>＋ 新对话</Button>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px' }}>
           {sessions.map(s => (
-            <div key={s.id} onClick={() => switchSession(s.id)} style={{ padding: '8px 10px', cursor: 'pointer', background: s.id === sessionId ? 'var(--color-accent-blue-bg)' : 'transparent', borderLeft: s.id === sessionId ? '2px solid var(--color-primary)' : '2px solid transparent', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ flex: 1, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: s.id === sessionId ? 'var(--color-primary)' : 'var(--color-text-primary)' }}>{s.title}</span>
-              <Button size="small" type="text" icon={<DeleteOutlined />} style={{ opacity: 0.4, fontSize: 10 }} onClick={async e => { e.stopPropagation(); await deleteSession(s.id); setSessions(await loadSessions()); if (sessionId === s.id) { setSessionId(null); setMessages([]); } }} />
+            <div key={s.id} onClick={() => switchSession(s.id)} style={{ padding: '9px 10px', borderRadius: 9, cursor: 'pointer', marginBottom: 2, background: s.id === sessionId ? '#EEF2FF' : 'transparent', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ flex: 1, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: s.id === sessionId ? 600 : 400, color: s.id === sessionId ? '#4338CA' : '#4B5563' }}>{s.title}</span>
+              <Button size="small" type="text" icon={<DeleteOutlined />} style={{ opacity: 0, fontSize: 10 }} onMouseEnter={e => (e.currentTarget.style.opacity = '1')} onMouseLeave={e => (e.currentTarget.style.opacity = '0')} onClick={async e => { e.stopPropagation(); await deleteSession(s.id); setSessions(await loadSessions()); if (sessionId === s.id) { setSessionId(null); setMessages([]); } }} />
             </div>
           ))}
         </div>
-        <div style={{ borderTop: '1px solid var(--color-border)', padding: '8px 10px' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 6 }}>数据分析工具</div>
-          {TOOLS.map(t => (
-            <div key={t.label} style={{ marginBottom: 6 }}>
-              <div onClick={() => setExpandedTool(expandedTool === t.label ? null : t.label)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', padding: '4px 6px', borderRadius: 6, background: expandedTool === t.label ? `${t.color}15` : 'transparent' }}>
-                <span style={{ color: t.color, fontSize: 13 }}>{t.icon}</span>
-                <span style={{ fontSize: 12, fontWeight: 500 }}>{t.label}</span>
-              </div>
-              {expandedTool === t.label && <div style={{ padding: '6px 6px 2px' }}>{t.render()}</div>}
-            </div>
-          ))}
-          <Divider style={{ margin: '8px 0' }} />
-          <Button size="small" block icon={<BookOutlined />} type="text" onClick={async () => { setShowContext(true); setMemories(await loadMemories(50)); }}>背景知识库 &amp; 长期记忆 ({contextEntries.length})</Button>
-          <Button size="small" block icon={<ExperimentOutlined />} type="text" onClick={async () => { setShowLearn(true); await loadLearnData(); }}>🧠 AI 学习档案（它学到了什么）</Button>
-          <Button size="small" block icon={<FilePptOutlined />} type="text" onClick={() => setShowDemo(true)}>📄 演示生成（HTML/PPT）</Button>
-          <Button size="small" block icon={<SettingOutlined />} type="text" onClick={async () => { setShowRules(true); setRules(await getModuleRules()); }}>分类规则管理</Button>
+        <div style={{ padding: '10px 12px', borderTop: '1px solid var(--color-border)', fontSize: 10.5, color: '#B0B7C3', textAlign: 'center', lineHeight: 1.7 }}>
+          🔒 数据只在本机处理<br />全部 AI 调用可审查
         </div>
       </div>
       {/* Chat Area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-        {/* 主视图切换：对话 / 自主建议 */}
-        <div style={{ padding: '10px 16px 4px' }}>
-          <Segmented block size="small" value={advisorTab} onChange={(v: any) => setAdvisorTab(v)}
-            options={[
-              { label: '💬 对话', value: 'chat' },
-              { label: '🤖 自主建议' + (advisorList.filter((x: any) => x.status === 'open').length > 0 ? ' (' + advisorList.filter((x: any) => x.status === 'open').length + ')' : ''), value: 'advice' },
-            ]} />
+        {/* 顶部导航栏（Demo B 方案：功能平铺，不再藏左下角） */}
+        <div style={{ height: 52, flexShrink: 0, background: '#fff', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', padding: '0 16px', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 14, marginRight: 20, color: '#111827' }}>
+            <span style={{ width: 26, height: 26, borderRadius: 8, background: 'linear-gradient(135deg,#0A84FF,#6366F1)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}><RobotOutlined /></span>
+            本地 AI 助手
+          </div>
+          <div onClick={() => setAdvisorTab('chat')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', background: advisorTab === 'chat' ? '#EEF2FF' : 'transparent', color: advisorTab === 'chat' ? '#4338CA' : '#6B7280', fontWeight: advisorTab === 'chat' ? 600 : 400 }}>💬 对话</div>
+          <div onClick={() => setAdvisorTab('advice')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', background: advisorTab === 'advice' ? '#EEF2FF' : 'transparent', color: advisorTab === 'advice' ? '#4338CA' : '#6B7280', fontWeight: advisorTab === 'advice' ? 600 : 400 }}>
+            🤖 自主建议
+            {advisorList.filter((x: any) => x.status === 'open').length > 0 && <span style={{ background: '#EF4444', color: '#fff', fontSize: 9, borderRadius: 9, padding: '1px 5px' }}>{advisorList.filter((x: any) => x.status === 'open').length}</span>}
+          </div>
+          <div onClick={async () => { setShowContext(true); setMemories(await loadMemories(50)); }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', color: '#6B7280' }}>📚 知识库</div>
+          <div onClick={async () => { setShowLearn(true); await loadLearnData(); }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', color: '#6B7280' }}>🧠 学习档案</div>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 11, color: connStatus === 'ok' ? '#16A34A' : connStatus === 'fail' ? '#DC2626' : '#6B7280', background: connStatus === 'ok' ? '#F0FDF4' : connStatus === 'fail' ? '#FEF2F2' : '#F3F4F8', border: '1px solid ' + (connStatus === 'ok' ? '#BBF7D0' : connStatus === 'fail' ? '#FECACA' : '#E5E9F0'), borderRadius: 20, padding: '3px 11px', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: connStatus === 'ok' ? '#22C55E' : connStatus === 'fail' ? '#EF4444' : '#D1D5DB' }} />
+              {connStatus === 'ok' ? (model || '已连接') : connStatus === 'fail' ? '连接失败' : '未连接'}
+            </span>
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'tools', label: '🛠 数据分析工具（注入 BOM/器件数据）' },
+                  { key: 'import', label: '📥 智能 BOM 导入' },
+                  { key: 'demo', label: '📄 演示生成（HTML/PPTX）' },
+                  { key: 'rules', label: '🗂 分类规则管理' },
+                  { type: 'divider' },
+                  { key: 'settings', label: '⚙️ 连接设置' },
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'tools') setToolsOpen(true);
+                  else if (key === 'import') setImportModalOpen(true);
+                  else if (key === 'demo') setShowDemo(true);
+                  else if (key === 'rules') { setShowRules(true); getModuleRules().then(setRules).catch(() => {}); }
+                  else if (key === 'settings') { setShowSettings(true); refreshNetStatus(); }
+                },
+              }}
+            >
+              <Button size="small" icon={<ThunderboltOutlined />} style={{ borderRadius: 8, fontSize: 12 }}>⚡ 功能</Button>
+            </Dropdown>
+          </div>
         </div>
         {advisorTab === 'chat' ? (
         <>
@@ -1999,7 +2007,8 @@ return (
             <Button size="small" type="link" onClick={() => setNetWarnDismissed(true)}>知道了</Button>
           </div>
         )}
-        <div ref={scrollRef} onScroll={handleScroll} style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+        <div ref={scrollRef} onScroll={handleScroll} style={{ flex: 1, overflowY: 'auto', padding: '24px 0' }}>
+          <div style={{ maxWidth: 780, margin: '0 auto', padding: '0 28px' }}>
           {messages.length === 0 && (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<span style={{ color: 'var(--color-text-secondary)' }}>选择左侧工具注入数据，或直接输入问题<br /><span style={{ fontSize: 11 }}>所有数据仅发送给本机 Ollama，绝不联网</span></span>} style={{ marginTop: 60 }} />
           )}
@@ -2057,6 +2066,7 @@ return (
             </div>
           ))}
           <div ref={bottomRef} />
+          </div>
         </div>
         {/* 回到底部悬浮按钮：用户在流式生成时向上回看，点此跳回底部 */}
         {showJumpDown && (
@@ -2072,7 +2082,8 @@ return (
             >回到底部</Button>
           </div>
         )}
-        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+        <div style={{ padding: '14px 20px 16px', borderTop: '1px solid var(--color-border)', background: '#fff' }}>
+          <div style={{ maxWidth: 780, margin: '0 auto' }}>
           {agentTrace.length > 0 && (
             <div style={{ marginBottom: 8, borderRadius: 8, border: '1px solid var(--color-border)', background: 'rgba(99,102,241,0.04)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', cursor: 'pointer', fontSize: 11.5, color: 'var(--color-text-secondary)' }} onClick={() => setAgentTraceOpen(!agentTraceOpen)}>
@@ -2122,10 +2133,12 @@ return (
             }
           </div>
           <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 4 }}>Shift+Enter 换行 · Enter 发送 · 数据仅在本机处理{agentMode ? ' · Agent 只读执行，计划与结果可审查' : ''}</div>
+          </div>
         </div>
         </>
         ) : (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 16px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 0 24px' }}>
+          <div style={{ maxWidth: 860, margin: '0 auto', padding: '0 20px' }}>
           <div style={{ fontSize: 11.5, color: 'var(--color-text-secondary)', lineHeight: 1.6, marginBottom: 8 }}>
             空闲时自动分析项目成本、物料价格、目标达成与供应风险，以资深成本经理视角找机会/风险点。
             处理方式：<b>复制提示词</b>交给 AI 执行议价/分析，或 <b>生成行业洞察</b>（本地→云端→本地三步，自动防重复查询）。
@@ -2181,6 +2194,7 @@ return (
               );
             });
           })()}
+          </div>
         </div>
         )}
       </div>
@@ -2791,6 +2805,24 @@ return (
           )}
         </div>
       </Modal>
+
+      {/* 数据分析工具（⚡功能菜单 → 右侧抽屉，Demo B 重构） */}
+      <Drawer title={<span><ToolOutlined /> 数据分析工具</span>} open={toolsOpen} onClose={() => setToolsOpen(false)} width={330}>
+        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 12, lineHeight: 1.6 }}>
+          点击工具注入对应的本地数据到当前对话——AI 回答将基于你的真实数据。
+        </div>
+        {TOOLS.map(t => (
+          <div key={t.label} style={{ marginBottom: 8 }}>
+            <div onClick={() => setExpandedTool(expandedTool === t.label ? null : t.label)}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '8px 10px', borderRadius: 9, border: '1px solid #E8ECF3', background: expandedTool === t.label ? '#FAFBFF' : '#fff' }}>
+              <span style={{ color: t.color, fontSize: 15 }}>{t.icon}</span>
+              <span style={{ fontSize: 13, fontWeight: 500 }}>{t.label}</span>
+              <span style={{ marginLeft: 'auto', fontSize: 10, color: '#9CA3AF' }}>{expandedTool === t.label ? '收起 ▲' : '展开 ▼'}</span>
+            </div>
+            {expandedTool === t.label && <div style={{ padding: '8px 4px 2px' }}>{t.render()}</div>}
+          </div>
+        ))}
+      </Drawer>
     </div>
   );
 }
