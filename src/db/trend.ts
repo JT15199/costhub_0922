@@ -38,8 +38,9 @@ export async function getQuickTrendItems() {
   try {
     await (await getDb()).execute("ALTER TABLE trend_items ADD COLUMN last_queried_at TEXT DEFAULT ''");
   } catch { /* 列已存在则忽略 */ }
+  // 2026-08-16：自动洞察（autoInsight，source_type='auto'）的物料也出现在洞察列表，可点击查看详情
   return (await getDb()).select<any[]>(
-    "SELECT * FROM trend_items WHERE source_type = 'quick' ORDER BY last_queried_at DESC, id DESC"
+    "SELECT * FROM trend_items WHERE source_type IN ('quick','auto') ORDER BY last_queried_at DESC, id DESC"
   );
 }
 

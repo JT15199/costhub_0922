@@ -8,6 +8,7 @@ import { getProjects, getProjectBOMs, getProjectCostSnapshots, getTargets } from
 import { getParts, getAllPartSuppliers } from './db/parts';
 import { computeTargetStatuses } from './targetInsight';
 import { findAdvisorByFingerprint, findDismissedByFingerprint, saveAdvisorInsight, updateAdvisorStatus, getAdvisorInsights } from './db/advisor';
+import { getDb } from './db/core';
 import { logLocalAICall } from './ollama';
 import { auditPromptStrict } from './aiBridge';
 
@@ -189,6 +190,9 @@ async function enhanceWithAI(cands: AdvisorCandidate[]): Promise<number> {
       if (prompt && !auditPromptStrict(prompt).safe) continue;
       const existing = await findAdvisorByFingerprint(c.fingerprint);
       if (existing) {
+        // ⚠️ 不覆盖用户已处理/已忽略的状态（2026-08-16 修复：润色曾把 done 改回 open，导致"已处理"记录消失）
+        const cur = await (await getDb()).select<any[]>('SELECT status FROM ai_advisor_insights WHERE id = ?', [existing.id]).catch(() => [] as any[]);
+        if (cur?.[0]?.status !== 'open') { enhanced++; continue; }
         await updateAdvisorStatus(existing.id, 'open', {
           detail: detail || c.detail,
           insight: prompt || c.prompt,

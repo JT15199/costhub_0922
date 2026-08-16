@@ -1695,14 +1695,14 @@ export default function LocalAIAssistant() {
     } catch { message.warning('复制失败，请手动选择复制'); }
   };
   const setAdvisorStatus = async (id: number, status: string) => {
-    // 乐观移除：点击立即消失
-    setAdvisorList(prev => prev.filter(x => x.id !== id));
+    // 乐观标记：立即显示新状态（已处理/已忽略条目保留在列表，切"显示全部"可见），失败回滚
+    setAdvisorList(prev => prev.map(x => x.id === id ? { ...x, status } : x));
     try {
       await updateAdvisorStatus(id, status);
       await loadAdvisor();
       // 反馈条带撤销：处理错了一键恢复
       notification.success({
-        message: status === 'done' ? '已标记处理' : '已忽略（数据不变将不再提醒）',
+        message: status === 'done' ? '已标记处理（切「显示全部」可查看）' : '已忽略（数据不变将不再提醒）',
         placement: 'bottomRight', duration: 4,
         btn: <Button size="small" type="link" onClick={async () => {
           try {
@@ -1712,7 +1712,12 @@ export default function LocalAIAssistant() {
           } catch (e2: any) { notification.error({ message: '撤销失败：' + (e2?.message || e2), placement: 'bottomRight' }); }
         }}>撤销</Button>,
       });
-    } catch (e: any) { message.error('操作失败：' + (e?.message || e)); await loadAdvisor(); }
+    } catch (e: any) {
+      // 回滚本地标记，恢复真实状态
+      setAdvisorList(prev => prev.map(x => x.id === id ? { ...x, status: 'open' } : x));
+      message.error('操作失败：' + (e?.message || e));
+      await loadAdvisor();
+    }
   };
   // 洞察执行（force=true 强制重新查询云端）
   const doBridgedInsight = async (ins: any, force: boolean) => {
@@ -1929,7 +1934,10 @@ return (
           <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <Button size="small" type="primary" loading={advisorRunning} onClick={runAdvisorNow}>⚡ 立即分析</Button>
             <Button size="small" type={advisorShowDone ? 'default' : 'primary'} onClick={() => setAdvisorShowDone(!advisorShowDone)}>
-              {advisorShowDone ? '显示全部' : '仅看待处理'}
+              {advisorShowDone ? '显示全部' : '仅看待处理'}{(() => {
+                const doneCount = advisorList.filter(x => x.status !== 'open').length;
+                return doneCount > 0 ? `（已处理 ${doneCount}）` : '';
+              })()}
             </Button>
             <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{advisorLastRun ? `上次分析 ${fmtA(advisorLastRun)}` : '尚未运行'}</span>
             {advisorProgress && <span style={{ fontSize: 11, color: '#8B5CF6' }}><Spin size="small" style={{ marginRight: 4 }} />{advisorProgress}</span>}

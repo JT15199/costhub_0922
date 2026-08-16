@@ -1975,7 +1975,10 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                       ]}
                     >
                       <div style={{ marginBottom: 6 }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>{item.query_category}</div>
+                        <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>
+                        {item.query_category}
+                        {item.source_type === 'auto' && <Tag color="orange" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px' }}>自动</Tag>}
+                      </div>
                         {/* 最近洞察时间 */}
                         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                           <ClockCircleOutlined style={{ marginRight: 4 }} />
