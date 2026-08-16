@@ -16,6 +16,7 @@ import { getDailyCloudUsage } from '../db/settings';
 import { runAutoAudit } from '../autoAudit';
 import AIStatusBar from '../components/AIStatusBar';
 import DailyBrief from '../components/DailyBrief';
+import KeyMaterialInsights from '../components/KeyMaterialInsights';
 
 interface DashboardProps {
   onNavigate?: (key: string) => void;
@@ -219,6 +220,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       {/* ===== AI 工作台：状态条 + 今日速览（打开就能看到本地 AI 在工作） ===== */}
       <AIStatusBar onNavigate={onNavigate} />
       <DailyBrief onNavigate={onNavigate} />
+      <KeyMaterialInsights onNavigate={onNavigate} />
 
             {/* ===== 状态仪表：一眼扫出哪里需要我 ===== */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 14 }}>

@@ -39,6 +39,14 @@
 - ⚠️ 节流原则：速览同一天不重复烧调用；advisor 30 分钟 AI 润色节流不变；所有失败静默降级，不打扰用户
 - **验证**：tsc -b 0 错；105 vitest 全过
 
+### v2.3.19 关键物料自动洞察 autoInsight（2026-08-16，用户确认节流设计）
+- **需求**：根据项目类型自动识别关键物料做行情洞察，但不能天天洞察浪费 token——设计原则：**识别免费（纯本地规则）、触发吝啬（四道闸门）、呈现主动（驾驶舱卡片）**
+- **识别**（src/autoInsight.ts 纯函数，vitest 13 用例）：帕累托——每项目 BOM 按小计（单价×数量）降序，累计占比 ≥80% 或 top5（先到者，至少 2 个才截断）；数量 0/软删/总成本 0 跳过；跨项目按 materialKey（名称+品类归一化）聚合去重——同一物料多项目关键只洞察一次
+- **四道闸门**（buildInsightPlan 纯函数）：①首次识别→立即洞察 ②7 天内→reuse 复用历史结论（显示上次方向/置信度/摘要）③30 天周期内（settings ai_insight_interval_days 可调，默认 30）→wait（显示"N 天后到洞察周期"+下次日期）④超期→insight；预算闸门：与云端每日上限（ai_usage_cloud_daily_limit 默认 50）共用，超限→wait"明日自动继续"
+- **执行**（runAutoInsight，App 级 60 秒轮询+启动立即一轮，独立防重入，limit=3 分批渐进）：走 agentSearchLoop('price-trend')（云端搜索+分析，外发内容=物料名/品类，与快捷洞察同链路同安全边界）→ 落 trend_items(source_type='auto') + trend_snapshots(source_type='auto')，Decomposition 快捷洞察区可见；完成广播 costhub-insight-done + message（有洞察才提示）
+- **UI**（src/components/KeyMaterialInsights.tsx，驾驶舱 DailyBrief 下方）：物料名/型号/品类 Tag/占某项目 X%/共 N 项目；已洞察→方向 Tag（↑红↓绿～蓝）+置信度+摘要+行动建议 Tooltip+洞察日期；wait→原因+下次日期；首识→"待自动洞察（下一轮轮询触发）"；顶部"全部洞察 →"直达物料趋势洞察页；无项目/无关键物料不渲染
+- **验证**：tsc -b 0 错；118 vitest 全过
+
 # CostHub - 成本管理平台 v2.3.19
 
 ## 项目概述

@@ -140,6 +140,31 @@ export default function App() {
     scheduleAppAdvisor(); // 打开应用立即探查一轮
     return () => clearInterval(iv);
   }, [scheduleAppAdvisor]);
+  // ====== 关键物料自动洞察：60 秒轮询，闸门节流（30 天周期 + 7 天复用 + 每日预算），启动立即一轮 ======
+  const insightRunningRef = useRef(false);
+  const scheduleAppInsight = useCallback(() => {
+    if (insightRunningRef.current) return;
+    insightRunningRef.current = true;
+    (async () => {
+      try {
+        const { runAutoInsight } = await import('./autoInsight');
+        const r = await runAutoInsight({
+          onProgress: msg => window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: msg } })),
+        });
+        window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: '关键物料洞察', done: true } }));
+        window.dispatchEvent(new CustomEvent('costhub-insight-done'));
+        if (r && r.insights > 0) {
+          message.success(`关键物料洞察完成：本轮洞察 ${r.insights} 个物料行情（共 ${r.planned} 个关键物料，见驾驶舱「关键物料洞察」）`);
+        }
+      } catch { /* 静默：识别/洞察失败不打扰 */ }
+      insightRunningRef.current = false;
+    })();
+  }, []);
+  useEffect(() => {
+    const iv = setInterval(() => scheduleAppInsight(), 60 * 1000);
+    scheduleAppInsight(); // 打开应用立即识别一轮（闸门免费判断，未到周期/预算不烧调用）
+    return () => clearInterval(iv);
+  }, [scheduleAppInsight]);
   useEffect(() => {
     // 持续轮询：每 60 秒探查一轮（Ollama 未运行/未配置自动跳过；指纹命中不调模型，只有变化才识别——探查仔细，不快）
     const iv = setInterval(() => scheduleAppCompare(), 60 * 1000);
