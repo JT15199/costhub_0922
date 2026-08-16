@@ -14,6 +14,8 @@ import { getAuditFindings, markAuditRead, dismissAuditFinding, getRecentPartPric
 import { getAdvisorInsights } from '../db/advisor';
 import { getDailyCloudUsage } from '../db/settings';
 import { runAutoAudit } from '../autoAudit';
+import AIStatusBar from '../components/AIStatusBar';
+import DailyBrief from '../components/DailyBrief';
 
 interface DashboardProps {
   onNavigate?: (key: string) => void;
@@ -213,6 +215,10 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   return (
     <div>
       <div className="page-title"><BarChartOutlined /> 驾驶舱</div>
+
+      {/* ===== AI 工作台：状态条 + 今日速览（打开就能看到本地 AI 在工作） ===== */}
+      <AIStatusBar onNavigate={onNavigate} />
+      <DailyBrief onNavigate={onNavigate} />
 
             {/* ===== 状态仪表：一眼扫出哪里需要我 ===== */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 14 }}>

@@ -12,12 +12,19 @@ import {
 import { message } from 'antd';
 import { invoke } from '@tauri-apps/api/core';
 import * as XLSX from 'xlsx';
-import { getDb, saveProject, getModuleRules, saveModuleRule, deleteModuleRule, clearModuleRules, loadContextEntries, saveContextEntry, deleteContextEntry, getSetting, setSetting, saveAIRequestLog } from '../db';
+import { getDb, saveProject, getModuleRules, saveModuleRule, deleteModuleRule, clearModuleRules, loadContextEntries, saveContextEntry, deleteContextEntry, getSetting, setSetting, saveAIRequestLog, getAllAIRequestLogs } from '../db';
 import { MAIN_CATEGORIES } from '../constants';
 import { startOllamaStream, logLocalAICall } from '../ollama';
 import { getAdvisorInsights, updateAdvisorStatus, getRecentBridgeLog, materialKey } from '../db/advisor';
 import { getDailyCloudUsage } from '../db/settings';
 import { runAutoAdvisor } from '../autoAdvisor';
+
+// AI 调用类型 → 中文名（活动记录展示用）
+const AI_TYPE_NAMES: Record<string, string> = {
+  quote_compare: '报价识别', project_health: '项目体检', snapshot_explain: '快照解释', global_ask: '全局问询',
+  auto_audit: '自主巡检', auto_advisor: '建议润色', local_chat: '本地对话',
+  bridge_intent: '洞察意图', bridge_summary: '洞察总结', daily_brief: '今日速览', demo_gen: '演示生成',
+};
 import { isProjectInsight } from '../aiBridge';
 import { EmojiIcon } from '../iconMap';
 import DemoGenerator from '../components/DemoGenerator';
@@ -1005,6 +1012,12 @@ export default function LocalAIAssistant() {
   // ===== 自主建议（后台分析引擎） =====
   const [advisorList, setAdvisorList] = useState<any[]>([]);
   const [advisorTab, setAdvisorTab] = useState<'chat' | 'advice'>('chat'); // 主视图：对话 / 自主建议
+  // AI 活动记录：回溯本地模型今天都做了什么（ai_request_logs 本地留痕）
+  const [aiLogs, setAiLogs] = useState<any[]>([]);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const loadAiLogs = async () => {
+    try { setAiLogs(await getAllAIRequestLogs(15)); } catch { /* 忽略 */ }
+  };
   const [advisorRunning, setAdvisorRunning] = useState(false);
   const [advisorShowDone, setAdvisorShowDone] = useState(false);
   const [advisorLastRun, setAdvisorLastRun] = useState('');
@@ -1814,6 +1827,31 @@ return (
         </div>
         {advisorTab === 'chat' ? (
         <>
+        {/* AI 活动记录：回溯"AI 今天都做了什么"（点击展开，本地留痕可审查） */}
+        <div style={{ padding: '2px 16px 0', borderBottom: logsOpen ? '1px solid var(--color-border)' : undefined }}>
+          <div onClick={() => { setLogsOpen(!logsOpen); if (!logsOpen && aiLogs.length === 0) loadAiLogs(); }}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', padding: '4px 0', fontSize: 12, color: 'var(--color-text-secondary)' }}>
+            <RobotOutlined style={{ color: '#6366F1', fontSize: 12 }} />
+            <span>AI 活动记录{aiLogs.length > 0 ? `（最近 ${aiLogs.length} 条）` : ''}</span>
+            <span style={{ flex: 1 }} />
+            <span style={{ fontSize: 10 }}>{logsOpen ? '▾' : '▸'}</span>
+          </div>
+          {logsOpen && (
+            <div style={{ padding: '2px 0 8px', maxHeight: 150, overflowY: 'auto' }}>
+              {aiLogs.length === 0 ? (
+                <div style={{ fontSize: 11.5, color: '#94A3B8' }}>暂无记录——AI 的每一次本地调用都会留痕，稍后自动出现</div>
+              ) : aiLogs.map((l: any, i: number) => (
+                <div key={l.id ?? i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 11.5, padding: '3px 0', borderBottom: i < aiLogs.length - 1 ? '1px dashed var(--color-border)' : undefined }}>
+                  <Tag style={{ margin: 0, fontSize: 10, flexShrink: 0, lineHeight: '16px' }} color={l.success ? 'blue' : 'red'}>{AI_TYPE_NAMES[l.request_type] || l.request_type}</Tag>
+                  <span style={{ color: l.success ? 'var(--color-text-primary)' : '#DC2626', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {l.response_summary || (l.success ? '执行完成' : `失败：${l.error_message || ''}`)}
+                  </span>
+                  <span style={{ color: '#94A3B8', flexShrink: 0, fontSize: 10.5 }}>{(l.created_at || '').slice(11, 16)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         {/* 启动时若检测到 Ollama 未封禁联网，显示一次性提示条（需等首次状态查询完成，避免闪提示） */}
         {netStatusLoaded && netOllamaFound && !netLocked && !netWarnDismissed && (
           <div style={{ padding: '8px 16px', background: '#FFF7ED', borderBottom: '1px solid #FED7AA', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#9A3412' }}>

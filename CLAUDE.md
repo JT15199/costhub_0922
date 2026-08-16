@@ -30,6 +30,15 @@
 - **界面轻量化第一步**（同日追加）：导航收敛为四区（驾驶舱置顶 + 项目中心/数据资产/AI 趋势三组，页面零改动仅 App.tsx）；项目列表「状态点」列（● 目标超支红 / 报价情报与快照异动橙，Tooltip 显示原因）——纯逻辑 src/projectStatus.ts（vitest 覆盖，复用 computeTargetStatuses/detectSnapshotChanges）
 - ⚠️ 铁律：项目目标成本数据依赖用户设定（生产库仅 2 条），驾驶舱预警以目标设定为前提
 
+### v2.3.19 AI 工作台：打开就有"本地 AI 在工作"的感觉（2026-08-16）
+- **背景**：用户反馈"打开工具没有本地 AI 在工作 的感觉"——原来自主引擎（advisor/compare）都在后台静默跑，无状态呈现、无主动输出
+- **AI 状态条**（src/components/AIStatusBar.tsx，驾驶舱顶部）：三态（连接中呼吸 / 已连接绿点+模型名 / 未连接灰点）——探测逻辑 src/aiStatus.ts detectOllama（127.0.0.1 优先，复用本地直连 no_proxy 铁律）；监听全局事件 `costhub-ai-task`（{task, done}）实时显示当前任务 + "刚刚完成 X · HH:mm"；30 秒自检
+- **AI 今日速览**（src/dailyBrief.ts + src/components/DailyBrief.tsx）：打开驾驶舱即触发——本地规则收集当天事实（collectBriefFacts：项目/器件/大额物料/AI建议/报价情报/待办，任一失败不阻断）→ 本地 Ollama 润色 3-5 句自然语言（http_post /api/chat 非流式，temperature 0.3）→ 失败静默降级规则文案（buildRuleBrief 纯函数）；节流：settings ai_daily_brief 存 {date, hash(指纹), text, model}，同日同指纹复用（缓存），数据变化自动重生成，「重新生成」按钮强制；logLocalAICall('daily_brief') 留痕；纯函数 hashString/buildRuleBrief/buildBriefPrompt/localDate vitest 覆盖（9 用例）
+- **AI 活动记录**（LocalAIAssistant 对话区顶部折叠条）：getAllAIRequestLogs 最近 15 条 → 类型中文映射（AI_TYPE_NAMES）+ 时间 + 摘要 + 成功/失败——"AI 今天都做了什么"可回溯、可审查
+- **启动可见性**（App.tsx）：scheduleAppAdvisor/scheduleAppCompare 接入 onProgress → 广播 costhub-ai-task（报价识别：模块名 / 自主分析步骤），完成广播 done
+- ⚠️ 节流原则：速览同一天不重复烧调用；advisor 30 分钟 AI 润色节流不变；所有失败静默降级，不打扰用户
+- **验证**：tsc -b 0 错；105 vitest 全过
+
 # CostHub - 成本管理平台 v2.3.19
 
 ## 项目概述

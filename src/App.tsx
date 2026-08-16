@@ -97,10 +97,11 @@ export default function App() {
     if (autoRunningRef.current) return;
     autoRunningRef.current = true;
     (async () => {
-      const r = await runAutoCompare(p => setAutoProgress(p));
+      const r = await runAutoCompare(p => { setAutoProgress(p); window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: '报价识别：' + p.current } })); });
       setAutoProgress(null);
       autoRunningRef.current = false;
       window.dispatchEvent(new CustomEvent('costhub-compare-done'));
+      window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: '报价识别', done: true } }));
       refreshInsightCount();
             // 分批提示：一轮只识别 3 个模块（60 秒后自动续下一批）；有情报/失败才提醒，全部无异常静默
       if (r) {
@@ -123,7 +124,8 @@ export default function App() {
     advisorRunningRef.current = true;
     (async () => {
       try {
-        const r = await runAutoAdvisor();
+        const r = await runAutoAdvisor(msg => window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: msg } })));
+        window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: '自主巡检', done: true } }));
         // 只在新建议出现时提醒（日常轮询静默）
         if (r && r.found > 0) {
           message.success(`AI 助理发现 ${r.found} 条成本机会/风险点（见「本地 AI → 自主建议」）`);
