@@ -53,6 +53,14 @@
 - **全模块缩略 + 机会点置顶**（同日追加，用户要求"展示模块都能缩略只显示几条，机会点放上面"）：目标成本达成默认 3 条（targetOpen）、AI 自主建议默认 3 条（advisorMore）、关键物料洞察默认 4 条（expanded），均带"展开全部（N）▼/收起 ▲"；关键物料洞察加载时按 机会点(0) > 风险点(1) > info(2) > 其他(3) 排序置顶（buildMaterialSuggestion 判级）；最近成本变动（costOpen）/巡检发现（auditOpen）原有展开保留
 - **验证**：tsc -b 0 错；147 vitest 全过
 
+### v2.3.19 AI 学习引擎 aiLearning（2026-08-16，用户要求"AI 应在日常对话中学习我关注什么、什么逻辑是对的"）
+- **设计边界**：本地模型不做微调，用"规则注入"实现行为修正（务实、可审查、全本地）——三层：①关注主题统计 ②反馈沉淀规则 ③偏好注入 prompt
+- **① 关注主题分类**（src/aiLearning.ts 纯函数，vitest 13 用例）：6 大主题（项目成本/物料行情/供应商/目标达成/成本结构/工作安排）×关键词表，classifyUserQuestion 命中排序；trackUserFocus 每次对话自动累计到 settings ai_user_focus（mergeFocus 旧数据衰减一半≈30 天窗口）
+- **② 逻辑偏好规则**：对话回答气泡底部新增 👍/👎 反馈——👍 轻提示；👎 弹窗选原因（太泛泛/没结合本地数据/结论逻辑不对/没优先关注点 + 自定义输入）→ addLearnedRule 沉淀为"必须遵守的逻辑偏好"（settings ai_learned_rules，最多 20 条，可删）
+- **③ 偏好注入**：buildPreferenceContext 汇总「用户近期关注重点（优先覆盖）+ 已学逻辑偏好（必须遵守）」——注入普通对话 system prompt、Agent 任务计划/总结 prompt（sendMessage/sendAgentTask）
+- **UI**：反馈行（👍/👎 + "教 AI 理解你的偏好"提示）；左侧「🧠 AI 学习档案」按钮 → Modal：关注主题 TOP 条形图（权重）+ 已学规则列表（删除）
+- **测试**：aiLearning.test.ts 13 用例（分类命中/多主题排序/聚合衰减/排序/反馈转换/上下文生成）——**160 vitest 全过**
+
 ### v2.3.19 洞察列表联动 + 已处理建议可见性修复（2026-08-16）
 - **洞察列表包含自动洞察物料**：getQuickTrendItems 查询条件 source_type='quick' → IN ('quick','auto')——autoInsight 自动洞察的物料出现在「物料趋势洞察 → 快捷洞察区」，点击卡片可查看详情（历史时间轴/分 Skill/追问全复用）；卡片标题旁 source_type='auto' 显示橙色「自动」Tag 与手动洞察区分
 - **已处理建议在"已处理"视图消失（用户反馈）**：排查三层——①库里 16 条建议全 open 无 done：UPDATE SQL 层验证正常（rowcount=1）②根因一（真实 bug）：autoAdvisor enhanceWithAI 的 AI 润色用 updateAdvisorStatus(existing.id, 'open', ...) 覆盖用户已处理状态——findAdvisorByFingerprint 把 done 也视为"已存在"，30 分钟后润色把 done 改回 open → 已处理记录消失。修复：润色前查 status，非 open 跳过（不覆盖用户选择）③根因二（交互）：setAdvisorStatus 乐观移除（点击立即消失）依赖 loadAdvisor 恢复，任一步失败则列表空 → 改乐观标记（条目保留并立即显示新状态）+ 失败回滚 + 报错；「仅看待处理」按钮加"（已处理 N）"计数，处理成功提示"切「显示全部」可查看"

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Button, Input, InputNumber, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Switch, Segmented, notification } from 'antd';
+import { Button, Input, InputNumber, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Switch, Segmented, Radio, notification } from 'antd';
 import { CopyOutlined, RadarChartOutlined } from '@ant-design/icons';
 import {
   SendOutlined, RobotOutlined, PlusOutlined, HistoryOutlined,
@@ -8,6 +8,7 @@ import {
   BookOutlined, DeleteOutlined, ApartmentOutlined, SettingOutlined, ArrowDownOutlined,
   UploadOutlined, FileExcelOutlined, EditOutlined, FilePptOutlined,
   WarningOutlined, BulbOutlined, CheckOutlined, ArrowRightOutlined,
+  LikeOutlined, DislikeOutlined, ExperimentOutlined,
 } from '@ant-design/icons';
 import { message } from 'antd';
 import { invoke } from '@tauri-apps/api/core';
@@ -19,6 +20,14 @@ import { toolIcon } from '../aiTools';
 import { getAdvisorInsights, updateAdvisorStatus, getRecentBridgeLog, materialKey } from '../db/advisor';
 import { getDailyCloudUsage } from '../db/settings';
 import { runAutoAdvisor } from '../autoAdvisor';
+
+// AI 学习：反馈原因选项（👎 时让用户选择/补充期望逻辑）
+const FEEDBACK_REASONS_UI: Record<string, string> = {
+  vague: '回答太泛泛，没有落到具体行动建议',
+  nodata: '没有结合我的本地数据（成本/占比/项目）',
+  wrong_logic: '结论逻辑不对，我想要另一种分析方式',
+  focus: '没有优先回答我最关注的部分',
+};
 
 // AI 调用类型 → 中文名（活动记录展示用）
 const AI_TYPE_NAMES: Record<string, string> = {
@@ -1037,6 +1046,21 @@ export default function LocalAIAssistant() {
   const [agentMode, setAgentMode] = useState(false);       // 输入框模式：普通对话 / Agent 任务
   const [agentTrace, setAgentTrace] = useState<any[]>([]); // 工具执行轨迹（[{name,argsText,status,result}]）
   const [agentTraceOpen, setAgentTraceOpen] = useState(true);
+  // ===== AI 学习（v2.3.19：👍/👎 反馈 + 学习档案） =====
+  const [feedbackMap, setFeedbackMap] = useState<Record<number, 'up' | 'down'>>({});   // 按消息 index 记录已反馈
+  const [feedbackModal, setFeedbackModal] = useState<{ index: number; userText: string } | null>(null);
+  const [feedbackReason, setFeedbackReason] = useState('vague');
+  const [feedbackCustom, setFeedbackCustom] = useState('');
+  const [showLearn, setShowLearn] = useState(false);       // 学习档案弹窗
+  const [learnRules, setLearnRules] = useState<any[]>([]);
+  const [learnFocus, setLearnFocus] = useState<{ topic: string; weight: number }[]>([]);
+  const loadLearnData = async () => {
+    try {
+      const m = await import('../aiLearning');
+      setLearnRules(await m.getLearnedRules());
+      setLearnFocus(m.focusRanked(await m.getUserFocus()));
+    } catch { /* 静默 */ }
+  };
   const [elapsed, setElapsed] = useState(0); // 生成过程计时（秒）
   const [streamRate, setStreamRate] = useState(0); // 生成速度（字符/秒）
   const [contextEntries, setContextEntries] = useState<ContextEntry[]>([]);
@@ -1306,6 +1330,8 @@ export default function LocalAIAssistant() {
   const sendMessage = useCallback(async (userContent: string) => {
     if (!userContent.trim() || streaming) return;
     if (!model) { message.warning('请先连接Ollama并选择模型'); return; }
+    // AI 学习：自动记录用户关注主题（失败静默）
+    import('../aiLearning').then(m => m.trackUserFocus(userContent)).catch(() => {});
     const cloudToolEnabled = (await getSetting('ai_local_cloud_tool', 'on')) !== 'off';
     let sid = sessionId;
     if (!sid) {
@@ -1332,6 +1358,9 @@ export default function LocalAIAssistant() {
       autoData = { data: '', note: '' };
     }
     const systemPrompt = await buildSystemPrompt(userContent);
+    // AI 学习：注入用户关注偏好与已学逻辑规则（失败静默）
+    let prefCtx = '';
+    try { prefCtx = await import('../aiLearning').then(m => m.buildPreferenceContext()); } catch { prefCtx = ''; }
     // 云端助手使用规则（克制调用 + 边界认知 + 防重复）：注入系统提示
     const cloudRules = '\n\n【云端助手使用规则】你可以在需要时调用 cloud_query 工具获取实时行业信息，但请遵守：\n1. 克制调用：先用本地知识与库内数据分析，确实需要实时行业趋势/供需信息时才调用；\n2. 边界认知：云端只能提供行业趋势/供需/参考区间，无法获取具体采购价格——结果仅供趋势参考与机会判断；\n3. 一次查询尽量覆盖完整问题，避免碎片化追问；\n4. 已查询过的信息不要重复查询（系统会自动复用最近结果）。';
     const dataBlock = autoData.data
@@ -1340,7 +1369,7 @@ export default function LocalAIAssistant() {
     // 只保留最近6轮历史，避免 CPU 上下文膨胀拖慢生成
     const recentHistory = messages.slice(-12).map(m => ({ role: m.role, content: m.content }));
     const apiMessages = [
-      { role: 'system', content: systemPrompt + cloudRules + dataBlock },
+      { role: 'system', content: systemPrompt + cloudRules + dataBlock + (prefCtx ? '\n\n' + prefCtx : '') },
       ...recentHistory,
       { role: 'user', content: userContent },
     ].filter(m => m.content);
@@ -1535,7 +1564,11 @@ export default function LocalAIAssistant() {
       setPhase('fetching');
       const { buildToolsPrompt, buildPlanSystemPrompt, parseAgentPlan, unknownTools, runAgentPlan, buildAnswerSystemPrompt } = await import('../aiAgent');
       const { listTools } = await import('../aiTools');
-      const planPrompt = buildPlanSystemPrompt(buildToolsPrompt(listTools()));
+      // AI 学习：记录关注主题 + 注入偏好上下文
+      import('../aiLearning').then(m => m.trackUserFocus(userContent)).catch(() => {});
+      let prefCtx = '';
+      try { prefCtx = await import('../aiLearning').then(m => m.buildPreferenceContext()); } catch { prefCtx = ''; }
+      const planPrompt = buildPlanSystemPrompt(buildToolsPrompt(listTools())) + (prefCtx ? '\n\n' + prefCtx : '');
       const planResp = await invoke<{ status: number; body: string; success: boolean }>('http_post', {
         request: {
           url: ollamaBase + '/api/chat',
@@ -1572,7 +1605,7 @@ export default function LocalAIAssistant() {
       });
       setPhase('thinking');
       // ③ 总结：基于执行报告流式生成最终回答
-      const ansSystem = buildAnswerSystemPrompt() + '\n\n【工具执行报告】\n' + report.slice(0, 6000);
+      const ansSystem = buildAnswerSystemPrompt() + (prefCtx ? '\n\n' + prefCtx : '') + '\n\n【工具执行报告】\n' + report.slice(0, 6000);
       const apiMessages = [
         { role: 'system', content: ansSystem },
         { role: 'user', content: userContent },
@@ -1917,6 +1950,7 @@ return (
           ))}
           <Divider style={{ margin: '8px 0' }} />
           <Button size="small" block icon={<BookOutlined />} type="text" onClick={async () => { setShowContext(true); setMemories(await loadMemories(50)); }}>背景知识库 &amp; 长期记忆 ({contextEntries.length})</Button>
+          <Button size="small" block icon={<ExperimentOutlined />} type="text" onClick={async () => { setShowLearn(true); await loadLearnData(); }}>🧠 AI 学习档案（它学到了什么）</Button>
           <Button size="small" block icon={<FilePptOutlined />} type="text" onClick={() => setShowDemo(true)}>📄 演示生成（HTML/PPT）</Button>
           <Button size="small" block icon={<SettingOutlined />} type="text" onClick={async () => { setShowRules(true); setRules(await getModuleRules()); }}>分类规则管理</Button>
         </div>
@@ -1996,6 +2030,29 @@ return (
                     </span>
                   )
                   : '')}
+                {/* AI 学习反馈：对完成的助手回答 👍/👎（沉淀逻辑偏好） */}
+                {m.role === 'assistant' && !streaming && m.content && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 8, fontSize: 11.5 }}>
+                    {!feedbackMap[i] ? (
+                      <>
+                        <Button size="small" type="text" icon={<LikeOutlined />} style={{ fontSize: 11, color: '#94A3B8', padding: '0 4px', height: 22 }} onClick={async () => {
+                          setFeedbackMap(prev => ({ ...prev, [i]: 'up' }));
+                          message.success('已记录 👍 AI 会继续保持这种分析方式', 1.5);
+                        }} />
+                        <Button size="small" type="text" icon={<DislikeOutlined />} style={{ fontSize: 11, color: '#94A3B8', padding: '0 4px', height: 22 }} onClick={() => {
+                          const prevUser = messages.slice(0, i).filter(x => x.role === 'user').pop();
+                          setFeedbackReason('vague'); setFeedbackCustom('');
+                          setFeedbackModal({ index: i, userText: prevUser?.content || '' });
+                        }} />
+                        <span style={{ color: '#C7CBD1' }}>| 教 AI 理解你的偏好</span>
+                      </>
+                    ) : feedbackMap[i] === 'up' ? (
+                      <span style={{ color: '#16A34A' }}>👍 已记录</span>
+                    ) : (
+                      <span style={{ color: '#D97706' }}>👎 已学习这条偏好，后续会遵守</span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -2636,6 +2693,103 @@ return (
         onCancel={() => setShowDemo(false)} footer={null} width={1040}
         styles={{ body: { maxHeight: '76vh', overflow: 'auto', paddingTop: 8 } }}>
         <DemoGenerator />
+      </Modal>
+
+      {/* AI 学习：回答反馈（👎 原因 → 沉淀逻辑偏好规则） */}
+      <Modal
+        title={<span><ExperimentOutlined /> 教 AI 理解你的偏好</span>}
+        open={!!feedbackModal}
+        onCancel={() => setFeedbackModal(null)}
+        footer={null}
+        width={480}
+      >
+        {feedbackModal && (
+          <div>
+            <div style={{ fontSize: 12, color: '#94A3B8', marginBottom: 10, maxHeight: 60, overflow: 'auto' }}>
+              你的问题：{feedbackModal.userText.slice(0, 120) || '（无法获取原问题）'}
+            </div>
+            <Radio.Group
+              value={feedbackReason}
+              onChange={e => setFeedbackReason(e.target.value)}
+              style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+            >
+              {Object.entries(FEEDBACK_REASONS_UI).map(([key, label]) => (
+                <Radio key={key} value={key} style={{ fontSize: 13 }}>{label}</Radio>
+              ))}
+            </Radio.Group>
+            <Input.TextArea
+              value={feedbackCustom}
+              onChange={e => setFeedbackCustom(e.target.value)}
+              placeholder="或者直接告诉我你期望的分析方式（可选）：如「按子类对比成本」「先给结论再给数据」…"
+              style={{ marginTop: 12, fontSize: 12.5 }}
+              autoSize={{ minRows: 2, maxRows: 4 }}
+            />
+            <div style={{ marginTop: 14, textAlign: 'right' }}>
+              <Button size="small" style={{ marginRight: 8 }} onClick={() => setFeedbackModal(null)}>取消</Button>
+              <Button size="small" type="primary" onClick={async () => {
+                try {
+                  const m = await import('../aiLearning');
+                  const topic = m.classifyUserQuestion(feedbackModal.userText)[0] || '通用';
+                  const pref = m.feedbackToPreference(feedbackReason, feedbackCustom);
+                  await m.addLearnedRule({ topic, preference: pref, source: 'feedback' });
+                  setFeedbackMap(prev => ({ ...prev, [feedbackModal.index]: 'down' }));
+                  setFeedbackModal(null);
+                  message.success('已学习！后续 AI 回答会遵守这条偏好（可在「🧠 学习档案」查看）', 2);
+                } catch { message.error('记录失败，请重试'); }
+              }}>确认学习</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* AI 学习档案：关注主题 + 已学规则 */}
+      <Modal
+        title={<span><ExperimentOutlined /> AI 学习档案 · 它从对话中学到了什么</span>}
+        open={showLearn}
+        onCancel={() => setShowLearn(false)}
+        footer={null}
+        width={560}
+      >
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>🎯 你的关注重点（按近期提及频率）</div>
+          {learnFocus.length === 0 ? (
+            <div style={{ fontSize: 12, color: '#94A3B8' }}>还没有数据——多和我对话，我会记住你常问什么</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {learnFocus.slice(0, 5).map(f => {
+                const max = learnFocus[0]?.weight || 1;
+                return (
+                  <div key={f.topic} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+                    <span style={{ width: 70, flexShrink: 0 }}>{f.topic}</span>
+                    <div style={{ flex: 1, background: '#F1F5F9', borderRadius: 4, height: 14, overflow: 'hidden' }}>
+                      <div style={{ width: Math.max(8, Math.round((f.weight / max) * 100)) + '%', background: 'linear-gradient(90deg,#60A5FA,#3B82F6)', height: '100%', borderRadius: 4 }} />
+                    </div>
+                    <span style={{ color: '#94A3B8', width: 46, textAlign: 'right' }}>{f.weight} 次</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>🧠 已学到的逻辑偏好（后续回答必须遵守）</div>
+          {learnRules.length === 0 ? (
+            <div style={{ fontSize: 12, color: '#94A3B8' }}>还没有——对我某条回答点 👎 并说明原因，我就会记住</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {learnRules.map(r => (
+                <div key={r.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 12.5, border: '1px solid #E8ECF1', borderRadius: 8, padding: '7px 9px' }}>
+                  <Tag style={{ margin: 0, flexShrink: 0, fontSize: 10.5 }}>{r.topic}</Tag>
+                  <span style={{ flex: 1 }}>{r.preference}</span>
+                  <Button size="small" type="text" danger icon={<DeleteOutlined />} style={{ fontSize: 11, height: 20 }} onClick={async () => {
+                    try { const m = await import('../aiLearning'); await m.deleteLearnedRule(r.id); } catch { /* 静默 */ }
+                    await loadLearnData();
+                  }} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </Modal>
     </div>
   );
