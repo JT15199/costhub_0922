@@ -66,7 +66,7 @@ export default function KeyMaterialInsights({ onNavigate, compact }: { onNavigat
         <a style={{ fontSize: 12 }} onClick={() => onNavigate?.('decomposition')}>全部洞察 <ArrowRightOutlined /></a>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {plan.slice(0, expanded ? plan.length : 4).map((item, i) => {
+        {plan.slice(0, expanded ? plan.length : 3).map((item, i) => {
           const agg = item.aggregate;
           const top = agg.projects[0];
           const dir = DIRECTION_META[item.lastDirection || ''] || null;
@@ -86,7 +86,7 @@ export default function KeyMaterialInsights({ onNavigate, compact }: { onNavigat
           const lineBg = level === 'opportunity' ? 'rgba(22,163,74,0.05)' : level === 'risk' ? 'rgba(220,38,38,0.04)' : hasResult ? 'rgba(10,132,255,0.04)' : 'transparent';
           const lineBorder = level === 'opportunity' ? '1px solid rgba(22,163,74,0.25)' : level === 'risk' ? '1px solid rgba(220,38,38,0.2)' : hasResult ? '1px solid rgba(10,132,255,0.12)' : 'transparent';
           return (
-            <div key={agg.key + i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '7px 9px', borderRadius: 8, background: lineBg, border: lineBorder }}>
+            <div key={agg.key + i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '6px 8px', borderRadius: 8, background: lineBg, border: lineBorder }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 12.5, fontWeight: 600 }}>{agg.name}</span>
@@ -104,9 +104,11 @@ export default function KeyMaterialInsights({ onNavigate, compact }: { onNavigat
                   <div style={{ marginTop: 3, fontSize: 11.5, color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
                     {dir && <Tag style={{ marginRight: 6, fontSize: 10.5, lineHeight: '18px', color: dir.color, borderColor: dir.color + '55' }}>{dir.text}</Tag>}
                     {item.lastConfidence && <Tag style={{ marginRight: 6, fontSize: 10.5, lineHeight: '18px' }}>{'置信度 ' + item.lastConfidence}</Tag>}
-                    <span>{item.lastSummary || ''}</span>
+                    {/* 摘要限 1 行（2026-08-16：卡片内容多导致板块过长） */}
+                    <span style={{ display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden', verticalAlign: 'top' }} title={item.lastSummary || ''}>{item.lastSummary || ''}</span>
                     {suggestion && (
-                      <div style={{ marginTop: 4, fontSize: 11.5, lineHeight: 1.6, color: level === 'opportunity' ? '#15803D' : level === 'risk' ? '#B91C1C' : '#64748B', background: level === 'info' ? 'rgba(100,116,139,0.06)' : 'transparent', borderRadius: 6, padding: level === 'info' ? '4px 8px' : 0 }}>
+                      <div style={{ marginTop: 4, fontSize: 11.5, lineHeight: 1.6, color: level === 'opportunity' ? '#15803D' : level === 'risk' ? '#B91C1C' : '#64748B', background: level === 'info' ? 'rgba(100,116,139,0.06)' : 'transparent', borderRadius: 6, padding: level === 'info' ? '4px 8px' : 0, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', cursor: 'pointer' }}
+                        title={suggestion.title + '——' + suggestion.action}>
                         <b>{suggestion.title}</b>——{suggestion.action}
                       </div>
                     )}
@@ -124,9 +126,9 @@ export default function KeyMaterialInsights({ onNavigate, compact }: { onNavigat
           );
         })}
       </div>
-      {plan.length > 4 && (
+      {plan.length > 3 && (
         <a onClick={() => setExpanded(e => !e)} style={{ display: 'inline-block', marginTop: 8, fontSize: 12, color: '#0A84FF' }}>
-          {expanded ? '收起 ▲' : '展开全部（' + (plan.length - 4) + ' 条）▼'}
+          {expanded ? '收起 ▲' : '展开全部（' + (plan.length - 3) + ' 条）▼'}
         </a>
       )}
     </div>
