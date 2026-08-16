@@ -576,6 +576,7 @@ npm run tauri:dev  # 启动完整应用
 ```
 
 ### 构建发布
+> **构建职责约定（2026-08-16 起）**：构建由 AI 负责——代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build` 产出最新 exe（构建前确认 costhub.exe 未运行；build.bat 末尾带 pause 不适合脚本环境，分步执行；产物 src-tauri/target/release/costhub.exe 验证时间戳）
 ```bash
 # 方法1: 使用构建脚本（推荐，Windows）
 build.bat
