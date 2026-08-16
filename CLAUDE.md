@@ -61,6 +61,13 @@
 - **测试**：aiTools.test.ts 7 用例（元数据/参数校验/未知工具）+ aiAgent.test.ts 12 用例（容错解析 7/未知工具/提示词）——**139 vitest 全过**
 - **下一步（P2 讨论中）**：MCP 桥 / 写操作工具（按用户确认后逐步放开）/ 更多工具（SKU/ODM/报告生成）
 
+### v2.3.19 Agent 子类对比 + 工具图标 + 驾驶舱图表优化（2026-08-16，用户试用反馈）
+- **用户反馈**："Agent 读不到成本数据/没法按子类对比"——模型只看到项目代号，缺对比工具。新增 **compare_subcategory_cost**（第 13 个工具）：跨全部项目按 sub_category 精确匹配聚合成本（子类小计 + 占项目 BOM 比例 + 最高/最低项目与差额）——直接回答"同一子类在不同项目成本高低"
+- **工具图标语义化**（TOOL_ICONS/toolIcon）：13 个工具按数据特征配 AntD 语义图标（查询=清单/文件夹、成本=钱币、趋势=折线、洞察=闪电、目标=靶心…），Agent 执行轨迹显示图标；⚠️ .ts 文件不能写 JSX → 存 React.ComponentType 引用，UI 层实例化
+- **驾驶舱布局去杂乱**（src/components/AIWorkspace.tsx）：AI 状态条 + 今日速览合并为一张卡（虚线分隔，compact prop 去卡片样式），顶部三卡变两卡；关键物料洞察保留独立卡
+- **驾驶舱图表根本性优化**（按 ui-ux-pro-max 图表选型：Compare Categories 规则）：两个 BOM 成本柱状图（项目/竞品）**按值降序排列**（比较的核心洞察是排序）+ 颜色从"每柱彩虹色"改**统一主色系**（最高值 #1D4ED8 深蓝高亮、其余 #60A5FA 浅蓝，skill：same hue family）；移除未用 CHART_COLORS import
+- **测试**：aiTools.test.ts 10 用例（新增子类对比工具必填校验 + 全部工具图标覆盖检查）——**141 vitest 全过**
+
 # CostHub - 成本管理平台 v2.3.19
 
 ## 项目概述

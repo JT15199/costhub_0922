@@ -5,7 +5,7 @@ import { Button, Tag } from 'antd';
 import { SyncOutlined, RobotOutlined } from '@ant-design/icons';
 import { runDailyBrief, type BriefResult } from '../dailyBrief';
 
-export default function DailyBrief({ onNavigate }: { onNavigate?: (page: string) => void }) {
+export default function DailyBrief({ onNavigate, compact }: { onNavigate?: (page: string) => void; compact?: boolean }) {
   const [state, setState] = useState<'loading' | 'done'>('loading');
   const [res, setRes] = useState<BriefResult | null>(null);
   const [genAt, setGenAt] = useState('');
@@ -33,9 +33,11 @@ export default function DailyBrief({ onNavigate }: { onNavigate?: (page: string)
 
   return (
     <div style={{
-      marginBottom: 14, borderRadius: 12, padding: '12px 16px',
-      background: 'linear-gradient(135deg, rgba(10,132,255,0.07), rgba(88,86,214,0.07))',
-      border: '1px solid rgba(10,132,255,0.18)',
+      marginBottom: compact ? 0 : 14,
+      borderRadius: compact ? 0 : 12,
+      padding: compact ? '8px 0 4px' : '12px 16px',
+      background: compact ? 'transparent' : 'linear-gradient(135deg, rgba(10,132,255,0.07), rgba(88,86,214,0.07))',
+      border: compact ? 'none' : '1px solid rgba(10,132,255,0.18)',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
         <RobotOutlined style={{ color: '#0A84FF' }} />

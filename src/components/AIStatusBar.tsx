@@ -12,7 +12,7 @@ const STATUS_TEXT: Record<string, { dot: string; color: string; text: string }> 
   error: { dot: '#EF4444', color: '#DC2626', text: '本地 AI 探测失败' },
 };
 
-export default function AIStatusBar({ onNavigate }: { onNavigate?: (page: string) => void }) {
+export default function AIStatusBar({ onNavigate, compact }: { onNavigate?: (page: string) => void; compact?: boolean }) {
   const [st, setSt] = useState<OllamaStatus | null>(null);
   const [task, setTask] = useState('');
   const [lastDone, setLastDone] = useState('');
@@ -46,9 +46,11 @@ export default function AIStatusBar({ onNavigate }: { onNavigate?: (page: string
       onClick={() => onNavigate?.('localAI')}
       style={{
         display: 'flex', alignItems: 'center', gap: 10,
-        marginBottom: 14, padding: '8px 14px',
-        borderRadius: 10,
-        background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+        marginBottom: compact ? 0 : 14,
+        padding: compact ? '6px 0' : '8px 14px',
+        borderRadius: compact ? 0 : 10,
+        background: compact ? 'transparent' : 'var(--color-surface)',
+        border: compact ? 'none' : '1px solid var(--color-border)',
         cursor: 'pointer', flexWrap: 'wrap',
       }}
       title={st?.connected ? `模型：${st.model} · ${st.baseUrl}` : '点击打开本地 AI 助手'}

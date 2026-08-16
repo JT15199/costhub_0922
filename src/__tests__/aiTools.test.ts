@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { listTools, getTool, validateArgs, executeTool } from '../aiTools';
+import { listTools, getTool, validateArgs, executeTool, TOOL_ICONS, toolIcon } from '../aiTools';
 
 describe('工具注册表元数据', () => {
   it('至少 10 个工具且 id 唯一', () => {
@@ -20,6 +20,18 @@ describe('工具注册表元数据', () => {
     expect(getTool('query_projects')).toBeDefined();
     expect(getTool('query_project_bom')).toBeDefined();
     expect(getTool('insight_material_trend')).toBeDefined();
+  });
+  it('子类成本对比工具存在且必填参数校验', () => {
+    const t = getTool('compare_subcategory_cost')!;
+    expect(t).toBeDefined();
+    expect(validateArgs(t, {})).toContain('缺少必填参数');
+    expect(validateArgs(t, { sub_category: '液晶面板' })).toBeNull();
+  });
+  it('全部工具都有语义图标（TOOL_ICONS 覆盖）', () => {
+    for (const t of listTools()) {
+      expect(TOOL_ICONS[t.id]).toBeDefined();
+      expect(toolIcon(t.id)).toBeDefined();
+    }
   });
 });
 

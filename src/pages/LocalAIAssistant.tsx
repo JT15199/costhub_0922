@@ -15,6 +15,7 @@ import * as XLSX from 'xlsx';
 import { getDb, saveProject, getModuleRules, saveModuleRule, deleteModuleRule, clearModuleRules, loadContextEntries, saveContextEntry, deleteContextEntry, getSetting, setSetting, saveAIRequestLog, getAllAIRequestLogs } from '../db';
 import { MAIN_CATEGORIES } from '../constants';
 import { startOllamaStream, logLocalAICall } from '../ollama';
+import { toolIcon } from '../aiTools';
 import { getAdvisorInsights, updateAdvisorStatus, getRecentBridgeLog, materialKey } from '../db/advisor';
 import { getDailyCloudUsage } from '../db/settings';
 import { runAutoAdvisor } from '../autoAdvisor';
@@ -2031,6 +2032,7 @@ return (
                         {tr.status === 'ok' ? '✅' : tr.status === 'fail' ? '❌' : '⏳'}
                       </span>
                       <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ color: '#6366F1', marginRight: 4, fontSize: 12 }}>{(() => { const Icon = toolIcon(tr.tool); return <Icon />; })()}</span>
                         <b>{tr.name}</b>
                         {tr.argsText !== '无参数' && <span style={{ color: '#94A3B8' }}>（{tr.argsText}）</span>}
                         {tr.status !== 'running' && (

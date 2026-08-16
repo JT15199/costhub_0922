@@ -8,14 +8,13 @@ import { getCategoryColor } from '../constants';
 import { EmojiIcon } from '../iconMap';
 import DataTable from '../components/DataTable';
 import type { DashboardStats } from '../types';
-import { CHART_COLORS, chartTooltip, chartAxisStyle, chartGrid, chartTextMuted, barGradient } from '../chartTheme';
+import { chartTooltip, chartAxisStyle, chartGrid, chartTextMuted, barGradient } from '../chartTheme';
 import { computeTargetStatuses, summarizeTargets, detectSnapshotChanges, type TargetStatus } from '../targetInsight';
 import { getAuditFindings, markAuditRead, dismissAuditFinding, getRecentPartPriceChanges } from '../auditStore';
 import { getAdvisorInsights } from '../db/advisor';
 import { getDailyCloudUsage } from '../db/settings';
 import { runAutoAudit } from '../autoAudit';
-import AIStatusBar from '../components/AIStatusBar';
-import DailyBrief from '../components/DailyBrief';
+import AIWorkspace from '../components/AIWorkspace';
 import KeyMaterialInsights from '../components/KeyMaterialInsights';
 
 interface DashboardProps {
@@ -180,25 +179,31 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   // 未达标领域（按差额排序，最严重在前）
   const missedSorted = [...missed].sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
 
+  // ⚠️ 图表优化（2026-08-16，按 ui-ux-pro-max 图表选型）：比较类柱状图必须降序排列（类别比较核心洞察是排序），
+  // 颜色统一品牌主色系（比较场景禁止每柱彩虹色——skill: same hue family），最高值同色系深色高亮
+  const projSorted = [...projCosts].sort((a, b) => b.cost - a.cost);
+  const maxProjCost = projSorted[0]?.cost;
   const projBarOption = {
     tooltip: chartTooltip('axis'),
-    xAxis: { type: 'category', data: projCosts.map(d => d.name), ...chartAxisStyle(12) },
+    xAxis: { type: 'category', data: projSorted.map(d => d.name), ...chartAxisStyle(12) },
     yAxis: { type: 'value', name: '¥', ...chartAxisStyle() },
     series: [{
       type: 'bar', barWidth: '55%',
-      data: projCosts.map((d, i) => ({ value: d.cost, itemStyle: { color: barGradient(CHART_COLORS[i % CHART_COLORS.length]), borderRadius: [8, 8, 0, 0] } })),
+      data: projSorted.map(d => ({ value: d.cost, itemStyle: { color: barGradient(d.cost === maxProjCost ? '#1D4ED8' : '#60A5FA'), borderRadius: [8, 8, 0, 0] } })),
       label: { show: true, position: 'top', formatter: (p: any) => `¥${p.value.toFixed(0)}`, fontSize: 11, fontWeight: 600, color: chartTextMuted() },
     }],
     grid: chartGrid(),
   };
 
+  const compSorted = [...compCosts].sort((a, b) => b.cost - a.cost);
+  const maxCompCost = compSorted[0]?.cost;
   const compBarOption = {
     tooltip: chartTooltip('axis'),
-    xAxis: { type: 'category', data: compCosts.map(d => d.name), ...chartAxisStyle(10, { rotate: 20 }) },
+    xAxis: { type: 'category', data: compSorted.map(d => d.name), ...chartAxisStyle(10, { rotate: 20 }) },
     yAxis: { type: 'value', name: '¥', ...chartAxisStyle() },
     series: [{
       type: 'bar', barWidth: '55%',
-      data: compCosts.map((d, i) => ({ value: d.cost, itemStyle: { color: barGradient(CHART_COLORS[(i + 2) % CHART_COLORS.length]), borderRadius: [8, 8, 0, 0] } })),
+      data: compSorted.map(d => ({ value: d.cost, itemStyle: { color: barGradient(d.cost === maxCompCost ? '#1D4ED8' : '#60A5FA'), borderRadius: [8, 8, 0, 0] } })),
       label: { show: true, position: 'top', formatter: (p: any) => `¥${p.value.toFixed(0)}`, fontSize: 11, fontWeight: 600, color: chartTextMuted() },
     }],
     grid: chartGrid({ bottom: 60 }),
@@ -217,9 +222,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     <div>
       <div className="page-title"><BarChartOutlined /> 驾驶舱</div>
 
-      {/* ===== AI 工作台：状态条 + 今日速览（打开就能看到本地 AI 在工作） ===== */}
-      <AIStatusBar onNavigate={onNavigate} />
-      <DailyBrief onNavigate={onNavigate} />
+      {/* ===== AI 工作台（一张卡：状态条 + 今日速览）+ 关键物料洞察 ===== */}
+      <AIWorkspace onNavigate={onNavigate} />
       <KeyMaterialInsights onNavigate={onNavigate} />
 
             {/* ===== 状态仪表：一眼扫出哪里需要我 ===== */}

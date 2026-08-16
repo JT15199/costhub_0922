@@ -10,6 +10,33 @@ import { getInsights } from './db/compare';
 import { getAdvisorInsights } from './db/advisor';
 import { supplierTrendText } from './supplierTrend';
 import { computeTargetStatuses } from './targetInsight';
+// 工具图标（2026-08-16：按数据特征选择——查询=清单/文件夹，成本=钱币，趋势=折线，洞察=闪电，目标=靶心…）
+import React from 'react';
+import {
+  FolderOutlined, ProfileOutlined, DollarOutlined, ShopOutlined, LineChartOutlined,
+  AimOutlined, HistoryOutlined, FundOutlined, BulbOutlined, BookOutlined,
+  CheckSquareOutlined, ThunderboltOutlined, BarChartOutlined,
+} from '@ant-design/icons';
+
+/** 工具图标映射（数据特征 → 语义图标；存组件引用以便在 .ts 中使用，UI 层再实例化） */
+export const TOOL_ICONS: Record<string, React.ComponentType> = {
+  query_projects: FolderOutlined,
+  query_project_bom: ProfileOutlined,
+  query_project_cost: DollarOutlined,
+  query_part_suppliers: ShopOutlined,
+  query_supplier_trend: LineChartOutlined,
+  query_target_status: AimOutlined,
+  query_cost_snapshots: HistoryOutlined,
+  query_price_insights: FundOutlined,
+  query_advisor_insights: BulbOutlined,
+  query_worklog: BookOutlined,
+  query_todos: CheckSquareOutlined,
+  insight_material_trend: ThunderboltOutlined,
+  compare_subcategory_cost: BarChartOutlined,
+};
+export function toolIcon(id: string): React.ComponentType {
+  return TOOL_ICONS[id] || FolderOutlined;
+}
 
 export interface AiToolParam {
   key: string;
@@ -217,6 +244,34 @@ const tools: AiTool[] = [
       const rows = (await getWorkLogs('', '', '', '', a.project || '')).filter((r: any) => r.is_todo === 1 && r.done === 0);
       if (rows.length === 0) return '没有未完成的待办';
       return rows.slice(0, 15).map((r: any) => fmtDate(r.log_date) + (r.work_project ? '【' + r.work_project + '】' : '') + ' ' + String(r.content || '').slice(0, 80)).join('\n');
+    },
+  },
+  {
+    id: 'compare_subcategory_cost',
+    name: '子类成本跨项目对比',
+    desc: '对比同一子类（物料通用名称，如"液晶面板"）在各项目的成本：列出每个项目中该子类的成本、占项目 BOM 比例，并标注最高与最低。参数 sub_category 必填（用子类通用名，不是型号）。',
+    params: [{ key: 'sub_category', type: 'string', required: true, desc: '子类通用名称，如 液晶面板' }],
+    execute: async (a) => {
+      const projects = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
+      const rows: { code: string; sub: number; total: number }[] = [];
+      for (const p of projects) {
+        const boms = (await getProjectBOMs(p.id)).filter((b: any) => !b.is_deleted);
+        if (boms.length === 0) continue;
+        const cost = (b: any) => (b.part_cost ?? b.cost ?? 0) * (b.quantity ?? 1);
+        const total = boms.reduce((s: number, b: any) => s + cost(b), 0);
+        const sub = boms.filter((b: any) => String(b.sub_category || '').trim() === a.sub_category)
+          .reduce((s: number, b: any) => s + cost(b), 0);
+        if (sub > 0) rows.push({ code: p.code || '', sub, total });
+      }
+      if (rows.length === 0) return '没有项目使用子类「' + a.sub_category + '」（子类需与 BOM 中 sub_category 完全一致，可用 query_project_bom 先确认写法）';
+      const lines = rows.map(r => r.code + '：' + fmtMoney(r.sub) + '（占 ' + Math.round((r.sub / r.total) * 100) + '%）');
+      const max = rows.reduce((m, r) => (r.sub > m.sub ? r : m), rows[0]);
+      const min = rows.reduce((m, r) => (r.sub < m.sub ? r : m), rows[0]);
+      return '子类「' + a.sub_category + '」跨项目成本对比（' + rows.length + ' 个项目）：\n'
+        + lines.join('\n')
+        + '\n成本最高：' + max.code + ' ' + fmtMoney(max.sub)
+        + '；最低：' + min.code + ' ' + fmtMoney(min.sub)
+        + '（差 ' + fmtMoney(max.sub - min.sub) + '）';
     },
   },
   {
