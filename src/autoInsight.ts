@@ -114,6 +114,8 @@ export interface LastInsightInfo {
   confidence?: string;
   summary?: string;
   suggested_action?: string;
+  magnitudeMin?: number | null;
+  magnitudeMax?: number | null;
 }
 
 export interface InsightPlanItem {
@@ -126,6 +128,8 @@ export interface InsightPlanItem {
   lastConfidence?: string;
   lastSummary?: string;
   lastAction?: string;
+  lastMagnitudeMin?: number | null;
+  lastMagnitudeMax?: number | null;
 }
 
 /** 解析洞察时间（兼容本地格式 "2026-08-14 10:00" 与 ISO） */
@@ -163,6 +167,8 @@ export function buildInsightPlan(
       lastConfidence: last?.confidence,
       lastSummary: last?.summary,
       lastAction: last?.suggested_action,
+      lastMagnitudeMin: last?.magnitudeMin,
+      lastMagnitudeMax: last?.magnitudeMax,
     };
     if (budgetLeft <= 0) {
       plan.action = "wait";
@@ -213,6 +219,8 @@ export async function queryLastInsights(): Promise<Record<string, LastInsightInf
           confidence: snap?.confidence_level || snap?.confidence || "",
           summary: snap?.summary || "",
           suggested_action: snap?.suggested_action || "",
+          magnitudeMin: snap?.magnitude_min ?? null,
+          magnitudeMax: snap?.magnitude_max ?? null,
         };
       }
     }
@@ -220,7 +228,58 @@ export async function queryLastInsights(): Promise<Record<string, LastInsightInf
   return lastInsights;
 }
 
-// ==================== ⑤ 主流程（App 级 60 秒轮询调用） ====================
+// ==================== ⑤ 机会点/风险点建议（纯函数：方向+幅度+占比 → 具体行动） ====================
+// 2026-08-16（用户反馈）：洞察不能只给泛泛结论，要落到"这个机会点/风险点 + 怎么行动"
+// 规则：行情下行+置信度达标 → 机会（降价谈判窗口）；行情上行 → 风险（锁价/备货）；幅度大/占比高 → 强化
+
+export interface MaterialSuggestion {
+  level: 'opportunity' | 'risk' | 'info';
+  title: string;   // 一句话定性
+  action: string;  // 具体行动建议
+}
+
+export function buildMaterialSuggestion(aggregate: MaterialAggregate, last?: LastInsightInfo): MaterialSuggestion | null {
+  if (!last?.direction) return null;
+  const dir = String(last.direction);
+  const conf = String(last.confidence || '');
+  const magMax = Number(last.magnitudeMax ?? last.magnitudeMin ?? 0) || 0;
+  const magMin = Number(last.magnitudeMin ?? 0) || 0;
+  const top = aggregate.projects[0];
+  const ratioPct = top ? Math.round(top.ratio * 100) : 0;
+  const projText = top ? '占 ' + top.projectCode + ' BOM ' + ratioPct + '%' : '占比较高';
+  const magText = magMax > 0 ? '，幅度约 ' + Math.abs(magMin) + '%~' + Math.abs(magMax) + '%' : '';
+  const confident = conf.includes('高') || conf.includes('中');
+  const isDown = dir.includes('下降') || dir.includes('跌');
+  const isUp = dir.includes('上涨') || dir.includes('涨');
+  const bigImpact = ratioPct >= 30;
+  const bigMove = magMax >= 10;
+
+  if (isDown) {
+    const s: MaterialSuggestion = {
+      level: 'opportunity',
+      title: '「' + aggregate.name + '」行情下行' + magText + (confident ? '' : '（信号待确认）'),
+      action: '该子类' + projText + '，行情走低存在降价空间——建议向当前供应商发起降价谈判或重新询价' + (bigImpact ? '，成本影响大，优先处理' : '') + '；若已与供应商约定调价联动，可据此主张下调。',
+    };
+    if (!confident) s.action = '信号强度不足，建议先观察 1-2 周再行动；' + s.action;
+    return s;
+  }
+  if (isUp) {
+    const s: MaterialSuggestion = {
+      level: 'risk',
+      title: '「' + aggregate.name + '」行情上行' + magText + (bigMove ? '，涨幅明显' : ''),
+      action: '该子类' + projText + '，成本有上行压力——建议提前锁定价格/备货' + (bigImpact ? '，或评估替代物料' : '') + '；与供应商沟通远期订单以对冲涨价。',
+    };
+    if (!confident) s.action = '信号强度不足，先跟踪行情；' + s.action;
+    return s;
+  }
+  return {
+    level: 'info',
+    title: '「' + aggregate.name + '」行情' + dir + magText,
+    action: '该子类' + projText + '，当前无明确趋势信号，维持现有采购节奏，下次洞察周期自动复查。',
+  };
+}
+
+// ==================== ⑥ 主流程（App 级 60 秒轮询调用） ====================
 
 export interface AutoInsightResult {
   planned: number;   // 关键物料总数

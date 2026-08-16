@@ -47,6 +47,11 @@
 - **UI**（src/components/KeyMaterialInsights.tsx，驾驶舱 DailyBrief 下方）：子类名（通用名称）+「含 N 种型号」/品类 Tag/占某项目 X%/共 N 项目；已洞察→方向 Tag（↑红↓绿～蓝）+置信度+摘要+行动建议 Tooltip+洞察日期；wait→原因+下次日期；首识→"待自动洞察（下一轮轮询触发）"；顶部"全部洞察 →"直达物料趋势洞察页；无项目/无关键物料不渲染
 - **验证**：tsc -b 0 错；119 vitest 全过（子类用例：同子类多型号合并帕累托/回退物料名/型号去重合并/大类隔离）
 
+### v2.3.19 关键物料机会点建议 + 驾驶舱清爽化（2026-08-16，用户反馈"只给泛泛结论/还不够清爽"）
+- **机会点/风险点引擎**（autoInsight.ts buildMaterialSuggestion 纯函数，vitest 6 用例）：洞察不只给结论，落到"机会/风险 + 怎么行动"——规则：行情下行+置信度高/中 → 🎯机会点（该子类占 X 项目 BOM Y%，建议降价谈判/重新询价，占比≥30% 追加"优先处理"）；行情上行 → ⚠️风险点（建议锁定价格/备货，占比高追加评估替代料）；幅度≥10% 强化；低置信度追加"先观察/先跟踪"；无方向 → info（维持节奏，下次周期复查）；LastInsightInfo/InsightPlanItem 补 magnitude 字段透传
+- **驾驶舱清爽化**：关键物料洞察移入「目标成本达成 | 关键物料洞察」双列 grid（compact prop 去 marginBottom），AI 洞察建议区 gridColumn 全宽——顶部纵向从 5 大卡缩到 4 行；机会点行绿色边框+Tag 高亮、风险点红色，行动文本直接展示（不再藏 Tooltip）
+- **验证**：tsc -b 0 错；147 vitest 全过
+
 ### v2.3.19 洞察列表联动 + 已处理建议可见性修复（2026-08-16）
 - **洞察列表包含自动洞察物料**：getQuickTrendItems 查询条件 source_type='quick' → IN ('quick','auto')——autoInsight 自动洞察的物料出现在「物料趋势洞察 → 快捷洞察区」，点击卡片可查看详情（历史时间轴/分 Skill/追问全复用）；卡片标题旁 source_type='auto' 显示橙色「自动」Tag 与手动洞察区分
 - **已处理建议在"已处理"视图消失（用户反馈）**：排查三层——①库里 16 条建议全 open 无 done：UPDATE SQL 层验证正常（rowcount=1）②根因一（真实 bug）：autoAdvisor enhanceWithAI 的 AI 润色用 updateAdvisorStatus(existing.id, 'open', ...) 覆盖用户已处理状态——findAdvisorByFingerprint 把 done 也视为"已存在"，30 分钟后润色把 done 改回 open → 已处理记录消失。修复：润色前查 status，非 open 跳过（不覆盖用户选择）③根因二（交互）：setAdvisorStatus 乐观移除（点击立即消失）依赖 loadAdvisor 恢复，任一步失败则列表空 → 改乐观标记（条目保留并立即显示新状态）+ 失败回滚 + 报错；「仅看待处理」按钮加"（已处理 N）"计数，处理成功提示"切「显示全部」可查看"

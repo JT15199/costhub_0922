@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { identifyKeyMaterials, aggregateMaterials, buildInsightPlan, parseInsightTime, type KeyMaterial } from '../autoInsight';
+import { identifyKeyMaterials, aggregateMaterials, buildInsightPlan, parseInsightTime, buildMaterialSuggestion, type KeyMaterial } from '../autoInsight';
 
 // 构造 BOM：sub_category/name/cost/quantity 快照列
 const mkBom = (partId: number, name: string, cost: number, qty: number, sub = '', model = '', cat = '硬件类') => ({
@@ -140,5 +140,43 @@ describe('parseInsightTime — 时间解析兼容', () => {
     expect(parseInsightTime('2026-08-14T10:00:00')).not.toBeNull();
     expect(parseInsightTime('')).toBeNull();
     expect(parseInsightTime(undefined)).toBeNull();
+  });
+});
+
+describe('buildMaterialSuggestion — 机会点/风险点建议', () => {
+  const agg = {
+    key: '液晶面板|硬件类', name: '液晶面板', models: ['M27A'], category: '硬件类',
+    projects: [{ projectId: 1, projectCode: 'M270', ratio: 0.45, subtotal: 450 }], totalSubtotal: 450,
+  };
+  it('行情下降+置信度中 → 机会点，含项目与占比与行动', () => {
+    const s = buildMaterialSuggestion(agg, { direction: '下降', confidence: '中', magnitudeMax: -8 });
+    expect(s?.level).toBe('opportunity');
+    expect(s?.title).toContain('下行');
+    expect(s?.action).toContain('M270');
+    expect(s?.action).toContain('45%');
+    expect(s?.action).toContain('降价');
+  });
+  it('行情上涨+置信度高 → 风险点，建议锁价', () => {
+    const s = buildMaterialSuggestion(agg, { direction: '上涨', confidence: '高', magnitudeMin: 5, magnitudeMax: 12 });
+    expect(s?.level).toBe('risk');
+    expect(s?.action).toContain('锁定价格');
+  });
+  it('占比≥30% 时强化优先级', () => {
+    const s = buildMaterialSuggestion(agg, { direction: '下降', confidence: '高' });
+    expect(s?.action).toContain('优先处理');
+  });
+  it('无方向 → null（不打扰）', () => {
+    expect(buildMaterialSuggestion(agg, {})).toBeNull();
+    expect(buildMaterialSuggestion(agg, undefined)).toBeNull();
+  });
+  it('低置信度 → 提示先观察', () => {
+    const s = buildMaterialSuggestion(agg, { direction: '上涨', confidence: '低' });
+    expect(s?.level).toBe('risk');
+    expect(s?.action).toContain('先跟踪');
+  });
+  it('无信号（震荡）→ info 级别，维持节奏', () => {
+    const s = buildMaterialSuggestion(agg, { direction: '震荡', confidence: '中' });
+    expect(s?.level).toBe('info');
+    expect(s?.action).toContain('维持');
   });
 });

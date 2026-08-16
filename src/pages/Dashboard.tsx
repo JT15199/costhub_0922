@@ -222,9 +222,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     <div>
       <div className="page-title"><BarChartOutlined /> 驾驶舱</div>
 
-      {/* ===== AI 工作台（一张卡：状态条 + 今日速览）+ 关键物料洞察 ===== */}
+      {/* ===== AI 工作台（一张卡：状态条 + 今日速览） ===== */}
       <AIWorkspace onNavigate={onNavigate} />
-      <KeyMaterialInsights onNavigate={onNavigate} />
 
             {/* ===== 状态仪表：一眼扫出哪里需要我 ===== */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 14 }}>
@@ -303,8 +302,11 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         )}
       </div>
 
-{/* ===== ③ AI 洞察建议（本地模型：机会点/占比意见/思路——这才叫 AI） ===== */}
-      <div className="content-card" style={{ marginBottom: 16 }}>
+{/* ===== 关键物料洞察（与目标成本达成并排，紧凑） ===== */}
+      <KeyMaterialInsights onNavigate={onNavigate} compact />
+
+      {/* ===== ③ AI 洞察建议（本地模型：机会点/占比意见/思路——这才叫 AI；占满整行） ===== */}
+      <div className="content-card" style={{ marginBottom: 16, gridColumn: '1 / -1' }}>
         <div className="card-header">
           <h3><RobotOutlined style={{ color: '#0A84FF' }} /> AI 洞察建议</h3>
           <span style={{ fontSize: 12, color: '#94A3B8' }}>
