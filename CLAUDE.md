@@ -1,3 +1,6 @@
+### v2.3.19 驾驶舱第二行等高对齐（2026-08-17，用户反馈：卡片只显示一条/两边要对齐）
+- 第二行 grid 加 alignItems stretch；左卡 KeyMaterialInsights compact 外壳 height 100% + flex column（默认显示 4 条，展开按钮 marginTop auto 吸底）；右卡 AI 洞察建议 height 100% + flex column（内容区 flex:1）——左右卡片边框等高，底部按钮对齐；关键物料洞察默认条数 3→4 与右列协调
+- **验证**：tsc -b 0 错；184 vitest 全过
 ### v2.3.19 驾驶舱重排版（2026-08-17，用户要求：自主分析与AI洞察建议合并/今日速览进标题/统计卡第一行/左关键物料右洞察建议/目标达成按项目维度/字数精简）
 - **新布局**（Dashboard.tsx）：①标题行=驾驶舱 + DailyBrief inline（单行省略悬停全文+活动记录链接）+ AIStatusBar compact（右侧）②第一行=5 统计卡（文案精简：未达标/待处理/近期变动/本地处理·审计留痕/达上限）③目标成本达成→项目维度紧凑条（chips：代号·最差领域·达成率%，悬停看全部领域，点击直达项目；未设目标提示移右侧）④第二行 grid：左=关键物料洞察 | 右=AI 洞察建议（内嵌 AutoThinkPanel mode=inline 合并自主分析结论 + 自主建议 + 巡检发现）⑤下方保留 最近成本变动/统计卡/图表/最近更新器件
 - **组件调整**：DailyBrief 加 inline prop（单行速览）；AutoThinkPanel 加 inline mode（无外壳/无按钮/无引擎汇总，只显示实时单行+最新 3 条结论摘要卡+查看全部链接）；AIWorkspace 大卡从驾驶舱移除（状态条与速览并入标题行）；targetOpen state 移除

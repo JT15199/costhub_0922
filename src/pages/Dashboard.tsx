@@ -295,11 +295,11 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         )}
       </div>
 
-      {/* ===== 第二行：左=关键物料洞察 | 右=AI 洞察建议（合并自主分析结论） ===== */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14, marginBottom: 14 }}>
+      {/* ===== 第二行：左=关键物料洞察 | 右=AI 洞察建议（等高对齐） ===== */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14, marginBottom: 14, alignItems: 'stretch' }}>
         <KeyMaterialInsights onNavigate={onNavigate} compact />
 
-        <div className="content-card" style={{ marginBottom: 0 }}>
+        <div className="content-card" style={{ marginBottom: 0, height: '100%', display: 'flex', flexDirection: 'column' }}>
         <div className="card-header">
           <h3><RobotOutlined style={{ color: '#0A84FF' }} /> AI 洞察建议</h3>
           <span style={{ fontSize: 12, color: '#94A3B8' }}>
@@ -309,7 +309,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             {auditLastAt && <span style={{ marginLeft: 8 }}>上次 {auditLastAt}</span>}
           </span>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
           {/* 🧠 自主分析结论（合并：AI 后台自发分析结果） */}
           <AutoThinkPanel mode="inline" onNavigate={onNavigate} />
           {/* 自主建议（AI 助理后台分析） */}

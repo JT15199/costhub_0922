@@ -57,7 +57,7 @@ export default function KeyMaterialInsights({ onNavigate, compact }: { onNavigat
   if (!plan || plan.length === 0) return null;
 
   return (
-    <div style={{ marginBottom: compact ? 0 : 14, borderRadius: 12, padding: '12px 16px', background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+    <div style={{ marginBottom: compact ? 0 : 14, borderRadius: 12, padding: '12px 16px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', height: compact ? '100%' : undefined, display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
         <BulbOutlined style={{ color: '#D97706' }} />
         <b style={{ fontSize: 13 }}>关键物料洞察</b>
@@ -66,7 +66,7 @@ export default function KeyMaterialInsights({ onNavigate, compact }: { onNavigat
         <a style={{ fontSize: 12 }} onClick={() => onNavigate?.('decomposition')}>全部洞察 <ArrowRightOutlined /></a>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {plan.slice(0, expanded ? plan.length : 3).map((item, i) => {
+        {plan.slice(0, expanded ? plan.length : 4).map((item, i) => {
           const agg = item.aggregate;
           const top = agg.projects[0];
           const dir = DIRECTION_META[item.lastDirection || ''] || null;
@@ -126,9 +126,9 @@ export default function KeyMaterialInsights({ onNavigate, compact }: { onNavigat
           );
         })}
       </div>
-      {plan.length > 3 && (
-        <a onClick={() => setExpanded(e => !e)} style={{ display: 'inline-block', marginTop: 8, fontSize: 12, color: '#0A84FF' }}>
-          {expanded ? '收起 ▲' : '展开全部（' + (plan.length - 3) + ' 条）▼'}
+      {plan.length > 4 && (
+        <a onClick={() => setExpanded(e => !e)} style={{ display: 'inline-block', marginTop: 'auto', paddingTop: 8, fontSize: 12, color: '#0A84FF' }}>
+          {expanded ? '收起 ▲' : '展开全部（' + (plan.length - 4) + ' 条）▼'}
         </a>
       )}
     </div>
