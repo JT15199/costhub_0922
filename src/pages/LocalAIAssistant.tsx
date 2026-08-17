@@ -1835,6 +1835,8 @@ export default function LocalAIAssistant() {
     try {
       await updateAdvisorStatus(id, status);
       await loadAdvisor();
+      // ⚠️ 处理后同步驾驶舱待处理计数（2026-08-17 修复：处理完驾驶舱「AI 建议」数字不刷新）
+      window.dispatchEvent(new CustomEvent('costhub-advisor-done'));
       // 反馈条带撤销：处理错了一键恢复
       notification.success({
         message: status === 'done' ? '已标记处理（切「显示全部」可查看）' : '已忽略（数据不变将不再提醒）',
@@ -1843,6 +1845,7 @@ export default function LocalAIAssistant() {
           try {
             await updateAdvisorStatus(id, 'open');
             await loadAdvisor();
+            window.dispatchEvent(new CustomEvent('costhub-advisor-done')); // 撤销恢复后计数同步
             notification.success({ message: '已恢复为待处理', placement: 'bottomRight', duration: 3 });
           } catch (e2: any) { notification.error({ message: '撤销失败：' + (e2?.message || e2), placement: 'bottomRight' }); }
         }}>撤销</Button>,

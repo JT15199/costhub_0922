@@ -1,3 +1,8 @@
+### v2.3.19 三处体验修复（2026-08-17，用户反馈：反复搜查噪音 / 处理后无反应 / 云端确认弹窗不易用）
+- **① 报价识别"反复搜查"视觉噪音**：runAutoCompare 原来对每个模块无条件调 onProgress（缓存命中也算）→ 60 秒轮询即使全缓存命中也会闪现顶部进度条 + AI 状态条"刚刚完成 报价识别"。修复：onProgress 只在 needsAI（真实 AI 识别）分支调用；App 侧三个引擎的 costhub-ai-task done 广播也改为真实产出才发（compare 用 didWork 标志、advisor 用 found/aiEnhanced、insight 用 insights>0）——日常轮询完全静默
+- **② 处理后无反应/反应不对**：LocalAIAssistant setAdvisorStatus 处理后未广播 costhub-advisor-done → 驾驶舱「AI 建议」待处理计数不刷新（已补 dispatch，含撤销恢复路径）；Projects confirm/reject 已带 costhub-insights-changed（核对确认存在）
+- **③ 云端确认 UI 重构（非打断式待确认队列）**：原来 autoInsight preview 模式直接弹 antd Modal.confirm（用户："弹窗自己弹、不知从哪看，UI 不好用"）→ 重构 src/cloudConfirm.tsx：**待确认队列**（内存 + costhub-cloud-pending 事件）+ src/components/CloudConfirmBar.tsx：**App 级底部固定横幅**（「🔐 N 个关键物料洞察等待云端发送确认 · 查看确认」，任何页面可见）→ 点击 Modal 列表（物料/品类/问题 + 确认发送/跳过 + 全部确认/全部跳过）；确认 → dispatch costhub-insight-request（App 监听 → scheduleAppInsight 立即继续自动洞察）；**会话级去重**：同物料只入队一次，确认/跳过后的物料本会话不再询问（防 60s 轮询重复打扰）；requestCloudConfirm 语义：auto→true / preview 未处理→入队返回 false（autoInsight failed++ 跳过）/ 本会话已确认→true / 已跳过→false
+- **验证**：tsc -b 0 错；160 vitest 全过
 ### ⚠️ reqwest 本地直连铁律（2026-08-14 公司电脑 504 教训）
 - **任何本地/内网地址（localhost/127.0.0.1/私有网段）的 reqwest client 必须显式 `.no_proxy()`**——reqwest 默认 features 含 system-proxy，Windows 走 WinHTTP 读系统代理（公司组策略设置，设置界面看不到），会把 127.0.0.1 转发到公司代理 → 504
 - 排查：`netsh winhttp show proxy`（WinHTTP）≠ 设置界面（WinINET）；GUI 启动 eprintln 不可见，诊断写 exe 同目录日志或塞回响应 body

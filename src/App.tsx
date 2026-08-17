@@ -21,6 +21,7 @@ const LoginScreen = lazy(() => import('./pages/LoginScreen'));
 import { ThemeProvider } from './theme/ThemeContext';
 import { ThemeSwitcher } from './theme/ThemeSwitcher';
 import GlobalAI from './components/GlobalAI';
+import CloudConfirmBar from './components/CloudConfirmBar';
 import AIGuide from './components/AIGuide';
 import ErrorBoundary from './components/ErrorBoundary';
 import {
@@ -97,11 +98,13 @@ export default function App() {
     if (autoRunningRef.current) return;
     autoRunningRef.current = true;
     (async () => {
-      const r = await runAutoCompare(p => { setAutoProgress(p); window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: '报价识别：' + p.current } })); });
+      let didWork = false;
+      const r = await runAutoCompare(p => { didWork = true; setAutoProgress(p); window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: '报价识别：' + p.current } })); });
       setAutoProgress(null);
       autoRunningRef.current = false;
       window.dispatchEvent(new CustomEvent('costhub-compare-done'));
-      window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: '报价识别', done: true } }));
+      // ⚠️ 只有真实识别了模块才广播"完成"（2026-08-17 修复：缓存全命中时不再每 60 秒闪现"刚刚完成 报价识别"）
+      if (didWork) window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: '报价识别', done: true } }));
       refreshInsightCount();
             // 分批提示：一轮只识别 3 个模块（60 秒后自动续下一批）；有情报/失败才提醒，全部无异常静默
       if (r) {
@@ -125,7 +128,10 @@ export default function App() {
     (async () => {
       try {
         const r = await runAutoAdvisor(msg => window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: msg } })));
-        window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: '自主巡检', done: true } }));
+        // ⚠️ 只有真实产出才广播"完成"（2026-08-17 修复：规则无新发现时不再每 60 秒闪现"刚刚完成 自主巡检"）
+        if (r && (r.found > 0 || r.aiEnhanced > 0)) {
+          window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: '自主巡检', done: true } }));
+        }
         // 只在新建议出现时提醒（日常轮询静默）
         if (r && r.found > 0) {
           message.success(`AI 助理发现 ${r.found} 条成本机会/风险点（见「本地 AI → 自主建议」）`);
@@ -151,9 +157,10 @@ export default function App() {
         const r = await runAutoInsight({
           onProgress: msg => window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: msg } })),
         });
-        window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: '关键物料洞察', done: true } }));
-        window.dispatchEvent(new CustomEvent('costhub-insight-done'));
+        // ⚠️ 只有真正产出洞察才广播"完成"（2026-08-17 修复：闸门等待/复用轮次不再每 60 秒闪现"刚刚完成 关键物料洞察"）
         if (r && r.insights > 0) {
+          window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: '关键物料洞察', done: true } }));
+          window.dispatchEvent(new CustomEvent('costhub-insight-done'));
           message.success(`关键物料洞察完成：本轮洞察 ${r.insights} 类物料行情（共 ${r.planned} 个关键子类，见驾驶舱「关键物料洞察」）`);
         }
       } catch { /* 静默：识别/洞察失败不打扰 */ }
@@ -163,7 +170,13 @@ export default function App() {
   useEffect(() => {
     const iv = setInterval(() => scheduleAppInsight(), 60 * 1000);
     scheduleAppInsight(); // 打开应用立即识别一轮（闸门免费判断，未到周期/预算不烧调用）
-    return () => clearInterval(iv);
+    // 云端确认队列放行后（CloudConfirmBar 确认 → costhub-insight-request）立即继续自动洞察
+    const onInsightRequest = () => scheduleAppInsight();
+    window.addEventListener('costhub-insight-request', onInsightRequest);
+    return () => {
+      clearInterval(iv);
+      window.removeEventListener('costhub-insight-request', onInsightRequest);
+    };
   }, [scheduleAppInsight]);
   useEffect(() => {
     // 持续轮询：每 60 秒探查一轮（Ollama 未运行/未配置自动跳过；指纹命中不调模型，只有变化才识别——探查仔细，不快）
@@ -318,6 +331,8 @@ export default function App() {
           <span>正在后台识别物料报价差异（{autoProgress.done}/{autoProgress.total}）· 当前：{autoProgress.current}{autoProgress.remaining ? `· 剩余 ${autoProgress.remaining} 个模块分批自动继续` : ''}…发现异常会通过「报价情报」提醒</span>
         </div>
       )}
+      {/* 云端洞察待确认横幅（非打断式，底部固定，任何页面可见） */}
+      <CloudConfirmBar />
       <aside className="sidebar">
         <div className="sidebar-logo">
           <div className="logo-img">

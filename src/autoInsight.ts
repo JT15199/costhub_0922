@@ -331,15 +331,15 @@ export async function runAutoInsight(opts?: {
     let insights = 0, failed = 0;
 
     for (const item of todo.slice(0, limit)) {
-      opts?.onProgress?.("关键物料洞察：" + item.aggregate.name + "…");
       try {
-        // ⚠️ 发送前确认（2026-08-16 修复：preview 模式必须弹窗确认才允许走云端；拒绝则跳过该物料）
+        // ⚠️ 发送前确认（2026-08-16 起：preview 模式拦截；2026-08-17 重构为非打断式队列，确认后 costhub-insight-request 继续）
         const { requestCloudConfirm } = await import("./cloudConfirm");
         const ok = await requestCloudConfirm({
           material: item.aggregate.name,
           category: item.aggregate.category,
         });
         if (!ok) { failed++; continue; }
+        opts?.onProgress?.("关键物料洞察：" + item.aggregate.name + "…"); // 确认放行后才广播任务（被拦截轮次不打扰）
         const { saveQuickTrendItem } = await import("./db");
         const { agentSearchLoop } = await import("./trendService");
         const trendItemId = await saveQuickTrendItem({

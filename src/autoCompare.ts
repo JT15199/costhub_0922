@@ -192,7 +192,6 @@ export async function runAutoCompare(onProgress?: (p: { done: number; total: num
   let failCount = 0, insightTotal = 0, scannedCount = 0, aiBatch = 0, i = 0;
   for (; i < jobs.length && aiBatch < BATCH_SIZE; i++) {
     const { cat, mod, projs } = jobs[i];
-    onProgress?.({ done: i, total: jobs.length, current: mod, remaining: jobs.length - i });
     try {
       const rows: any[] = [];
       for (const p of projs) {
@@ -210,6 +209,8 @@ export async function runAutoCompare(onProgress?: (p: { done: number; total: num
         try { groups = JSON.parse(cache.result_json); } catch { groups = []; }
       } else {
         aiBatch++; // 计入批容量（无论成败，防止坏模块占满整轮）
+        // ⚠️ 只对"真正需要 AI 识别"的模块报进度（2026-08-17 修复：缓存全命中时不再闪现"正在识别"进度条/任务广播）
+        onProgress?.({ done: i, total: jobs.length, current: mod, remaining: jobs.length - i });
         try {
           groups = await runAiIdentifyOnce(rows, aliases);
         } catch (e: any) {
@@ -217,6 +218,7 @@ export async function runAutoCompare(onProgress?: (p: { done: number; total: num
           groups = await runAiIdentifyOnce(rows, aliases); // 其他偶发错误自动重试一次
         }
         await saveCompareCache(cat, mod, fp, JSON.stringify(groups));
+        onProgress?.({ done: i + 1, total: jobs.length, current: mod, remaining: jobs.length - i - 1 });
       }
       const ins = buildInsights(groups, rows, aliases);
       insightTotal += ins.length;
@@ -225,7 +227,6 @@ export async function runAutoCompare(onProgress?: (p: { done: number; total: num
     } catch {
       failCount++;
     }
-    onProgress?.({ done: i + 1, total: jobs.length, current: mod, remaining: jobs.length - i - 1 });
   }
   return { scanned: scannedCount, insights: insightTotal, failed: failCount, remaining: Math.max(0, jobs.length - i) };
 }
