@@ -1,3 +1,7 @@
+### v2.3.19 报价情报数据混乱 + 侧边栏入口白屏修复（2026-08-17，用户反馈）
+- **① 侧边栏「报价情报」其他页面点击白屏/没反应**：原来 onClick 直接 `setActive('projects')` 不走 navigate → mountedPages 没有 projects 时页面区空白（白屏）；且事件在懒加载组件挂载前发出 → 丢失没反应。修复：App 新增 openInsightsEntry = localStorage 写 `costhub-open-insights-pending` 标志 + `navigate('projects')`（挂载页面）+ 300ms 延迟补发事件双保险；Projects 挂载 useEffect 消费标志（有则打开弹窗）
+- **② 报价情报数据混乱（处理过的还在待处理/已处理为空/未读含已处理）根因**：`upsertInsight` 原实现内容变化时 **DELETE+INSERT 整行** → `handled_json`（已处理记录）被清空（已处理视图全空）+ `status` 被重置 unread（处理完的模块回到待处理）+ 空情报也建 unread 行（"已核对"占住待处理）。修复（src/db/compare.ts）：**UPDATE 保留行**（handled_json 不丢）；仅当出现**新组**（hasNewGroups 比对组名集合）才重置 unread——用户处理导致的组消失/变化不打扰，BOM/报价变化带来的新疑似组正常提醒；空情报（[]）不创建记录；新增 `cleanupInsightStatus()` 一次性清理历史脏数据（无待处理组的 unread 模块归档为已读），Projects loadInsights 每次先执行
+- **验证**：tsc -b 0 错；160 vitest 全过
 ### v2.3.19 三处体验修复（2026-08-17，用户反馈：反复搜查噪音 / 处理后无反应 / 云端确认弹窗不易用）
 - **① 报价识别"反复搜查"视觉噪音**：runAutoCompare 原来对每个模块无条件调 onProgress（缓存命中也算）→ 60 秒轮询即使全缓存命中也会闪现顶部进度条 + AI 状态条"刚刚完成 报价识别"。修复：onProgress 只在 needsAI（真实 AI 识别）分支调用；App 侧三个引擎的 costhub-ai-task done 广播也改为真实产出才发（compare 用 didWork 标志、advisor 用 found/aiEnhanced、insight 用 insights>0）——日常轮询完全静默
 - **② 处理后无反应/反应不对**：LocalAIAssistant setAdvisorStatus 处理后未广播 costhub-advisor-done → 驾驶舱「AI 建议」待处理计数不刷新（已补 dispatch，含撤销恢复路径）；Projects confirm/reject 已带 costhub-insights-changed（核对确认存在）

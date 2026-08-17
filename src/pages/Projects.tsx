@@ -5,7 +5,7 @@ import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOut
 import * as XLSX from 'xlsx';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
-import { getProjects, saveProject, deleteProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, syncProjectModulesToLibrary, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, deleteSku, saveSkuDiff, deleteSkuDiff, getAllSkuDiffs, getAllSkus, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead, markInsightUnread, appendHandledInsight, removeHandledInsight, deletePartAliasExact } from '../db';
+import { getProjects, saveProject, deleteProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, syncProjectModulesToLibrary, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, deleteSku, saveSkuDiff, deleteSkuDiff, getAllSkuDiffs, getAllSkus, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead, markInsightUnread, appendHandledInsight, removeHandledInsight, deletePartAliasExact, cleanupInsightStatus } from '../db';
 import { TIERS, PROJECT_STATUSES, PROJECT_TYPES, SCREEN_SIZES, RESOLUTIONS, REFRESH_RATES, PANEL_TYPES, MAIN_CATEGORIES, SUB_CATEGORIES, MEASURE_STATUSES, getCategoryColor } from '../constants';
 import { getMainCategories, getSetting } from '../db';
 import { startOllamaStream, logLocalAICall } from '../ollama';
@@ -327,6 +327,7 @@ export default function Projects() {
   const [insightBusyKey, setInsightBusyKey] = useState<string | null>(null); // 正在处理的 模块id|组index
   const [unreadMods, setUnreadMods] = useState<Set<string>>(new Set());
   const loadInsights = async () => {
+    try { await cleanupInsightStatus(); } catch { /* 清理失败不影响加载 */ } // 历史脏数据：已核对/已处理完的模块不再停在待处理
     const list = await getInsights();
     setInsights(list);
     setUnreadMods(new Set(list.filter(i => i.status === 'unread').map(i => i.module_name)));
@@ -335,6 +336,12 @@ export default function Projects() {
   const scheduleAutoCompare = () => window.dispatchEvent(new CustomEvent('costhub-compare-request'));
   useEffect(() => {
     loadInsights();
+    // 侧边栏「报价情报」入口：App 先写待处理标志再切页（组件未挂载时 costhub-open-insights 事件会丢失）→ 挂载后消费标志打开弹窗
+    if (localStorage.getItem('costhub-open-insights-pending')) {
+      localStorage.removeItem('costhub-open-insights-pending');
+      loadInsights();
+      setInsightModal(true);
+    }
     scheduleAutoCompare(); // 打开项目页立即触发一次（App 空闲监听会继续兜底）
     const onDone = () => loadInsights(); // 识别完成刷新情报红点
     window.addEventListener('costhub-compare-done', onDone);

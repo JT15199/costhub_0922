@@ -270,6 +270,15 @@ export default function App() {
     window.dispatchEvent(new CustomEvent('app-page-active', { detail: { page: key } }));
   }, []);
 
+  // 侧边栏「报价情报」入口：任何页面可点 → 跳项目管理页并打开情报弹窗
+  // ⚠️ 2026-08-17 修复：原来直接 setActive('projects') 不走 navigate → mountedPages 没有 projects 时白屏；
+  // 且事件在 Projects 组件挂载前发出 → 没反应。现在 navigate 挂载页面 + localStorage 标志兜底（组件挂载后消费）+ 延迟事件双保险
+  const openInsightsEntry = useCallback(() => {
+    localStorage.setItem('costhub-open-insights-pending', '1');
+    navigate('projects');
+    setTimeout(() => window.dispatchEvent(new CustomEvent('costhub-open-insights')), 300);
+  }, [navigate]);
+
   const setZoomLevel = (level: number) => {
     setZoom(level);
     localStorage.setItem('app-zoom', String(level));
@@ -383,7 +392,7 @@ export default function App() {
 </nav>
 
         {/* 报价情报（后台自动识别的报价差异提醒）——全局入口，任何页面可见 */}
-        <div onClick={() => { setActive('projects'); window.dispatchEvent(new CustomEvent('costhub-open-insights')); }}
+        <div onClick={openInsightsEntry}
           style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 12.5, color: 'var(--color-text-secondary)', borderTop: '1px solid var(--color-border)', userSelect: 'none' }}
           onMouseEnter={e => { e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
           onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>

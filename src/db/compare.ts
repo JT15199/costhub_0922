@@ -54,13 +54,43 @@ export async function saveCompareCache(category: string, moduleName: string, fin
 
 
 // 差异情报（后台自动识别产生，未读提醒）
-// 内容与上次相同 → 保持原状态（已读不被重置）；内容变化 → 重置 unread（新情报）
+// ⚠️ 2026-08-17 重构（修复数据混乱）：原实现内容变化 DELETE+INSERT 整行 → handled_json（已处理记录）被清空、已处理模块被重置 unread
+// 新规则：UPDATE 保留行（handled_json 不丢）；仅当出现【新组】才重置 unread（用户处理导致的组消失/变化不打扰）；无异常（空情报）不创建记录
+function parseGroupNames(json: string): string[] {
+  try { return (JSON.parse(json || '[]') || []).map((g: any) => String(g?.name || '')); } catch { return []; }
+}
+function hasNewGroups(oldJson: string, newJson: string): boolean {
+  const oldSet = new Set(parseGroupNames(oldJson));
+  return parseGroupNames(newJson).some(n => n && !oldSet.has(n));
+}
 export async function upsertInsight(category: string, moduleName: string, insightJson: string) {
   const d = await getDb();
-  const old = await d.select<any[]>('SELECT insight_json FROM part_insights WHERE category = ? AND module_name = ?', [category || '', moduleName]);
-  if (old[0] && old[0].insight_json === insightJson) return;
-  await d.execute('DELETE FROM part_insights WHERE category = ? AND module_name = ?', [category || '', moduleName]);
+  const old = await d.select<any[]>('SELECT * FROM part_insights WHERE category = ? AND module_name = ?', [category || '', moduleName]);
+  if (old[0]) {
+    if (old[0].insight_json === insightJson) return;
+    // 出现新组（数据变化导致的新情报）→ unread；否则（用户处理/归档导致的变化）保持原状态
+    const newStatus = hasNewGroups(old[0].insight_json, insightJson) ? 'unread' : old[0].status;
+    await d.execute("UPDATE part_insights SET insight_json = ?, status = ?, updated_at = datetime('now','localtime') WHERE id = ?", [insightJson, newStatus, old[0].id]);
+    return;
+  }
+  // 无异常（空情报）不创建记录——避免"已核对"空模块占住待处理
+  let arr: any[] = [];
+  try { arr = JSON.parse(insightJson || '[]'); } catch { arr = []; }
+  if (arr.length === 0) return;
   await d.execute("INSERT INTO part_insights (category, module_name, insight_json, status) VALUES (?,?,?,'unread')", [category || '', moduleName, insightJson]);
+}
+
+// 历史脏数据一次性清理（2026-08-17）：无待处理组（已核对/已处理完）的模块不应停在待处理——统一归档为已读
+export async function cleanupInsightStatus() {
+  const d = await getDb();
+  const rows = await d.select<any[]>('SELECT * FROM part_insights');
+  for (const r of rows) {
+    let data: any[] = [];
+    try { data = JSON.parse(r.insight_json || '[]'); } catch { data = []; }
+    if (data.length === 0 && r.status === 'unread') {
+      await d.execute("UPDATE part_insights SET status = 'read' WHERE id = ?", [r.id]);
+    }
+  }
 }
 
 
