@@ -1656,6 +1656,21 @@ export async function agentSearchLoop(
     const native = await tryDeepSeekNativeInsight(materialName, categoryType, skill);
     if (native) {
       if (onProgress) onProgress('使用 DeepSeek 原生联网搜索...');
+      // ⚠️ 审计修复（2026-08-16）：原生搜索路径曾在此提前 return，未写 ai_request_logs → 审计日志无记录
+      try {
+        const { saveAIRequestLog } = await import('./db');
+        await saveAIRequestLog({
+          request_type: 'trend_insight',
+          material_name: materialName,
+          system_prompt: (skill.systemPrompt || '').slice(0, 500),
+          user_prompt: '分析物料: ' + materialName,
+          response_summary: (native.summary || '').slice(0, 500),
+          success: true,
+          provider_name: 'DeepSeek 原生搜索',
+          model_name: '',
+          prompt_tokens: 0, completion_tokens: 0, total_tokens: 0,
+        });
+      } catch (err) { console.error('保存AI日志失败:', err); }
       return native;
     }
   }

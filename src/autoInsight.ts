@@ -333,6 +333,13 @@ export async function runAutoInsight(opts?: {
     for (const item of todo.slice(0, limit)) {
       opts?.onProgress?.("关键物料洞察：" + item.aggregate.name + "…");
       try {
+        // ⚠️ 发送前确认（2026-08-16 修复：preview 模式必须弹窗确认才允许走云端；拒绝则跳过该物料）
+        const { requestCloudConfirm } = await import("./cloudConfirm");
+        const ok = await requestCloudConfirm({
+          material: item.aggregate.name,
+          category: item.aggregate.category,
+        });
+        if (!ok) { failed++; continue; }
         const { saveQuickTrendItem } = await import("./db");
         const { agentSearchLoop } = await import("./trendService");
         const trendItemId = await saveQuickTrendItem({

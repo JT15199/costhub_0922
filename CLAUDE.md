@@ -61,6 +61,13 @@
 - **UI**：反馈行（👍/👎 + "教 AI 理解你的偏好"提示）；左侧「🧠 AI 学习档案」按钮 → Modal：关注主题 TOP 条形图（权重）+ 已学规则列表（删除）
 - **测试**：aiLearning.test.ts 13 用例（分类命中/多主题排序/聚合衰减/排序/反馈转换/上下文生成）——**160 vitest 全过**
 
+### v2.3.19 自动洞察云端确认 + 原生搜索审计修复（2026-08-16，用户反馈"没收到弹窗就洞察了/审计没记录"）
+- **问题 1**：autoInsight 后台轮询直接调 agentSearchLoop，绕过 ai_bridge_review 预览确认——开了 preview 也没弹窗
+- **修复**：新建 src/cloudConfirm.tsx（⚠️ .ts 不能写 JSX，用 .tsx）——requestCloudConfirm(payload)：settings ai_bridge_review==='preview' 时弹 antd Modal.confirm（展示将发送的 物料名/品类/问题 三项 + 安全说明），确认才放行；'auto' 直接放行；读取失败放行。autoInsight runAutoInsight 每个云端洞察前调用，拒绝 → failed++ 跳过该物料（60 秒轮询后继续尝试）
+- **问题 2**：审计日志无记录——agentSearchLoop 走 DeepSeek 原生搜索路径时在写日志前提前 return（tryDeepSeekNativeInsight 命中 → return native）
+- **修复**：native 路径 return 前补 saveAIRequestLog（request_type='trend_insight'，response_summary=结论摘要，provider='DeepSeek 原生搜索'）；非 native 路径原有 logRequestStart 保留（"分析中..."占位）
+- **验证**：tsc -b 0 错；160 vitest 全过
+
 ### v2.3.19 本地 AI 助手布局重构（2026-08-16，用户选 Demo B 顶部导航方案）
 - **背景**：功能多且藏在左下角（4 个按钮+工具折叠区），界面"老土不清爽"——先产出 3 套 HTML demo（LocalAI-重构Demo-A/B/C.html）供选择，用户选定 **B：顶部导航工作台**（Apple/Claude 风格）
 - **左侧**：220px → 180px 简洁会话列（绿点状态+模型 pill、圆角新对话按钮、会话列表圆角高亮、底部"数据只在本机处理"提示）；删除原左下角工具区
