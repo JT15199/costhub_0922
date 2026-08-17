@@ -1216,7 +1216,7 @@ export default function LocalAIAssistant() {
 
   // 连接失败的具体原因（诊断用）
   const [connError, setConnError] = useState('');
-  const testConnection = useCallback(async () => {
+  const testConnection = useCallback(async (silent = false) => {
     setConnStatus('idle');
     setConnError('');
     // 多地址兜底：公司代理环境会把 localhost 请求转发到代理服务器（代理连自己机器上的 localhost 失败 → 504）；
@@ -1243,7 +1243,7 @@ export default function LocalAIAssistant() {
         }
         setConnStatus('ok');
         await setSetting('local_ai_base_url', base);
-        if (base !== ollamaUrl.replace(/\/$/, '')) {
+        if (!silent && base !== ollamaUrl.replace(/\/$/, '')) {
           message.success('已通过 127.0.0.1 连接（localhost 解析异常已自动切换）');
         }
         return;
@@ -1253,8 +1253,15 @@ export default function LocalAIAssistant() {
     }
     setConnStatus('fail');
     setConnError(lastErr.slice(0, 200));
-    message.error('Ollama 连接失败：' + lastErr.slice(0, 150));
+    if (!silent) message.error('Ollama 连接失败：' + lastErr.slice(0, 150));
   }, [ollamaUrl, model]);
+
+  // 连接状态自动探测（2026-08-17）：挂载立即静默探测 + 30 秒周期自检——绿点与实际 Ollama 连接实时关联，不再一直是灰色
+  useEffect(() => {
+    testConnection(true);
+    const iv = setInterval(() => testConnection(true), 30 * 1000);
+    return () => clearInterval(iv);
+  }, [testConnection]);
 
   const startSession = useCallback(async (title = '新对话') => {
     const id = await newSession(title);
@@ -2350,7 +2357,7 @@ return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div><div style={{ fontSize: 12, marginBottom: 4, color: 'var(--color-text-secondary)' }}>Ollama 地址</div>
             <Input value={ollamaUrl} onChange={e => setOllamaUrl(e.target.value)} placeholder="http://localhost:11434" /></div>
-          <Button onClick={testConnection} icon={connStatus === 'ok' ? <CheckCircleOutlined style={{ color: '#16A34A' }} /> : <SyncOutlined />}>测试连接 &amp; 获取模型列表</Button>
+          <Button onClick={() => testConnection()} icon={connStatus === 'ok' ? <CheckCircleOutlined style={{ color: '#16A34A' }} /> : <SyncOutlined />}>测试连接 &amp; 获取模型列表</Button>
           {connStatus === 'fail' && (
             <div>
               <div style={{ color: '#DC2626', fontSize: 12 }}>连接失败，请确认 Ollama 正在运行（<code>ollama serve</code>）</div>

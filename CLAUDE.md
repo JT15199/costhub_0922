@@ -1,3 +1,6 @@
+### v2.3.19 本地 AI 连接状态自动探测（2026-08-17，用户反馈：本地AI助手绿点经常灰色，未与实际Ollama连接关联）
+- 根因：connStatus 只在手动点「测试连接」时更新，初始 idle → 打开页面永远灰色「未连接」。修复：testConnection 加 silent 参数（自动探测不弹 message）；挂载立即静默探测 + 30 秒周期自检（cleanup 随依赖重建）；按钮仍手动非静默（失败弹错/127.0.0.1 切换提示保留）
+- **验证**：tsc -b 0 错；184 vitest 全过
 ### v2.3.19 AI 情报中心统一（2026-08-17，用户反馈：驾驶舱 AI 块多/重复分不清，建议自主建议并入报价情报）
 - **AI 情报中心**（项目页报价情报弹窗升级）：三个 tab——📊 报价差异（原内容）/ 💡 自主建议（open 列表+已处理/忽略+显示全部切换）/ 🔍 巡检发现（已读/忽略）；侧边栏入口改名「AI 情报」，badge 三合一（报价未读+建议 open+巡检 unread，refreshInsightCount 扩展）
 - **驾驶舱右列「AI 洞察」**：只保留 🧠 自主分析结论（2 条+查看全部）+ 📋 待处理事项汇总行（三个计数 Tag 点击直达 AI 情报中心）；移除原自主建议/巡检列表明细（goToAuditObject/auditOpen/advisorMore/markAuditRead/dismissAuditFinding 清理）；巡检按钮保留在卡 header
