@@ -1,3 +1,11 @@
+### v2.3.19 自主分析引擎（🧠 像 DSH 一样自主思考 + 按需申请云端，2026-08-17 用户核心需求）
+- **背景**：用户要求"按面积算成本只是给本地模型思考的其中一个思路，不能机械执行；要看到调动本地模型思考的过程；自主思考、自主调用云端、遇权限问题就申请（像 DSH harness）；权限=是否可以发送什么样的提示词给 LLM；思考过程渲染流畅，UI 参考 DSH"
+- **设计原则**：本地模型 token 免费不涉安全 → **思考不设限**（多轮自由循环 + 流式渲染思考过程）；云端调用 = **权限申请**（申请"发送什么提示词给云端 LLM"，preview 就地审批弹窗，auto 直接放行）
+- **入口**：本地 AI 助手输入框 Segmented 三态（💬 普通对话 / 🤖 Agent 任务 / 🧠 自主分析）
+- **引擎**（src/thinkEngine.ts 纯逻辑，vitest 9 用例）：Ollama 原生 function calling 循环（≤8 轮）——流式思考（onReasoning）→ 模型输出 tool_calls → 本地 13 工具直接执行 / cloud_market_query 虚拟工具走审批后 agentSearchLoop → 结果回填继续 → 无工具调用输出结论；buildThinkSystemPrompt 注入**灵活思路引导**（带尺寸物料可考虑单位面积成本/按同样尺寸折算，也可数量阶梯/工艺/供应商/规格差异，不要机械套用）；buildCloudReviewPrompt 审批展示脱敏三字段（物料名/品类/问题）；buildLocalToolDefs 从工具元数据自动生成 Ollama schema
+- **过程渲染（DSH 式）**：think 过程卡——💭 思考过程（灰色流式实时，分轮展示）+ 🔧 工具调用卡（✓/✗ + 语义图标 + 参数 + 结果摘要）+ 🔐 云端申请卡（琥珀色：等待审批/已批准+结果/已拒绝）+ 最终结论区（流式）；云端审批复用 aiBridge 的 bridgeReviewPrompt/bridgeReviewResolve Modal（预览脱敏提示词全文，确认/取消）
+- **云端边界**：审批通过才走 agentSearchLoop（外发仅物料名/品类/问题，与 aiBridge 同安全边界）；拒绝时模型收到"用户拒绝"可继续基于本地数据分析
+- **验证**：tsc -b 0 错；177 vitest 全过（17 文件）
 ### v2.3.19 报价情报识别升级 + 本地→云端审批（2026-08-17，用户反馈）
 - **① 情报显示**：成本改四位小数（toFixed(4)）；每行带子类 Tag（geekblue）+ 名称/型号/规格悬停完整显示（title，\n 分隔）；比对弹窗 rows 同步补 sub_category + specs
 - **② 逐行「不是同一器件」**（markRowDifferent，情报组内每行 ✗ 按钮）：#ROWDIFF#<partKey> 别名沉淀（source=marked_different），该行从情报/识别输入消失；buildInsights 的 ai/rule 组均过滤 rowDiff 行；已处理视图三态（确认同一/标记不同/标记不是同一器件）+ 撤销（undoHandledInsight 增 row_different 分支）

@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, createElement } from 'react';
 import { Button, Input, InputNumber, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Switch, Segmented, Radio, Dropdown, Drawer, notification } from 'antd';
-import { CopyOutlined, RadarChartOutlined } from '@ant-design/icons';
+import { CopyOutlined, RadarChartOutlined, LockOutlined } from '@ant-design/icons';
 import {
   SendOutlined, RobotOutlined, PlusOutlined, HistoryOutlined,
   ThunderboltOutlined, TeamOutlined, ClearOutlined,
@@ -1043,7 +1043,18 @@ export default function LocalAIAssistant() {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   // ===== Agent 模式（P1：工具注册表 + 计划-执行-总结） =====
-  const [agentMode, setAgentMode] = useState(false);       // 输入框模式：普通对话 / Agent 任务
+  const [chatMode, setChatMode] = useState<'chat' | 'agent' | 'think'>('chat'); // 输入框模式：普通对话 / Agent 任务 / 自主分析
+  // 自主分析（think）运行态：思考流/工具卡/云端申请/最终回答（DSH 式过程渲染）
+  const [thinkRun, setThinkRun] = useState<{
+    user: string;
+    thoughts: string[];
+    tools: { name: string; args: any; result: string; ok: boolean }[];
+    clouds: { material: string; question: string; status: 'pending' | 'approved' | 'rejected'; result?: string }[];
+    answer: string;
+    status: 'running' | 'done' | 'error';
+    error?: string;
+    round: number;
+  } | null>(null);
   const [agentTrace, setAgentTrace] = useState<any[]>([]); // 工具执行轨迹（[{name,argsText,status,result}]）
   const [agentTraceOpen, setAgentTraceOpen] = useState(true);
   // ===== AI 学习（v2.3.19：👍/👎 反馈 + 学习档案） =====
@@ -1639,6 +1650,111 @@ export default function LocalAIAssistant() {
     }
   }, [streaming, model, sessionId, ollamaUrl, sendMessage]);
 
+  // ===== 自主分析（think）：本地模型自由思考 + 按需申请云端（2026-08-17 用户需求，DSH 式过程渲染） ======
+  // 本地 token 免费不涉安全 → 思考不限；云端调用=申请"发送什么提示词给云端 LLM"，preview 就地审批 / auto 放行
+  const requestCloudApproval = useCallback(async (prompt: string): Promise<boolean> => {
+    try {
+      const mode = await getSetting('ai_bridge_review', 'auto');
+      if (mode !== 'preview') return true;
+    } catch { return true; }
+    return new Promise<boolean>(resolve => {
+      setBridgeReviewPrompt(prompt);
+      setBridgeReviewResolve(() => (ok: boolean) => resolve(ok));
+    });
+  }, []);
+  const sendThinkTask = useCallback(async (userContent: string) => {
+    if (!userContent.trim() || streaming) return;
+    if (!model) { message.warning('请先连接Ollama并选择模型'); return; }
+    let sid = sessionId;
+    if (!sid) {
+      sid = await newSession(userContent.slice(0, 20));
+      setSessions(await loadSessions()); setSessionId(sid);
+    }
+    setMessages(prev => [...prev, { role: 'user', content: userContent }]);
+    await saveMsg(sid, 'user', userContent);
+    setInput('');
+    setStreaming(true);
+    setPhase('thinking');
+    setThinkRun({ user: userContent, thoughts: [], tools: [], clouds: [], answer: '', status: 'running', round: 0 });
+    const currentSid = sid;
+    const curThinkRef = { current: '' }; // 当前轮思考增量缓冲
+    try {
+      // AI 学习：记录关注主题 + 注入偏好上下文
+      import('../aiLearning').then(m => m.trackUserFocus(userContent)).catch(() => {});
+      let prefCtx = '';
+      try { prefCtx = await import('../aiLearning').then(m => m.buildPreferenceContext()); } catch { prefCtx = ''; }
+      const { listTools, executeTool } = await import('../aiTools');
+      const { buildCloudToolDef, buildLocalToolDefs, buildThinkSystemPrompt, buildCloudReviewPrompt, formatCloudResult, MAX_THINK_ROUNDS } = await import('../thinkEngine');
+      const localTools = listTools();
+      const tools = [...buildLocalToolDefs(localTools), buildCloudToolDef()];
+      const sysPrompt = buildThinkSystemPrompt(localTools.map(t => t.name), prefCtx);
+      const messages: any[] = [{ role: 'system', content: sysPrompt }, { role: 'user', content: userContent }];
+      let finalText = '';
+      let rounds = 0;
+      while (rounds < MAX_THINK_ROUNDS) {
+        rounds++;
+        setThinkRun(prev => prev ? { ...prev, round: rounds } : prev);
+        curThinkRef.current = '';
+        setThinkRun(prev => prev ? { ...prev, thoughts: [...(prev.thoughts || []), ''] } : prev);
+        let toolCalls: any[] = [];
+        let roundText = '';
+        await new Promise<void>((resolve, reject) => {
+          startOllamaStream(
+            ollamaUrl, model, messages,
+            (t) => { roundText += t; setThinkRun(prev => prev ? { ...prev, answer: (prev.answer || '') + t } : prev); },
+            (t) => { curThinkRef.current += t; setThinkRun(prev => { const thoughts = [...(prev?.thoughts || [])]; if (thoughts.length > 0) thoughts[thoughts.length - 1] = curThinkRef.current; return prev ? { ...prev, thoughts } : prev; }); },
+            () => resolve(),
+            (e) => reject(new Error(e)),
+            { endpoint: 'native', think: true, tools, onToolCalls: (tcs) => { toolCalls = tcs; } },
+          ).then(c => { cleanupRef.current = c; }).catch(() => { /* 错误走 onError */ });
+        });
+        if (!toolCalls || toolCalls.length === 0) { finalText = roundText; break; }
+        // 执行工具调用（含云端审批）
+        const toolResults: { role: string; content: string }[] = [];
+        for (const tc of toolCalls) {
+          const fn = tc.function || {};
+          const name = String(fn.name || '');
+          let args: any = {};
+          try { args = JSON.parse(fn.arguments || '{}'); } catch { args = {}; }
+          if (name === 'cloud_market_query') {
+            // 云端申请：展示将发送的提示词（脱敏），用户批准才发（DSH 式权限申请）
+            const review = buildCloudReviewPrompt(args);
+            const ok = await requestCloudApproval(review);
+            if (ok) {
+              const { agentSearchLoop } = await import('../trendService');
+              const r = await agentSearchLoop(args.material_name, args.category || '', 'price-trend');
+              const result = formatCloudResult(r);
+              setThinkRun(prev => prev ? { ...prev, clouds: [...(prev.clouds || []), { material: args.material_name, question: args.question || '近1-3月价格趋势', status: 'approved', result }] } : prev);
+              toolResults.push({ role: 'tool', content: result });
+            } else {
+              const denied = '用户拒绝了本次云端申请。你可以基于已有本地数据继续分析，或说明缺少行情数据无法下结论。';
+              setThinkRun(prev => prev ? { ...prev, clouds: [...(prev.clouds || []), { material: args.material_name, question: args.question || '近1-3月价格趋势', status: 'rejected' }] } : prev);
+              toolResults.push({ role: 'tool', content: denied });
+            }
+          } else {
+            const { ok, text } = await executeTool(name, args);
+            setThinkRun(prev => prev ? { ...prev, tools: [...(prev.tools || []), { name, args, result: text, ok }] } : prev);
+            toolResults.push({ role: 'tool', content: (ok ? '' : '[工具失败] ') + text });
+          }
+        }
+        messages.push({ role: 'assistant', content: roundText || '', tool_calls: toolCalls });
+        messages.push(...toolResults);
+      }
+      setThinkRun(prev => prev ? { ...prev, status: 'done' } : prev);
+      await logLocalAICall({ request_type: 'think_run', system_prompt: sysPrompt.slice(0, 3000), user_prompt: userContent.slice(0, 3000), response_summary: (finalText || '').slice(0, 2000), success: true, model_name: model });
+      if (finalText) await saveMsg(currentSid, 'assistant', finalText);
+      setMessages(prev => [...prev, { role: 'assistant', content: finalText || '(未输出结论)' }]);
+    } catch (e: any) {
+      const err = e?.message || String(e);
+      setThinkRun(prev => prev ? { ...prev, status: 'error', error: String(err).slice(0, 300) } : prev);
+      await logLocalAICall({ request_type: 'think_run', system_prompt: '', user_prompt: userContent.slice(0, 3000), response_summary: '', success: false, error_message: String(err).slice(0, 500), model_name: model });
+      playChime('error');
+    } finally {
+      setStreaming(false);
+      setPhase('idle');
+    }
+  }, [streaming, model, sessionId, ollamaUrl, requestCloudApproval]);
+
   // 智能导入：更新某行分类字段
   const updateImportRow = useCallback((idx: number, field: string, value: any) => {
     setImportRows(prev => {
@@ -2068,6 +2184,55 @@ return (
               </div>
             </div>
           ))}
+          {thinkRun && (
+            <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 16 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 8, background: '#EEF2FF', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 10, flexShrink: 0, marginTop: 2 }}><ExperimentOutlined style={{ color: '#6366F1', fontSize: 14 }} /></div>
+              <div style={{ maxWidth: '82%', flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <b style={{ fontSize: 12.5 }}>🧠 自主分析</b>
+                  {thinkRun.status === 'running' && <Tag color="processing">思考中 · 第 {thinkRun.round} 轮</Tag>}
+                  {thinkRun.status === 'done' && <Tag color="green">完成</Tag>}
+                  {thinkRun.status === 'error' && <Tag color="red">失败</Tag>}
+                </div>
+                {thinkRun.thoughts.filter(t => (t || '').trim()).length > 0 && (
+                  <div style={{ border: '1px dashed #C7D2FE', borderRadius: 10, padding: '8px 12px', marginBottom: 8, background: '#F8FAFF' }}>
+                    <div style={{ fontSize: 11, color: '#6366F1', fontWeight: 600, marginBottom: 4 }}>💭 思考过程{thinkRun.status === 'running' ? '（实时）' : ''}</div>
+                    {thinkRun.thoughts.map((t, ti) => (t || '').trim() ? (
+                      <div key={ti} style={{ fontSize: 12, color: '#64748B', lineHeight: 1.65, whiteSpace: 'pre-wrap', marginBottom: 4 }}>{t}</div>
+                    ) : null)}
+                  </div>
+                )}
+                {thinkRun.tools.map((tc, ti) => (
+                  <div key={'t' + ti} style={{ border: '1px solid #E8ECF1', borderRadius: 10, padding: '8px 12px', marginBottom: 8, background: 'var(--color-surface, #fff)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                      <span style={{ color: tc.ok ? '#16A34A' : '#DC2626' }}>{tc.ok ? '✓' : '✗'}</span>
+                      <b>{createElement(toolIcon(tc.name))} {tc.name}</b>
+                      <span style={{ color: '#94A3B8', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{JSON.stringify(tc.args || {})}</span>
+                    </div>
+                    <div style={{ fontSize: 11.5, color: '#64748B', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginTop: 4, maxHeight: 120, overflow: 'auto' }}>{tc.result}</div>
+                  </div>
+                ))}
+                {thinkRun.clouds.map((cc, ci) => (
+                  <div key={'c' + ci} style={{ border: cc.status === 'rejected' ? '1px solid #FECACA' : '1px solid #FFD591', borderRadius: 10, padding: '8px 12px', marginBottom: 8, background: cc.status === 'rejected' ? '#FFF7F7' : '#FFF7E6' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                      <LockOutlined style={{ color: '#D46B08' }} />
+                      <b>申请调用云端模型</b>
+                      <Tag color={cc.status === 'approved' ? 'green' : cc.status === 'rejected' ? 'red' : 'orange'} style={{ margin: 0 }}>{cc.status === 'approved' ? '已批准' : cc.status === 'rejected' ? '已拒绝' : '等待审批…'}</Tag>
+                    </div>
+                    <div style={{ fontSize: 11.5, color: '#7C5A12', marginTop: 4, lineHeight: 1.6 }}>查询：{cc.material}{cc.question ? ' · ' + cc.question : ''}</div>
+                    {cc.result && <div style={{ fontSize: 11.5, color: '#64748B', lineHeight: 1.6, whiteSpace: 'pre-wrap', marginTop: 4 }}>{cc.result}</div>}
+                  </div>
+                ))}
+                <div style={{ border: '1px solid var(--color-border)', borderRadius: 10, padding: '10px 14px', background: 'var(--color-surface)', fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {thinkRun.status === 'error'
+                    ? <span style={{ color: '#DC2626' }}>分析失败：{thinkRun.error}</span>
+                    : thinkRun.answer || (thinkRun.status === 'done' ? '（未输出结论）' : (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Spin size="small" /> 正在思考…</span>
+                    ))}
+                </div>
+              </div>
+            </div>
+          )}
           <div ref={bottomRef} />
           </div>
         </div>
@@ -2121,21 +2286,23 @@ return (
           <div style={{ display: 'flex', gap: 8 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ marginBottom: 4 }}>
-                <Segmented size="small" value={agentMode ? 'agent' : 'chat'} disabled={streaming} onChange={(v: any) => setAgentMode(v === 'agent')}
+                <Segmented size="small" value={chatMode} disabled={streaming} onChange={(v: any) => setChatMode(v as any)}
                   options={[
                     { label: '💬 普通对话', value: 'chat' },
                     { label: '🤖 Agent 任务', value: 'agent' },
+                    { label: '🧠 自主分析', value: 'think' },
                   ]} />
-                {agentMode && <span style={{ fontSize: 10.5, color: '#94A3B8', marginLeft: 6 }}>AI 自动调用工具完成多步任务（全部只读，数据不出本机）</span>}
+                {chatMode === 'agent' && <span style={{ fontSize: 10.5, color: '#94A3B8', marginLeft: 6 }}>AI 自动调用工具完成多步任务（全部只读，数据不出本机）</span>}
+                {chatMode === 'think' && <span style={{ fontSize: 10.5, color: '#94A3B8', marginLeft: 6 }}>本地模型自主思考 + 按需申请云端（思考过程实时可见，云端发送需你审批）</span>}
               </div>
-              <Input.TextArea value={input} onChange={e => setInput(e.target.value)} placeholder={agentMode ? '例如：分析 M270 成本结构，找出 top3 风险物料并洞察行情，最后总结 200 字' : '输入问题，或使用左侧工具注入数据分析…'} autoSize={{ minRows: 1, maxRows: 5 }} onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); agentMode ? sendAgentTask(input) : sendMessage(input); } }} style={{ borderRadius: 10 }} />
+              <Input.TextArea value={input} onChange={e => setInput(e.target.value)} placeholder={chatMode === 'agent' ? '例如：分析 M270 成本结构，找出 top3 风险物料并洞察行情，最后总结 200 字' : chatMode === 'think' ? '例如：评估 M270 的 PCB 成本是否合理，贵的话分析贵在哪（可申请云端查行情）' : '输入问题，或使用左侧工具注入数据分析…'} autoSize={{ minRows: 1, maxRows: 5 }} onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); if (chatMode === 'agent') sendAgentTask(input); else if (chatMode === 'think') sendThinkTask(input); else sendMessage(input); } }} style={{ borderRadius: 10 }} />
             </div>
             {streaming
               ? <Button danger icon={<ClearOutlined />} onClick={() => { stoppedRef.current = true; cleanupRef.current?.(); setStreaming(false); }} style={{ alignSelf: 'flex-end' }}>停止</Button>
-              : <Button type="primary" icon={<SendOutlined />} onClick={() => agentMode ? sendAgentTask(input) : sendMessage(input)} disabled={!input.trim()} style={{ alignSelf: 'flex-end' }}>{agentMode ? '执行' : '发送'}</Button>
+              : <Button type="primary" icon={<SendOutlined />} onClick={() => { if (chatMode === 'agent') sendAgentTask(input); else if (chatMode === 'think') sendThinkTask(input); else sendMessage(input); }} disabled={!input.trim()} style={{ alignSelf: 'flex-end' }}>{chatMode === 'chat' ? '发送' : '执行'}</Button>
             }
           </div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 4 }}>Shift+Enter 换行 · Enter 发送 · 数据仅在本机处理{agentMode ? ' · Agent 只读执行，计划与结果可审查' : ''}</div>
+          <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 4 }}>Shift+Enter 换行 · Enter 发送 · 数据仅在本机处理{chatMode === 'agent' ? ' · Agent 只读执行，计划与结果可审查' : chatMode === 'think' ? ' · 本地思考免费不限 · 云端发送需审批' : ''}</div>
           </div>
         </div>
         </>
