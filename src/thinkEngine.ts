@@ -152,6 +152,7 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
   const maxRounds = opts.maxRounds || MAX_THINK_ROUNDS;
   const clouds: { call: any; ok: boolean; result: string }[] = [];
   let finalText = '';
+  let lastClean = ''; // 每轮清理后的文本（循环耗尽时兜底作结论）
   let looped = 0;
   // 轮内去重：相同 工具+参数 只执行一次
   const callCache = new Map<string, string>();
@@ -166,12 +167,14 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
         (t) => { buffer += t; opts.onEvent?.onThought?.(t); },
         () => resolve(),
         (e) => reject(new Error(e)),
-        // ⚠️ json:false 必须（2026-08-17 修复：默认 format:'json' 会强制模型只输出 JSON，思考/正文全被吞 → 自主分析无内容）
-        { endpoint: 'native', think: true, json: false },
+        // ⚠️ json:false 必须（默认 format:'json' 会强制只输出 JSON，思考/正文被吞 → 无内容）；num_predict 4096（默认 1200 会截断长思考 → 无结论）
+        { endpoint: 'native', think: true, json: false, num_predict: 4096 },
       ).catch(() => { /* 错误走 onError */ });
     });
+    const clean = cleanProtocolText(buffer);
+    lastClean = clean;
     const calls = parseProtocolCalls(buffer);
-    if (calls.length === 0) { finalText = cleanProtocolText(buffer); break; }
+    if (calls.length === 0) { finalText = clean; break; }
     const toolResults: { role: string; content: string }[] = [];
     for (const call of calls) {
       const argsKey = (call.kind === 'tool' ? call.name : 'cloud') + '|' + JSON.stringify(call.args || {});
@@ -211,7 +214,10 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
       }
     }
     messages.push({ role: 'assistant', content: buffer });
-    messages.push({ role: 'user', content: toolResults.map(r => r.content).join('\n---\n') + '\n继续你的分析：如需更多数据再输出 [TOOL]/[CLOUD] 调用，否则直接给出最终结论。' });
+    const roundHint = round >= maxRounds - 1 ? '（注意：这是最后一轮——如果你已有足够信息，请直接输出最终结论，不要再调用工具）' : '';
+    messages.push({ role: 'user', content: toolResults.map(r => r.content).join('\n---\n') + '\n继续你的分析：如需更多数据再输出 [TOOL]/[CLOUD] 调用，否则直接给出最终结论。' + roundHint });
   }
+  // ⚠️ 循环耗尽兜底（用户反馈：跑了一会儿停了没有结论）：最后一轮有调用时 finalText 为空 → 用最后一轮清理文本作结论
+  if (!finalText) finalText = lastClean || '(思考循环达到上限未输出结论——可减少工具调用轮次或直接提问)';
   return { finalText, rounds: looped, clouds };
 }

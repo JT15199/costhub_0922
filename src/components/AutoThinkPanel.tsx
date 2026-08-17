@@ -21,7 +21,8 @@ interface LiveState {
   skipped?: string;
 }
 
-export default function AutoThinkPanel() {
+export default function AutoThinkPanel({ mode = 'summary' }: { mode?: 'summary' | 'full' }) {
+  const full = mode === 'full';
   const [logs, setLogs] = useState<ThinkLog[]>([]);
   const [live, setLive] = useState<LiveState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -93,7 +94,7 @@ export default function AutoThinkPanel() {
       <div className="card-header">
         <h3><ExperimentOutlined style={{ color: '#7C3AED' }} /> AI 自主分析</h3>
         <span style={{ fontSize: 12, color: '#94A3B8' }}>
-          AI 后台自发分析你的数据（每 15 分钟一轮 + 数据变化后触发），过程实时呈现
+          {full ? 'AI 后台自发分析你的数据（每 15 分钟一轮 + 数据变化后触发）——完整思考过程实时呈现' : 'AI 后台自发分析的关键结论（完整过程见「本地 AI 助手 → 🧠 自主分析」）'}
           <Button size="small" style={{ marginLeft: 10 }} icon={<ThunderboltOutlined />} loading={busy} onClick={runNow}>现在分析一轮</Button>
         </span>
       </div>
@@ -103,8 +104,16 @@ export default function AutoThinkPanel() {
         <Tag icon={<RobotOutlined />} color="orange" style={{ margin: 0, fontSize: 11.5 }}>自主建议：{engine.advisor} 条待处理</Tag>
         <Tag icon={<RobotOutlined />} color="purple" style={{ margin: 0, fontSize: 11.5 }}>物料洞察：{engine.trends} 类已追踪</Tag>
       </div>
-      {/* 实时区：进行中的一轮 */}
-      {live && (
+      {/* 实时区：进行中的一轮（summary 只显示状态行，full 显示完整过程） */}
+      {live && !full && (
+        <div style={{ fontSize: 12, color: live.status === 'error' ? '#DC2626' : '#7C3AED', padding: '6px 2px', marginBottom: 8 }}>
+          {live.status === 'running' ? <span><Spin size="small" /> 🧠 AI 正在自主分析…（见「本地 AI 助手 → 🧠 自主分析」查看过程）</span>
+            : live.skipped ? '⏭ ' + live.skipped
+            : live.status === 'error' ? '本轮分析失败：' + live.error
+            : '✓ 本轮分析完成' + (live.answer ? '：' + cleanProtocolText(live.answer).slice(0, 120) + (cleanProtocolText(live.answer).length > 120 ? '…' : '') : '')}
+        </div>
+      )}
+      {live && full && (
         <div style={{ border: '1px solid #DDD6FE', borderRadius: 10, padding: '10px 14px', marginBottom: 10, background: 'linear-gradient(180deg, #F5F3FF, #FFFFFF)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <b style={{ fontSize: 12.5 }}>🧠 本轮自主分析</b>
@@ -138,7 +147,7 @@ export default function AutoThinkPanel() {
           )}
         </div>
       )}
-      {/* 历史时间线 */}
+      {/* 历史：summary 结论摘要卡 / full 完整时间线 */}
       {logs.length === 0 ? (
         <div style={{ fontSize: 12, color: '#94A3B8', padding: '6px 2px' }}>
           暂无自主分析记录——AI 会在后台自发开始（也可点「现在分析一轮」立即触发）。
@@ -146,6 +155,19 @@ export default function AutoThinkPanel() {
             <a style={{ marginLeft: 6 }}>什么是自主分析？</a>
           </Tooltip>
         </div>
+      ) : !full ? (
+        /* summary：结论摘要卡（驾驶舱轻量呈现） */
+        logs.map((l, i) => (
+          <div key={l.id ?? i} style={{ border: '1px solid var(--color-border)', borderLeft: '3px solid ' + (l.status === 'error' ? '#EF4444' : '#7C3AED'), borderRadius: 8, padding: '8px 12px', marginBottom: 6, background: 'var(--color-surface, #fff)', cursor: 'default' }}
+            title={l.conclusion || l.thoughts || ''}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Tag color={l.status === 'done' ? 'green' : l.status === 'error' ? 'red' : 'processing'} style={{ margin: 0 }}>{l.status === 'done' ? '✓' : l.status === 'error' ? '✗' : '…'}</Tag>
+              <b style={{ flex: 1, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.topic || '自主分析'}</b>
+              <span style={{ fontSize: 11, color: '#94A3B8', flexShrink: 0 }}>{(l.started_at || l.finished_at || '').slice(0, 16)}</span>
+            </div>
+            {l.conclusion && <div style={{ fontSize: 12, color: '#64748B', lineHeight: 1.6, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>{l.conclusion}</div>}
+          </div>
+        ))
       ) : (
         logs.map((l, i) => (
           <details key={l.id ?? i} style={{ border: '1px solid var(--color-border)', borderRadius: 8, marginBottom: 6, background: 'var(--color-surface, #fff)' }}>

@@ -1,3 +1,7 @@
+### v2.3.19 自主分析呈现分层 + 无结论修复（2026-08-17，用户反馈：过程应放本地AI助手/驾驶舱只放结论；跑了一会儿停了没结论）
+- **① 呈现分层**：AutoThinkPanel 加 mode prop——驾驶舱默认 summary（只显示每轮结论摘要卡：topic/时间/结论前 3 行悬停全文 + 引擎状态 Tags + 进行中单行提示），本地 AI 助手顶部导航新增「🧠 自主分析」tab 渲染 mode=full（完整实时流：💭思考/🔧工具/🔐云端/📌结论 + 历史时间线可展开全部思考过程）；两处共享 costhub-think-event 实时事件
+- **② 停了没结论根因与修复**（thinkEngine runThinkLoop）：a) startOllamaStream 默认 num_predict 1200 → 思考型模型长思考被截断 → 显式 num_predict 4096 b) 循环耗尽（maxRounds 内每轮都有工具调用）时 finalText 为空 → 兜底：无最终文本时用最后一轮清理文本作结论 c) 最后一轮提示模型「已有足够信息请直接输出结论不要再调用工具」
+- **验证**：tsc -b 0 错；184 vitest 全过
 ### v2.3.19 自主分析协议 v2 文本协议 + 建表兜底（2026-08-17，用户反馈：对话里自主分析一直无内容 + no such table: ai_think_logs）
 - **① 无内容根因**：v1 用 Ollama 原生 function calling（tools 参数），但 startOllamaStream 默认 format:'json'——**tools 与 format 冲突**（Ollama 会报错/空输出），且本地小模型（qwythos-9b）对 function calling 支持不稳 → 整轮无输出。修复：**改文本协议 v2**——模型在输出中写 `[TOOL] 工具名 {...}` / `[CLOUD] {...}` 标记行，前端 parseProtocolCalls（括号平衡扫描，支持 JSON 跨行/嵌套）解析执行并回填 `[RESULT]`；不依赖模型 function calling；startOllamaStream 显式 json:false（自由文本）；渲染/存库时 cleanProtocolText 去掉标记；新增 7 个协议测试
 - **② no such table 根因**：ensureSchema 仅启动时执行一次，旧库/热更场景表可能缺失。修复：db/think.ts 运行时兜底 ensureThinkTable()（CREATE TABLE IF NOT EXISTS，模块级缓存标志），saveThinkLog/getThinkLogs/getRunningThinkLog 每次访问前确保

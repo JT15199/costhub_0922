@@ -39,6 +39,7 @@ const AI_TYPE_NAMES: Record<string, string> = {
 import { isProjectInsight } from '../aiBridge';
 import { EmojiIcon } from '../iconMap';
 import DemoGenerator from '../components/DemoGenerator';
+import AutoThinkPanel from '../components/AutoThinkPanel';
 
 // ===== Types =====
 interface ChatMessage { id?: number; role: 'user' | 'assistant'; content: string; reasoning?: string; steps?: string[]; created_at?: string; }
@@ -1022,7 +1023,7 @@ export default function LocalAIAssistant() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // ===== 自主建议（后台分析引擎） =====
   const [advisorList, setAdvisorList] = useState<any[]>([]);
-  const [advisorTab, setAdvisorTab] = useState<'chat' | 'advice'>('chat'); // 主视图：对话 / 自主建议
+  const [advisorTab, setAdvisorTab] = useState<'chat' | 'advice' | 'think'>('chat'); // 主视图：对话 / 自主建议 / 自主分析
   // AI 活动记录：回溯本地模型今天都做了什么（ai_request_logs 本地留痕）
   const [aiLogs, setAiLogs] = useState<any[]>([]);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -2030,6 +2031,7 @@ return (
             🤖 自主建议
             {advisorList.filter((x: any) => x.status === 'open').length > 0 && <span style={{ background: '#EF4444', color: '#fff', fontSize: 9, borderRadius: 9, padding: '1px 5px' }}>{advisorList.filter((x: any) => x.status === 'open').length}</span>}
           </div>
+          <div onClick={() => setAdvisorTab('think')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', background: advisorTab === 'think' ? '#EEF2FF' : 'transparent', color: advisorTab === 'think' ? '#4338CA' : '#6B7280', fontWeight: advisorTab === 'think' ? 600 : 400 }}>🧠 自主分析</div>
           <div onClick={async () => { setShowContext(true); setMemories(await loadMemories(50)); }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', color: '#6B7280' }}>📚 知识库</div>
           <div onClick={async () => { setShowLearn(true); await loadLearnData(); }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', color: '#6B7280' }}>🧠 学习档案</div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -2274,6 +2276,12 @@ return (
           </div>
         </div>
         </>
+        ) : advisorTab === 'think' ? (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 0 24px' }}>
+          <div style={{ maxWidth: 860, margin: '0 auto', padding: '0 20px' }}>
+            <AutoThinkPanel mode="full" />
+          </div>
+        </div>
         ) : (
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 0 24px' }}>
           <div style={{ maxWidth: 860, margin: '0 auto', padding: '0 20px' }}>
