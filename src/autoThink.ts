@@ -5,7 +5,7 @@
 //   · 云端需要行情 → cloud_market_query 走 requestCloudConfirm 审批（preview 挂非打断式队列，auto 放行）
 //   · 全过程落库 ai_think_logs（思考/工具/云端/结论），驾驶舱 AutoThinkPanel 实时流式呈现
 // 现有后台引擎（比价/巡检/洞察）是它思考的一部分：各自完成时也记入时间线（由 AutoThinkPanel 汇总展示）
-import { getProjects, getProjectBOMs, getSetting, getInsights } from './db';
+import { getProjects, getProjectBOMs, getSetting, setSetting, getInsights } from './db';
 import { getAdvisorInsights } from './db/advisor';
 import { getThinkLogs, saveThinkLog } from './db/think';
 
@@ -46,6 +46,7 @@ export async function runAutoThink(opts?: {
   onEvent?: (ev: any) => void;
   approveCloud?: (call: any) => Promise<boolean>;
   maxRounds?: number;
+  force?: boolean; // 手动触发时跳过【数据无变化】去重
 }): Promise<AutoThinkResult | null> {
   try {
     const model = await getSetting('local_ai_model', '');
@@ -57,6 +58,18 @@ export async function runAutoThink(opts?: {
       if (last[0] && last[0].status === 'running') return null; // 有未完成的一轮
     } catch { /* 忽略 */ }
     const overview = await buildThinkOverview();
+    // ⚠️ 轮间去重（2026-08-17）：数据概览指纹无变化 → 不重复思考（复用上轮结论）
+    const { hashString } = await import('./dailyBrief');
+    const ovHash = hashString(overview);
+    if (!opts?.force) {
+      try {
+        const lastHash = await getSetting('ai_think_overview_hash', '');
+        if (lastHash === ovHash) {
+          opts?.onEvent?.({ kind: 'skipped', reason: '数据无变化，复用上轮结论' });
+          return null;
+        }
+      } catch { /* 指纹读取失败不阻断 */ }
+    }
     const { listTools } = await import('./aiTools');
     const { buildThinkSystemPrompt, runThinkLoop } = await import('./thinkEngine');
     const { requestCloudConfirm } = await import('./cloudConfirm');
@@ -86,8 +99,25 @@ export async function runAutoThink(opts?: {
         return requestCloudConfirm({ material: call.material_name, category: call.category || '', question: call.question });
       },
       runCloud: async (call) => {
-        const r = await agentSearchLoop(call.material_name, call.category || '', 'price-trend');
-        return r;
+        // ⚠️ 云端去重（2026-08-17）：同一物料 7 天内已洞察 → 复用 ai_bridge_logs 结论，不重复烧云端
+        try {
+          const { materialKey, getRecentBridgeLog, saveBridgeLog } = await import('./db/advisor');
+          const key = materialKey(call.material_name, call.category || '');
+          const recent = await getRecentBridgeLog(key, 7);
+          if (recent && recent.cloud_result) {
+            try {
+              const cached = JSON.parse(recent.cloud_result);
+              return { ...cached, reused: true };
+            } catch { /* 解析失败走实时查询 */ }
+          }
+          const r = await agentSearchLoop(call.material_name, call.category || '', 'price-trend');
+          try {
+            await saveBridgeLog({ material_key: key, material_name: call.material_name, category: call.category || '', question: call.question || '', cloud_result: JSON.stringify(r), cloud_prompt: '', local_result: '', verdict: '', reused: 0 });
+          } catch { /* 存档失败忽略 */ }
+          return r;
+        } catch {
+          return agentSearchLoop(call.material_name, call.category || '', 'price-trend');
+        }
       },
       onEvent: {
         onRoundStart: (round) => { curThought = ''; thoughts.push(''); opts?.onEvent?.({ kind: 'round', round }); },
@@ -106,6 +136,7 @@ export async function runAutoThink(opts?: {
       tools_json: JSON.stringify(toolsRec), clouds_json: JSON.stringify(cloudsRec),
       conclusion: finalText, finished_at: new Date().toLocaleString('zh-CN', { hour12: false }),
     });
+    try { await setSetting('ai_think_overview_hash', ovHash); } catch { /* 忽略 */ }
     opts?.onEvent?.({ kind: 'done', topic, conclusion: finalText, rounds, clouds: clouds.length });
     return { topic, logId, rounds, clouds: clouds.length };
   } catch (e: any) {

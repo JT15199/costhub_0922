@@ -99,6 +99,8 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
   const clouds: { call: any; ok: boolean; result: string }[] = [];
   let finalText = '';
   let looped = 0;
+  // 轮内去重：相同工具+参数只执行一次，重复调用回填结果并提示（防模型反复查同一数据/反复申请云端）
+  const callCache = new Map<string, string>();
   for (let round = 1; round <= maxRounds; round++) {
     looped = round;
     opts.onEvent?.onRoundStart?.(round);
@@ -122,12 +124,22 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
       let args: any = {};
       try { args = JSON.parse(fn.arguments || '{}'); } catch { args = {}; }
       if (name === 'cloud_market_query') {
+        const argsKey = name + '|' + JSON.stringify(args);
+        const cached = callCache.get(argsKey);
+        if (cached) {
+          // 重复云端申请（同物料同问题）→ 不再申请，直接回填
+          clouds.push({ call: args, ok: true, result: cached });
+          opts.onEvent?.onCloudResult?.(args, true, cached);
+          toolResults.push({ role: 'tool', content: '[重复申请] 该云端查询在本轮已执行，结果未变化，请直接使用：\n' + cached });
+          continue;
+        }
         const ok = opts.approveCloud ? await opts.approveCloud(args) : true;
         let result: string;
         if (ok && opts.runCloud) {
           try {
             const r = await opts.runCloud(args);
-            result = formatCloudResult(r);
+            result = (r && r.reused) ? '♻（复用近期云端结论）' + formatCloudResult(r) : formatCloudResult(r);
+            callCache.set(argsKey, result);
           } catch (e: any) {
             result = '云端查询失败：' + String(e?.message || e).slice(0, 200);
             clouds.push({ call: args, ok: false, result });
@@ -144,7 +156,14 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
         opts.onEvent?.onCloudResult?.(args, ok, result);
         toolResults.push({ role: 'tool', content: result });
       } else {
+        const argsKey = name + '|' + JSON.stringify(args);
+        const cached = callCache.get(argsKey);
+        if (cached) {
+          toolResults.push({ role: 'tool', content: '[重复调用] 工具 ' + name + ' 与相同参数在本轮已执行过，结果未变化：\n' + cached + '\n请基于已有结果继续，不要重复调用相同工具。' });
+          continue;
+        }
         const res = await opts.executeTool(name, args);
+        if (res.ok) callCache.set(argsKey, res.text);
         opts.onEvent?.onToolResult?.(name, args, res.ok, res.text);
         toolResults.push({ role: 'tool', content: (res.ok ? '' : '[工具失败] ') + res.text });
       }

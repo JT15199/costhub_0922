@@ -17,6 +17,7 @@ interface LiveState {
   clouds: { material: string; ok: boolean; result: string }[];
   answer: string;
   error?: string;
+  skipped?: string;
 }
 
 export default function AutoThinkPanel() {
@@ -57,6 +58,8 @@ export default function AutoThinkPanel() {
       } else if (ev.kind === 'done') {
         setLive(prev => prev ? { ...prev, status: 'done', answer: prev.answer || ev.conclusion || '' } : { status: 'done', thoughts: '', tools: [], clouds: [], answer: ev.conclusion || '' });
         refreshLogs(); refreshEngine();
+      } else if (ev.kind === 'skipped') {
+        setLive({ status: 'done', thoughts: '', tools: [], clouds: [], answer: '', skipped: ev.reason || '数据无变化' });
       } else if (ev.kind === 'error') {
         setLive(prev => prev ? { ...prev, status: 'error', error: ev.error } : prev);
       }
@@ -71,13 +74,14 @@ export default function AutoThinkPanel() {
     setBusy(true);
     setLive({ status: 'running', thoughts: '', tools: [], clouds: [], answer: '' });
     const { runAutoThink } = await import('../autoThink');
-    await runAutoThink({ onEvent: (ev) => {
+    await runAutoThink({ force: true, onEvent: (ev) => {
       if (ev.kind === 'thought') setLive(prev => prev ? { ...prev, thoughts: prev.thoughts + ev.text } : prev);
       else if (ev.kind === 'tool') setLive(prev => prev ? { ...prev, tools: [...prev.tools, { name: ev.name, args: ev.args, ok: ev.ok, text: ev.text }] } : prev);
       else if (ev.kind === 'cloud_request') setLive(prev => prev ? { ...prev, clouds: [...prev.clouds, { material: ev.call?.material_name || '?', ok: false, result: '等待审批…' }] } : prev);
       else if (ev.kind === 'cloud') setLive(prev => prev ? { ...prev, clouds: [...prev.clouds, { material: ev.call?.material_name || '?', ok: ev.ok, result: ev.result || '' }] } : prev);
       else if (ev.kind === 'answer') setLive(prev => prev ? { ...prev, answer: prev.answer + ev.text } : prev);
       else if (ev.kind === 'done') { setLive(prev => prev ? { ...prev, status: 'done', answer: prev.answer || ev.conclusion || '' } : prev); refreshLogs(); refreshEngine(); }
+      else if (ev.kind === 'skipped') setLive({ status: 'done', thoughts: '', tools: [], clouds: [], answer: '', skipped: ev.reason || '数据无变化' });
       else if (ev.kind === 'error') setLive(prev => prev ? { ...prev, status: 'error', error: ev.error } : prev);
     } });
     setBusy(false);
@@ -123,6 +127,7 @@ export default function AutoThinkPanel() {
               🔐 云端申请「{c.material}」：{c.result === '等待审批…' ? <span>等待审批（底部横幅确认）</span> : c.ok ? '已批准' + (c.result ? ' · ' + c.result.slice(0, 80) : '') : '未批准' + (c.result && c.result !== '等待审批…' ? ' · ' + c.result.slice(0, 60) : '')}
             </div>
           ))}
+          {live.skipped && <div style={{ fontSize: 12, color: '#94A3B8' }}>⏭ {live.skipped}（数据无变化时不重复思考，有变化立即重新分析）</div>}
           {live.error && <div style={{ fontSize: 12, color: '#DC2626' }}>失败：{live.error}</div>}
           {(live.answer || live.status === 'done') && (
             <div style={{ fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', marginTop: 6, borderTop: '1px dashed #E9D5FF', paddingTop: 6 }}>

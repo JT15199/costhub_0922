@@ -1,3 +1,8 @@
+### v2.3.19 autoThink 避免重复思考（2026-08-17，用户问：思考循环如何避免重复思考）——三层去重
+- **① 轮内去重**（thinkEngine runThinkLoop）：同一轮循环中相同 工具+参数 只执行一次（callCache）——重复调用直接回填上次结果并提示模型结果未变化不要重复调用；重复的云端申请也不重复弹审批
+- **② 轮间去重**（autoThink）：数据概览（buildThinkOverview 输出）指纹 hashString 存 settings ai_think_overview_hash——**数据无变化 → 本轮跳过**（事件 kind=skipped，面板显示「数据无变化，复用上轮结论」），数据一变立即重新分析；手动「现在分析一轮」带 force 强制
+- **③ 云端去重**（autoThink runCloud）：同一物料 7 天内已洞察 → 复用 ai_bridge_logs.cloud_result（返回 reused 标记，结果前加 ♻ 前缀），不重复烧云端 token；新查询结果回写 ai_bridge_logs 供后续复用
+- **验证**：tsc -b 0 错；177 vitest 全过
 ### v2.3.19 后台自主思考引擎 autoThink（2026-08-17，用户澄清：不是用户指挥的分析，而是 AI 自发的分析，并把过程呈现出来；现有比价/巡检/洞察都算它思考的一部分）
 - **调度**（App.tsx scheduleAppThink）：启动立即一轮 + 每 15 分钟一轮 + 数据变更事件（costhub-compare-request）后 5 分钟节流触发；防重入（模块级 + running 日志兜底）
 - **引擎**（src/autoThink.ts）：buildThinkOverview 收集本地概览（项目/BOM 成本/报价情报/自主建议数）→ 复用 runThinkLoop（Ollama 原生 function calling，≤6 轮）→ 模型自主决定深挖方向（工具核实）→ 需要行情时 cloud_market_query → **requestCloudConfirm 审批**（preview 挂底部横幅队列，auto 放行；确认过的物料会话内放行）→ 输出 200-400 字结论（发现/判断/建议）→ 落库 ai_think_logs（thoughts/tools_json/clouds_json/conclusion）→ 广播 costhub-think-event 实时呈现
