@@ -1,3 +1,10 @@
+### v2.3.19 报价情报识别升级 + 本地→云端审批（2026-08-17，用户反馈）
+- **① 情报显示**：成本改四位小数（toFixed(4)）；每行带子类 Tag（geekblue）+ 名称/型号/规格悬停完整显示（title，\n 分隔）；比对弹窗 rows 同步补 sub_category + specs
+- **② 逐行「不是同一器件」**（markRowDifferent，情报组内每行 ✗ 按钮）：#ROWDIFF#<partKey> 别名沉淀（source=marked_different），该行从情报/识别输入消失；buildInsights 的 ai/rule 组均过滤 rowDiff 行；已处理视图三态（确认同一/标记不同/标记不是同一器件）+ 撤销（undoHandledInsight 增 row_different 分支）
+- **③ AI 识别规则升级（autoCompare v3，指纹加 v3| 前缀强制旧缓存失效重识别）**：输入排除完全同名同型号行（exactCount<2，规则组已覆盖）；提示词强化——必须同一种器件（同子类：都是接口/电容/电阻，不同子类名称接近也不算）、完全一致不列、规格多指标顺序不一致按内容集合判断（"24V 3A 适配器" vs "3A 24V 适配器"）、写法相近才列；输入行带 子类+规格
+- **④ 尺寸类物料按同样尺寸评估成本**（parseDimension/dimensionAnalysis 纯函数，vitest 8 用例）：识别规格 W×H mm/cm/英寸（×/x/* 分隔），面积 cm²，单位面积成本 ¥/cm²，组内 ≥2 行有尺寸 → 情报卡片显示蓝色 dimension 条「📐 按同样尺寸评估：参考单位面积 ¥0.0336/cm²（中位）—— A 200×150mm ¥8.40（¥0.0280/cm²）/ B 250×180mm ¥15.12（¥0.0336/cm²）」；specs 批量查询 getPartsSpecsMap（db/parts.ts）
+- **⑤ 本地模型→云端审批全覆盖（用户新增需求）**：agentSearchLoop 各入口统一安全边界——autoInsight（后台，非打断式队列 ✓ 已有）、aiBridge runBridgedInsight（preview 弹窗 ✓ 已有）、**Agent 工具 insight_material_trend 补审批**（aiTools.ts execute 先 requestCloudConfirm，preview → 入队返回未批准文案提示底部横幅，确认后重发任务即放行（会话级记忆））；手动快捷洞察（用户主动触发）不拦
+- **验证**：tsc -b 0 错；168 vitest 全过（16 文件）
 ### v2.3.19 报价情报数据混乱 + 侧边栏入口白屏修复（2026-08-17，用户反馈）
 - **① 侧边栏「报价情报」其他页面点击白屏/没反应**：原来 onClick 直接 `setActive('projects')` 不走 navigate → mountedPages 没有 projects 时页面区空白（白屏）；且事件在懒加载组件挂载前发出 → 丢失没反应。修复：App 新增 openInsightsEntry = localStorage 写 `costhub-open-insights-pending` 标志 + `navigate('projects')`（挂载页面）+ 300ms 延迟补发事件双保险；Projects 挂载 useEffect 消费标志（有则打开弹窗）
 - **② 报价情报数据混乱（处理过的还在待处理/已处理为空/未读含已处理）根因**：`upsertInsight` 原实现内容变化时 **DELETE+INSERT 整行** → `handled_json`（已处理记录）被清空（已处理视图全空）+ `status` 被重置 unread（处理完的模块回到待处理）+ 空情报也建 unread 行（"已核对"占住待处理）。修复（src/db/compare.ts）：**UPDATE 保留行**（handled_json 不丢）；仅当出现**新组**（hasNewGroups 比对组名集合）才重置 unread——用户处理导致的组消失/变化不打扰，BOM/报价变化带来的新疑似组正常提醒；空情报（[]）不创建记录；新增 `cleanupInsightStatus()` 一次性清理历史脏数据（无待处理组的 unread 模块归档为已读），Projects loadInsights 每次先执行

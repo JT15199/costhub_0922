@@ -23,6 +23,17 @@ export async function getPart(id: number) {
   return r[0] || null;
 }
 
+// 批量取器件规格（报价比对/尺寸归一评估用；2026-08-17）
+export async function getPartsSpecsMap(partIds: number[]): Promise<Record<number, string>> {
+  const ids = [...new Set(partIds.filter(id => Number(id) > 0))];
+  if (ids.length === 0) return {};
+  const d = await getDb();
+  const rows = await d.select<any[]>('SELECT id, COALESCE(specs, \'\') as specs FROM parts WHERE id IN (' + ids.map(() => '?').join(',') + ')', ids);
+  const map: Record<number, string> = {};
+  rows.forEach((r: any) => { map[r.id] = r.specs || ''; });
+  return map;
+}
+
 
 export async function savePart(data: any, autoSnapshot = true) {
   const d = await getDb();

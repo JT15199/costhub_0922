@@ -279,9 +279,14 @@ export default function Projects() {
       if (!p) continue;
       const boms = await getProjectBOMs(p.id);
       boms.filter((b: any) => b.module_name === modName).forEach((b: any) => {
-        rows.push({ project: p.code || p.name, projectId: p.id, name: b.part_name, model: b.part_model || '', cost: b.part_cost || 0, quantity: b.quantity || 1 });
+        rows.push({ project: p.code || p.name, projectId: p.id, name: b.part_name, model: b.part_model || '', sub_category: b.sub_category || '', cost: b.part_cost || 0, quantity: b.quantity || 1, partId: b.part_id || 0 });
       });
     }
+    try {
+      const { getPartsSpecsMap } = await import('../db');
+      const specsMap = await getPartsSpecsMap(rows.map((r: any) => r.partId));
+      rows.forEach((r: any) => { r.specs = specsMap[r.partId] || ''; });
+    } catch { /* 规格缺失不阻断 */ }
     setCmpRows(rows);
     const aliases = await getPartAliases(modName);
     setCmpRuleGroups(buildRuleGroups(rows, aliases));
@@ -459,6 +464,34 @@ export default function Projects() {
     }
     setInsightBusyKey(null);
   };
+  // 逐行标记「不是同一器件」（2026-08-17 用户需求：组内可能有部分行不是同一物料）：#ROWDIFF# 别名沉淀，该行从情报消失（可撤销）
+  const markRowDifferent = async (ins: any, g: any, gi: number, ri: number) => {
+    const r = (g.rows || [])[ri];
+    if (!r) return;
+    const key = ins.id + '|' + gi + '|' + ri;
+    setInsightBusyKey(key);
+    try {
+      await savePartAlias({ module_name: ins.module_name, alias_name: '#ROWDIFF#' + partKey(r), alias_model: '', canonical_name: '', canonical_model: '', source: 'marked_different' });
+      await rebuildModuleInsight(ins);
+      const handledIdx = await appendHandledInsight(ins.category, ins.module_name, {
+        name: r.name, type: 'row', action: 'row_different', rows: [r], diff: 0,
+        handled_at: new Date().toLocaleString('zh-CN', { hour12: false }),
+      });
+      window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
+      await loadInsights();
+      notification.success({
+        message: '已标记「' + r.name + '」不是同一器件',
+        description: '该行不再参与该组识别与价差计算（可在「已处理」撤销）',
+        placement: 'bottomRight', duration: 4,
+        btn: <Button size="small" type="link" onClick={() => undoHandledInsight(ins, handledIdx)}>撤销</Button>,
+      });
+    } catch (e: any) {
+      console.error('标记行不同失败:', e);
+      message.error('操作失败：' + (e?.message || e));
+      await loadInsights();
+    }
+    setInsightBusyKey(null);
+  };
   // 知道了 = 归档（已读）：从「待处理」消失，留在「全部」可查看可恢复；不重算，数据变化后新情报自动重新出现
   const markKnownInsight = async (ins: any) => {
     setInsights(prev => prev.map(x => x.id === ins.id ? { ...x, status: 'read' } : x));
@@ -551,14 +584,17 @@ export default function Projects() {
         for (const r of item.rows || []) {
           await deletePartAliasExact(ins.module_name, r.name, r.model || '', 'user_confirmed');
         }
+      } else if (item.action === 'row_different') {
+        const r = (item.rows || [])[0];
+        if (r) await deletePartAliasExact(ins.module_name, '#ROWDIFF#' + partKey(r), '', 'marked_different');
       } else {
         const keys = (item.rows || []).map((r: any) => partKey(r)).sort().join(';');
-        await deletePartAliasExact(ins.module_name, `#NEG#${keys}`, '', 'marked_different');
+        await deletePartAliasExact(ins.module_name, '#NEG#' + keys, '', 'marked_different');
       }
       await removeHandledInsight(ins.category, ins.module_name, hi);
       await rebuildModuleInsight(ins);
       await loadInsights();
-      message.success(item.action === 'confirmed' ? '已撤销确认，该组已恢复（回到待处理重新识别）' : '已撤销标记，该组已恢复（AI 可重新建议）');
+      message.success(item.action === 'confirmed' ? '已撤销确认，该组已恢复（回到待处理重新识别）' : item.action === 'row_different' ? '已撤销行标记，该行恢复参与识别' : '已撤销标记，该组已恢复（AI 可重新建议）');
     } catch (e: any) {
       console.error('撤销失败:', e);
       message.error('撤销失败：' + (e?.message || e));
@@ -3069,14 +3105,16 @@ export default function Projects() {
                     <div key={hi} style={{ border: '1px solid #E8ECF1', borderRadius: 8, marginBottom: 6, padding: '8px 12px', background: '#FAFBFC' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
                         <b style={{ fontSize: 12.5, color: h.action === 'confirmed' ? '#16A34A' : '#DC2626' }}><EmojiIcon e={h.action === 'confirmed' ? '✓' : '✗'} /> {h.name}</b>
-                        <Tag color={h.action === 'confirmed' ? 'green' : 'red'} style={{ margin: 0 }}>{h.action === 'confirmed' ? '已确认同一' : '已标记不同'}</Tag>
+                        <Tag color={h.action === 'confirmed' ? 'green' : 'red'} style={{ margin: 0 }}>{h.action === 'confirmed' ? '已确认同一' : h.action === 'row_different' ? '已标记不是同一器件' : '已标记不同'}</Tag>
                         <span style={{ fontSize: 10.5, color: '#94A3B8' }}>{h.handled_at}</span>
                       </div>
                       {(h.rows || []).map((r: any, ri: number) => (
-                        <div key={ri} style={{ fontSize: 12, display: 'flex', gap: 10, padding: '1px 0' }}>
-                          <b style={{ width: 70 }}>{r.project}</b>
-                          <span style={{ width: 180, color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name} {r.model}</span>
-                          <span style={{ fontVariantNumeric: 'tabular-nums' }}>¥{r.cost.toFixed(2)} × {r.quantity}</span>
+                        <div key={ri} style={{ fontSize: 12, display: 'flex', gap: 8, padding: '2px 0', alignItems: 'center' }}>
+                          <b style={{ width: 60, flexShrink: 0 }}>{r.project}</b>
+                          {r.sub_category && <Tag color="geekblue" style={{ margin: 0, fontSize: 10.5, flexShrink: 0 }}>{r.sub_category}</Tag>}
+                          <span style={{ flex: 1, minWidth: 0, color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'default' }}
+                            title={`${r.name} ${r.model}${r.specs ? '\n规格：' + r.specs : ''}`}>{r.name} {r.model}</span>
+                          <span style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>¥{r.cost.toFixed(4)} × {r.quantity}</span>
                         </div>
                       ))}
                       <div style={{ marginTop: 6 }}>
@@ -3114,6 +3152,7 @@ export default function Projects() {
                     <Tag color="red" style={{ margin: 0 }}>价差 ¥{(g.diff || 0).toFixed(2)}</Tag>
                   </div>
                   {g.reason && <div style={{ fontSize: 11.5, color: '#64748B', marginBottom: 4 }}>{g.reason}</div>}
+                  {g.dimension && <div style={{ fontSize: 11.5, marginBottom: 4, color: '#1D4ED8', background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 6, padding: '3px 8px', whiteSpace: 'pre-wrap' }}>{g.dimension}</div>}
                   {(() => {
                     const prices = g.rows.map((r: any) => r.cost || 0);
                     const maxP = Math.max(...prices), minP = Math.min(...prices);
@@ -3125,10 +3164,13 @@ export default function Projects() {
                     ) : null;
                   })()}
                   {g.rows.map((r: any, ri: number) => (
-                    <div key={ri} style={{ fontSize: 12, display: 'flex', gap: 10, padding: '1px 0' }}>
-                      <b style={{ width: 70 }}>{r.project}</b>
-                      <span style={{ width: 180, color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name} {r.model}</span>
-                      <span style={{ fontVariantNumeric: 'tabular-nums' }}>¥{r.cost.toFixed(2)} × {r.quantity}</span>
+                    <div key={ri} style={{ fontSize: 12, display: 'flex', gap: 8, padding: '2px 0', alignItems: 'center' }}>
+                      <b style={{ width: 60, flexShrink: 0 }}>{r.project}</b>
+                      {r.sub_category && <Tag color="geekblue" style={{ margin: 0, fontSize: 10.5, flexShrink: 0 }}>{r.sub_category}</Tag>}
+                      <span style={{ flex: 1, minWidth: 0, color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'default' }}
+                        title={`${r.name} ${r.model}${r.specs ? '\n规格：' + r.specs : ''}`}>{r.name} {r.model}</span>
+                      <span style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>¥{r.cost.toFixed(4)} × {r.quantity}</span>
+                      <Button size="small" type="text" danger style={{ fontSize: 11, padding: '0 4px', flexShrink: 0 }} loading={insightBusyKey === (ins.id + '|' + gi + '|' + ri)} onClick={() => markRowDifferent(ins, g, gi, ri)}>✗ 不是同一器件</Button>
                     </div>
                   ))}
                   <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap' }}>

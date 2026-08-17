@@ -283,6 +283,13 @@ const tools: AiTool[] = [
       { key: 'category', type: 'string', desc: '品类，如 硬件类，可空' },
     ],
     execute: async (a) => {
+      // ⚠️ 云端调用审批（2026-08-17，用户需求：本地 AI 要调云端时必须有提示+审批）——
+      // preview 模式 → 挂入待确认队列（底部横幅「🔐 等待云端发送确认」），不发云端；确认后重发任务即放行（会话级记忆）
+      const { requestCloudConfirm } = await import('./cloudConfirm');
+      const ok = await requestCloudConfirm({ material: a.material_name, category: a.category || '' });
+      if (!ok) {
+        return '⚠️ 云端行情查询需审批：已加入待确认队列（屏幕底部「🔐 N 个物料洞察等待云端发送确认」横幅）。请在横幅中确认发送，确认后重新执行本任务即可获取行情。';
+      }
       const { agentSearchLoop } = await import('./trendService');
       const r = await agentSearchLoop(a.material_name, a.category || '', 'price-trend');
       return '「' + a.material_name + '」行情：趋势 ' + (r.trend_direction || '信号不明确') + '，置信度 ' + (r.confidence_level || '中') + (r.magnitude_min != null ? '，幅度 ' + r.magnitude_min + '%~' + (r.magnitude_max ?? '') + '%' : '') + '\n摘要：' + (r.summary || '') + (r.suggested_action ? '\n建议：' + r.suggested_action : '');

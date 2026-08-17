@@ -1,12 +1,59 @@
 // 报价比对后台识别引擎（v2.3.19+，App 级全局调用）
 // 空闲自动 / 导入改价后自动 / 打开项目页自动：全品类扫描，指纹命中跳过，发现差异情报落 part_insights
 // 数据安全：全程本地（Ollama 流式经 Rust 代理），无任何云端调用；未配置模型或 Ollama 未运行 → 静默跳过
-import { getProjects, getProjectBOMs, getPartAliases, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getSetting } from './db';
+// 2026-08-17 v3 升级（用户反馈）：
+//   ① AI 输入排除"完全同名同型号"行（确定同一物料由规则组覆盖，AI 只认"看起来差不多但写法不同"的）
+//   ② 识别优先同子类（都是接口/电容/电阻…），不同子类即使名称接近也不算同一；规格多指标顺序不一致按内容集合判断
+//   ③ 逐行"不是同一器件"：#ROWDIFF# 别名沉淀，该行从情报/识别消失（可撤销）
+//   ④ 尺寸类物料（PCB/结构件带 W×H mm/cm）按单位面积成本归一，评估"按同样尺寸成本应该是什么样"
+import { getProjects, getProjectBOMs, getPartAliases, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getSetting, getPartsSpecsMap } from './db';
 import { startOllamaStream, logLocalAICall } from './ollama';
 import { invoke } from '@tauri-apps/api/core';
 
 export const partKey = (r: any) => `${normalizePartName(r.name)}|${normalizePartName(r.model)}`;
-export const moduleFingerprint = (rows: any[]) => rows.map(r => `${r.project}|${r.name}|${r.model}|${r.cost}|${r.quantity}`).sort().join('\n');
+// v3 前缀：识别规则升级（排除完全一致行/同子类优先）后强制旧缓存失效，重新识别一轮
+export const moduleFingerprint = (rows: any[]) => 'v3|' + rows.map(r => `${r.project}|${r.name}|${r.model}|${r.cost}|${r.quantity}`).sort().join('\n');
+
+// 逐行否定集合（用户标记"该行不是同一器件"→ #ROWDIFF#<partKey>；2026-08-17）
+export function getRowDiffSet(aliases: any[]): Set<string> {
+  const s = new Set<string>();
+  aliases.filter((a: any) => a.source === 'marked_different' && a.alias_name.startsWith('#ROWDIFF#')).forEach((a: any) => s.add(a.alias_name.slice(9)));
+  return s;
+}
+
+// ===== 尺寸类物料按同样尺寸评估成本（2026-08-17，用户需求：PCB/结构件带明显尺寸，可按面积归一） =====
+// 支持 200×150mm / 200*150MM / 12.5x8.5cm / 150x90mm / 7英寸 等；英寸按 2.54cm 换算
+const DIM_RE = /(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*(mm|cm|毫米|厘米|inch|inches|英寸|寸|in)["”]?/i;
+export function parseDimension(text: string): { w: number; h: number; areaCm2: number; unit: string; label: string } | null {
+  if (!text) return null;
+  const m = text.match(DIM_RE);
+  if (!m) return null;
+  const w = parseFloat(m[1]), h = parseFloat(m[2]);
+  if (!w || !h) return null;
+  const u = m[3].toLowerCase();
+  const mm = u === 'mm' || u === '毫米';
+  const cm = u === 'cm' || u === '厘米';
+  const wCm = mm ? w / 10 : cm ? w : w * 2.54;
+  const hCm = mm ? h / 10 : cm ? h : h * 2.54;
+  return { w, h, areaCm2: Math.round(wCm * hCm * 100) / 100, unit: m[3], label: `${w}×${h}${m[3]}` };
+}
+
+// 尺寸归一评估：组内 ≥2 行有尺寸 → 以单位面积成本（¥/cm²）中位数为参考口径，折算"按同样尺寸"的成本对比
+// 返回 null = 无足够尺寸信息；note 供情报卡片直接展示
+export function dimensionAnalysis(rows: { project?: string; name?: string; model?: string; specs?: string; cost: number }[]): { note: string } | null {
+  const dims = rows.map(r => {
+    const d = parseDimension(`${r.specs || ''} ${r.name || ''} ${r.model || ''}`);
+    if (!d) return null;
+    const cost = Number(r.cost) || 0;
+    return { row: r, ...d, unitCost: d.areaCm2 > 0 ? cost / d.areaCm2 : 0 };
+  }).filter((x: any): x is any => !!x && x.areaCm2 > 0);
+  if (dims.length < 2) return null;
+  const sorted = [...dims].sort((a: any, b: any) => a.unitCost - b.unitCost);
+  const med = sorted[Math.floor(sorted.length / 2)].unitCost;
+  const parts = dims.map((d: any) => `${d.row.project || '?'} ${d.label} ¥${(Number(d.row.cost) || 0).toFixed(2)}（¥${d.unitCost.toFixed(4)}/cm²）`);
+  const note = `📐 按同样尺寸评估：参考单位面积 ¥${med.toFixed(4)}/cm²（中位）—— ` + parts.join(' / ');
+  return { note };
+}
 
 // 规则分组：已确认别名 + 归一化同名同型号 → 直接归组（免费实时，不用 AI）
 export function buildRuleGroups(rows: any[], aliases: any[]) {
@@ -66,8 +113,6 @@ function parseAiGroups(text: string, ungrouped: any[]): any[] {
     const idxs = (m[2].match(/\d+/g) || []).map(Number).filter(i => i >= 0 && i < ungrouped.length);
     if (idxs.length >= 2) groups.push({ name: m[1].trim(), reason: '', rows: idxs.map(i => ungrouped[i]) });
   });
-  if (groups.length === 0 && text.trim() && !/无/.test(text)) {
-  }
   return groups;
 }
 
@@ -79,14 +124,26 @@ export async function runAiIdentifyOnce(rows: any[], aliases: any[]): Promise<an
   const aliasSet = new Set<string>();
   aliases.filter((a: any) => a.source === 'user_confirmed').forEach((a: any) => aliasSet.add(`${normalizePartName(a.alias_name)}|${normalizePartName(a.alias_model)}`));
   const negSet = new Set(aliases.filter((a: any) => a.source === 'marked_different' && a.alias_name.startsWith('#NEG#')).map((a: any) => a.alias_name.slice(5)));
-  const ungrouped = rows.filter(r => !aliasSet.has(partKey(r)));
+  const rowDiff = getRowDiffSet(aliases);
+  // 完全同名同型号的行（跨项目重复出现）→ 规则组已覆盖（确定同一物料，价差是谈判信息），不进 AI 输入
+  const exactCount = new Map<string, number>();
+  rows.forEach(r => { const k = partKey(r); exactCount.set(k, (exactCount.get(k) || 0) + 1); });
+  const ungrouped = rows.filter(r => {
+    const k = partKey(r);
+    return !aliasSet.has(k) && !rowDiff.has(k) && (exactCount.get(k) || 0) < 2;
+  });
   if (ungrouped.length < 2) return [];
-  const sysPrompt = `你是物料识别助手。以下是同一模块下、不同项目的器件清单，部分器件是同一物料但名称/型号写法不同（可能含规格词差异或口语化写法）。
+  const sysPrompt = `你是物料识别助手。以下是同一模块下、不同项目的器件清单，部分器件是同一物料但名称/型号/规格写法不同（可能含规格词差异、指标顺序不同或口语化写法）。
 找出"疑似同一物料"的组，输出格式（每行一组，不要任何解释）：
 组名|序号1,序号2
 例如：27寸液晶面板|0,2,4
-规则：1) 每组至少 2 个序号 2) 每行只能出现在一组 3) 不确定就不要列出 4) 没有疑似组就只输出"无"`;
-  const userPrompt = ungrouped.map((r, i) => `[${i}] ${r.project} | ${r.name} | ${r.model} | ¥${r.cost}`).join('\n');
+规则：
+1) 必须是同一种器件才能归组：优先看子类——都是接口、都是电容、都是电阻等；不同子类即使名称接近也不算同一物料
+2) 名称与型号完全一样的行不要列入（那是确定同一物料，无需识别）
+3) 名称/规格相近、可能因写法或顺序不同表达同一器件的才列入（如"27寸液晶面板"与"27英寸LCD屏"；"24V 3A 适配器"与"3A 24V 适配器"）
+4) 同一器件可能有多个指标规格但书写顺序不一致，按规格内容集合判断是否同一
+5) 每组至少 2 个序号；每行只能出现在一组；不确定就不要列出；没有疑似组就只输出"无"`;
+  const userPrompt = ungrouped.map((r, i) => `[${i}] ${r.project} | ${r.name} | ${r.model} | 子类:${r.sub_category || '未知'} | ¥${r.cost}${r.specs ? ' | 规格:' + r.specs : ''}`).join('\n');
   let full = '';
   // 单模块超时（60s）：模型太慢/卡住时直接跳过，不拖住整轮识别；超时后取消流监听
   await new Promise<void>((resolve, reject) => {
@@ -121,27 +178,38 @@ export async function runAiIdentifyOnce(rows: any[], aliases: any[]): Promise<an
   return groups;
 }
 
-// 差异情报判定：AI 疑似组必报（已人工确认的行先过滤——确认后该组应消失，不再打扰）；
-// 规则组价差明显（≥¥10 且 ≥10%）也报
+// 差异情报判定：AI 疑似组必报（已确认/已逐行否定的行先过滤）；规则组价差明显（≥¥10 且 ≥10%）也报；
+// 组内 ≥2 行有尺寸 → 附加 dimension（按同样尺寸评估）
 export function buildInsights(aiGroups: any[], rows: any[], aliases: any[]): any[] {
   const out: any[] = [];
   // 已确认别名集合（user_confirmed → alias 归到 canonical，这些行不再算疑似）
   const confirmed = new Set<string>();
   aliases.filter((a: any) => a.source === 'user_confirmed').forEach((a: any) => confirmed.add(`${normalizePartName(a.alias_name)}|${normalizePartName(a.alias_model)}`));
+  const rowDiff = getRowDiffSet(aliases);
+  const okRow = (r: any) => !confirmed.has(partKey(r)) && !rowDiff.has(partKey(r));
   aiGroups.forEach((g: any) => {
-    const unconfirmed = (g.rows || []).filter((r: any) => !confirmed.has(partKey(r)));
-    if (unconfirmed.length < 2) return; // 整组已确认 → 情报消失
+    const unconfirmed = (g.rows || []).filter(okRow);
+    if (unconfirmed.length < 2) return; // 整组已确认/被逐行否定 → 情报消失
     const prices = unconfirmed.map((r: any) => r.cost);
-    out.push({ type: 'ai', name: g.name, reason: g.reason, rows: unconfirmed, diff: Math.round((Math.max(...prices) - Math.min(...prices)) * 100) / 100 });
+    const ins: any = { type: 'ai', name: g.name, reason: g.reason, rows: unconfirmed, diff: Math.round((Math.max(...prices) - Math.min(...prices)) * 100) / 100 };
+    const dim = dimensionAnalysis(unconfirmed);
+    if (dim) ins.dimension = dim.note;
+    out.push(ins);
   });
   buildRuleGroups(rows, aliases).forEach((g: any) => {
-    if (g.rows.length < 2) return;
+    const kept = (g.rows || []).filter(okRow);
+    if (kept.length < 2) return;
     // 全部行都已被用户确认归组 → 该组已处理，不再提醒（与 rebuildModuleInsight 过滤一致，防止后台轮询让已确认组重现）
-    if ((g.rows || []).every((r: any) => confirmed.has(partKey(r)))) return;
-    const prices = g.rows.map((r: any) => r.cost);
+    if (kept.every((r: any) => confirmed.has(partKey(r)))) return;
+    const prices = kept.map((r: any) => r.cost);
     const min = Math.min(...prices); const max = Math.max(...prices);
     const diff = max - min;
-    if (diff >= 10 && diff / min >= 0.1) out.push({ type: 'rule', name: g.canonical, reason: '同名同型号报价差异明显', rows: g.rows, diff: Math.round(diff * 100) / 100 });
+    if (diff >= 10 && diff / min >= 0.1) {
+      const ins: any = { type: 'rule', name: g.canonical, reason: '同名同型号报价差异明显', rows: kept, diff: Math.round(diff * 100) / 100 };
+      const dim = dimensionAnalysis(kept);
+      if (dim) ins.dimension = dim.note;
+      out.push(ins);
+    }
   });
   return out;
 }
@@ -197,9 +265,13 @@ export async function runAutoCompare(onProgress?: (p: { done: number; total: num
       for (const p of projs) {
         const boms = await getProjectBOMs(p.id);
         boms.filter((b: any) => b.module_name === mod).forEach((b: any) => {
-          rows.push({ project: p.code || p.name, projectId: p.id, name: b.part_name, model: b.part_model || '', cost: b.part_cost || 0, quantity: b.quantity || 1 });
+          rows.push({ project: p.code || p.name, projectId: p.id, name: b.part_name, model: b.part_model || '', sub_category: b.sub_category || '', cost: b.part_cost || 0, quantity: b.quantity || 1, partId: b.part_id || 0 });
         });
       }
+      try {
+        const specsMap = await getPartsSpecsMap(rows.map((r: any) => r.partId));
+        rows.forEach((r: any) => { r.specs = specsMap[r.partId] || ''; });
+      } catch { /* 规格缺失不阻断识别 */ }
       const fp = moduleFingerprint(rows);
       const aliases = await getPartAliases(mod);
       const cache = await getCompareCache(cat, mod);
