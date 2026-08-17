@@ -1,3 +1,7 @@
+### v2.3.19 驾驶舱重排版（2026-08-17，用户要求：自主分析与AI洞察建议合并/今日速览进标题/统计卡第一行/左关键物料右洞察建议/目标达成按项目维度/字数精简）
+- **新布局**（Dashboard.tsx）：①标题行=驾驶舱 + DailyBrief inline（单行省略悬停全文+活动记录链接）+ AIStatusBar compact（右侧）②第一行=5 统计卡（文案精简：未达标/待处理/近期变动/本地处理·审计留痕/达上限）③目标成本达成→项目维度紧凑条（chips：代号·最差领域·达成率%，悬停看全部领域，点击直达项目；未设目标提示移右侧）④第二行 grid：左=关键物料洞察 | 右=AI 洞察建议（内嵌 AutoThinkPanel mode=inline 合并自主分析结论 + 自主建议 + 巡检发现）⑤下方保留 最近成本变动/统计卡/图表/最近更新器件
+- **组件调整**：DailyBrief 加 inline prop（单行速览）；AutoThinkPanel 加 inline mode（无外壳/无按钮/无引擎汇总，只显示实时单行+最新 3 条结论摘要卡+查看全部链接）；AIWorkspace 大卡从驾驶舱移除（状态条与速览并入标题行）；targetOpen state 移除
+- **验证**：tsc -b 0 错；184 vitest 全过
 ### v2.3.19 自主分析呈现分层 + 无结论修复（2026-08-17，用户反馈：过程应放本地AI助手/驾驶舱只放结论；跑了一会儿停了没结论）
 - **① 呈现分层**：AutoThinkPanel 加 mode prop——驾驶舱默认 summary（只显示每轮结论摘要卡：topic/时间/结论前 3 行悬停全文 + 引擎状态 Tags + 进行中单行提示），本地 AI 助手顶部导航新增「🧠 自主分析」tab 渲染 mode=full（完整实时流：💭思考/🔧工具/🔐云端/📌结论 + 历史时间线可展开全部思考过程）；两处共享 costhub-think-event 实时事件
 - **② 停了没结论根因与修复**（thinkEngine runThinkLoop）：a) startOllamaStream 默认 num_predict 1200 → 思考型模型长思考被截断 → 显式 num_predict 4096 b) 循环耗尽（maxRounds 内每轮都有工具调用）时 finalText 为空 → 兜底：无最终文本时用最后一轮清理文本作结论 c) 最后一轮提示模型「已有足够信息请直接输出结论不要再调用工具」

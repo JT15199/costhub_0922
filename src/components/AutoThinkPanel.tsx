@@ -21,8 +21,9 @@ interface LiveState {
   skipped?: string;
 }
 
-export default function AutoThinkPanel({ mode = 'summary' }: { mode?: 'summary' | 'full' }) {
+export default function AutoThinkPanel({ mode = 'summary', onNavigate }: { mode?: 'summary' | 'full' | 'inline'; onNavigate?: (page: string) => void }) {
   const full = mode === 'full';
+  const inline = mode === 'inline';
   const [logs, setLogs] = useState<ThinkLog[]>([]);
   const [live, setLive] = useState<LiveState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -88,6 +89,37 @@ export default function AutoThinkPanel({ mode = 'summary' }: { mode?: 'summary' 
     } });
     setBusy(false);
   };
+
+  // inline：嵌入 AI 洞察建议卡（合并自主分析结论，无外壳/无按钮/无引擎汇总）
+  if (inline) {
+    return (
+      <div style={{ marginBottom: 10 }}>
+        {live && (
+          <div style={{ fontSize: 12, color: live.status === 'error' ? '#DC2626' : '#7C3AED', padding: '2px 0 6px' }}>
+            {live.status === 'running' ? <span><Spin size="small" /> 🧠 AI 正在自主分析…</span>
+              : live.skipped ? '⏭ ' + live.skipped
+              : live.status === 'error' ? '本轮分析失败：' + live.error
+              : cleanProtocolText(live.answer) ? '✓ ' + cleanProtocolText(live.answer).slice(0, 90) + (cleanProtocolText(live.answer).length > 90 ? '…' : '')
+              : '✓ 本轮分析完成'}
+          </div>
+        )}
+        {logs.length === 0 ? (
+          <div style={{ fontSize: 12, color: '#94A3B8', padding: '2px 0 6px' }}>暂无自主分析记录——AI 后台自发分析后结论会出现在这里</div>
+        ) : logs.slice(0, 3).map((l, i) => (
+          <div key={l.id ?? i} style={{ border: '1px solid #E9D5FF', borderRadius: 8, padding: '7px 10px', marginBottom: 6, background: '#FCFAFF' }}
+            title={l.conclusion || l.thoughts || ''}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Tag color={l.status === 'done' ? 'green' : l.status === 'error' ? 'red' : 'processing'} style={{ margin: 0, fontSize: 10 }}>{l.status === 'done' ? '✓' : l.status === 'error' ? '✗' : '…'}</Tag>
+              <b style={{ flex: 1, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.topic || '自主分析'}</b>
+              <span style={{ fontSize: 10.5, color: '#94A3B8', flexShrink: 0 }}>{(l.started_at || l.finished_at || '').slice(5, 16)}</span>
+            </div>
+            {l.conclusion && <div style={{ fontSize: 11.5, color: '#6D28D9', lineHeight: 1.55, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{l.conclusion}</div>}
+          </div>
+        ))}
+        {logs.length > 3 && <a style={{ fontSize: 11.5, color: '#0A84FF' }} onClick={() => onNavigate?.('localAI')}>查看全部（完整思考过程见「本地 AI 助手 → 🧠 自主分析」）→</a>}
+      </div>
+    );
+  }
 
   return (
     <div className="content-card" style={{ marginBottom: 16 }}>

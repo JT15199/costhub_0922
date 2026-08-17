@@ -5,7 +5,7 @@ import { Button, Tag } from 'antd';
 import { SyncOutlined, RobotOutlined } from '@ant-design/icons';
 import { runDailyBrief, type BriefResult } from '../dailyBrief';
 
-export default function DailyBrief({ onNavigate, compact }: { onNavigate?: (page: string) => void; compact?: boolean }) {
+export default function DailyBrief({ onNavigate, compact, inline }: { onNavigate?: (page: string) => void; compact?: boolean; inline?: boolean }) {
   const [state, setState] = useState<'loading' | 'done'>('loading');
   const [res, setRes] = useState<BriefResult | null>(null);
   const [genAt, setGenAt] = useState('');
@@ -30,6 +30,20 @@ export default function DailyBrief({ onNavigate, compact }: { onNavigate?: (page
     : res.source === 'model' ? <Tag color="blue" style={{ margin: 0, fontSize: 10.5, lineHeight: '18px' }}>本地模型 {res.model}</Tag>
     : res.source === 'cache' ? <Tag style={{ margin: 0, fontSize: 10.5, lineHeight: '18px' }}>今日已生成（缓存）</Tag>
     : <Tag style={{ margin: 0, fontSize: 10.5, lineHeight: '18px' }}>规则速览 · 本地模型未连接</Tag>;
+
+  // inline：驾驶舱标题行内的紧凑单行速览（悬停看全文）
+  if (inline) {
+    const text = state === 'loading' ? 'AI 正在整理今日速览…' : (res?.text || '');
+    return (
+      <span title={state === 'done' ? res?.text : ''} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--color-text-secondary)', maxWidth: '48vw', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'default', minWidth: 0 }}>
+        <RobotOutlined style={{ color: '#0A84FF', fontSize: 12, flexShrink: 0 }} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{text}</span>
+        {state === 'done' && (
+          <a style={{ fontSize: 11, flexShrink: 0, color: '#0A84FF' }} onClick={(e) => { e.stopPropagation(); onNavigate?.('localAI'); }}>活动记录</a>
+        )}
+      </span>
+    );
+  }
 
   return (
     <div style={{

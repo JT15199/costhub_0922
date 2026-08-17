@@ -14,7 +14,8 @@ import { getAuditFindings, markAuditRead, dismissAuditFinding, getRecentPartPric
 import { getAdvisorInsights } from '../db/advisor';
 import { getDailyCloudUsage } from '../db/settings';
 import { runAutoAudit } from '../autoAudit';
-import AIWorkspace from '../components/AIWorkspace';
+import AIStatusBar from '../components/AIStatusBar';
+import DailyBrief from '../components/DailyBrief';
 import AutoThinkPanel from '../components/AutoThinkPanel';
 import KeyMaterialInsights from '../components/KeyMaterialInsights';
 
@@ -52,7 +53,6 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   // 折叠控制
   const [costOpen, setCostOpen] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
-  const [targetOpen, setTargetOpen] = useState(false);   // 目标成本达成：默认 3 条
   const [advisorMore, setAdvisorMore] = useState(false); // AI 自主建议：默认 3 条
   // 洞察直达：objects 里匹配项目代号 → 项目页；器件名 → 器件库搜索
   const goToAuditObject = (f: any) => {
@@ -181,6 +181,17 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
 
   // 未达标领域（按差额排序，最严重在前）
   const missedSorted = [...missed].sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+  // 目标成本达成（项目维度，2026-08-17 简化）：每项目聚合未达标领域 + 最差达成率
+  const missedByProject = (() => {
+    const map = new Map<number, { projectId: number; code: string; domains: string[]; worstDomain: string; worstRate: number }>();
+    missedSorted.forEach(t => {
+      const m = map.get(t.projectId) || { projectId: t.projectId, code: t.code, domains: [], worstDomain: t.domain, worstRate: t.rate };
+      m.domains.push(t.domain);
+      if (t.rate < m.worstRate) { m.worstRate = t.rate; m.worstDomain = t.domain; }
+      map.set(t.projectId, m);
+    });
+    return [...map.values()];
+  })();
 
   // ⚠️ 图表优化（2026-08-16，按 ui-ux-pro-max 图表选型）：比较类柱状图必须降序排列（类别比较核心洞察是排序），
   // 颜色统一品牌主色系（比较场景禁止每柱彩虹色——skill: same hue family），最高值同色系深色高亮
@@ -223,101 +234,72 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
 
   return (
     <div>
-      <div className="page-title"><BarChartOutlined /> 驾驶舱</div>
-
-      {/* ===== AI 工作台（一张卡：状态条 + 今日速览） ===== */}
-      <AIWorkspace onNavigate={onNavigate} />
-
-      {/* ===== AI 自主分析（后台自发思考，过程实时呈现） ===== */}
-      <AutoThinkPanel />
+      {/* ===== 标题行：驾驶舱 + 今日速览（紧凑单行）+ AI 连接状态 ===== */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+        <div className="page-title" style={{ marginBottom: 0 }}><BarChartOutlined /> 驾驶舱</div>
+        <DailyBrief onNavigate={onNavigate} inline />
+        <span style={{ marginLeft: 'auto' }}><AIStatusBar onNavigate={onNavigate} compact /></span>
+      </div>
 
             {/* ===== 状态仪表：一眼扫出哪里需要我 ===== */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 14 }}>
         <div onClick={() => onNavigate?.('projects')} style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 12, padding: '12px 14px', cursor: onNavigate ? 'pointer' : 'default', transition: 'box-shadow 150ms ease-out, transform 150ms ease-out' }}>
           <div style={{ fontSize: 11, color: '#94A3B8', display: 'flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="🎯" /> 目标预警</div>
           <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: missedSorted.length > 0 ? '#DC2626' : '#16A34A' }}>{missedSorted.length}</div>
-          <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>{missedSorted.length > 0 ? '个领域未达标' : '全部达标'}</div>
+          <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>{missedSorted.length > 0 ? '未达标' : '全部达标'}</div>
         </div>
         <div onClick={() => onNavigate?.('localAI')} style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 12, padding: '12px 14px', cursor: onNavigate ? 'pointer' : 'default', transition: 'box-shadow 150ms ease-out, transform 150ms ease-out' }}>
           <div style={{ fontSize: 11, color: '#94A3B8', display: 'flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="🤖" /> AI 建议</div>
           <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: advisorInsights.length > 0 ? '#D97706' : '#16A34A' }}>{advisorInsights.length}</div>
-          <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>待处理{advisorInsights.length > 0 ? ' · 见本地 AI 页' : ' · 无'}</div>
+          <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>{advisorInsights.length > 0 ? '待处理' : '无'}</div>
         </div>
         <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 12, padding: '12px 14px' }}>
           <div style={{ fontSize: 11, color: '#94A3B8', display: 'flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="📈" /> 成本变动</div>
           <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: (snapshotChanges.length + recentPriceChanges.length) > 0 ? '#2563EB' : '#16A34A' }}>{snapshotChanges.length + recentPriceChanges.length}</div>
-          <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>项近期变动</div>
+          <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>近期变动</div>
         </div>
         <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 12, padding: '12px 14px' }}>
           <div style={{ fontSize: 11, color: '#94A3B8', display: 'flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="🛡" /> 安全状态</div>
           <div style={{ fontSize: 16, fontWeight: 800, marginTop: 6, color: '#16A34A', display: 'flex', alignItems: 'center', gap: 5 }}><EmojiIcon e="✓" /> 受控</div>
-          <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>审计留痕 · 永不外传敏感</div>
+          <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>本地处理 · 审计留痕</div>
         </div>
         <div onClick={() => onNavigate?.('localAI')} style={{ background: 'var(--color-surface)', border: '1px solid ' + (cloudUsage.count >= cloudLimit ? '#FECACA' : '#E8ECF1'), borderRadius: 12, padding: '12px 14px', cursor: onNavigate ? 'pointer' : 'default', transition: 'box-shadow 150ms ease-out, transform 150ms ease-out' }}>
           <div style={{ fontSize: 11, color: '#94A3B8', display: 'flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="☁" /> 云端用量</div>
           <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: cloudUsage.count >= cloudLimit ? '#DC2626' : '#16A34A' }}>{cloudUsage.count}<span style={{ fontSize: 12, color: '#94A3B8' }}>/{cloudLimit}</span></div>
-          <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>{cloudUsage.count >= cloudLimit ? '已达今日上限' : (cloudUsage.tokens > 0 ? cloudUsage.tokens.toLocaleString() + ' token' : '今日未调用')}</div>
+          <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 2 }}>{cloudUsage.count >= cloudLimit ? '已达上限' : (cloudUsage.tokens > 0 ? cloudUsage.tokens.toLocaleString() + ' token' : '未调用')}</div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14, marginBottom: 14 }}>
-{/* ===== ① 目标成本达成（最显眼） ===== */}
-      <div className="content-card" style={{ marginBottom: 16, border: missedSorted.length > 0 ? '1.5px solid #FF4D4F' : '1px solid #E2E8F0', background: missedSorted.length > 0 ? 'linear-gradient(180deg, #FFF7F7 0%, #FFFFFF 100%)' : undefined }}>
-        <div className="card-header">
-          <h3><AimOutlined style={{ color: '#CF0A2C' }} /> 目标成本达成</h3>
-          <span style={{ fontSize: 12, color: '#94A3B8' }}>
-            {missedSorted.length > 0
-              ? <Tag color="red">未达标 {summary.missedProjects} 个项目 / {summary.missedDomains} 个领域</Tag>
-              : <Tag color="green">全部达标</Tag>}
-            {summary.targetedProjects > 0 && <Tag style={{ marginLeft: 6 }}>{summary.targetedProjects} 个项目已设目标</Tag>}
-          </span>
-        </div>
-
-        {missedSorted.length > 0 ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10 }}>
-            {missedSorted.slice(0, targetOpen ? missedSorted.length : 3).map(t => (
-              <div key={`${t.projectId}-${t.domain}`} onClick={() => goProject(onNavigate, t.projectId)}
-                style={{ border: '1px solid #FECACA', background: '#FFF5F5', borderRadius: 10, padding: '10px 14px', cursor: 'pointer', transition: 'box-shadow 0.2s' }}
-                onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(239,68,68,0.15)'; }}
-                onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <b style={{ fontSize: 14, color: '#DC2626' }}>{t.code}</b>
-                  <Tag color={getCategoryColor(t.domain)} style={{ margin: 0 }}>{t.domain}</Tag>
-                  <span style={{ marginLeft: 'auto', fontSize: 12, color: '#DC2626', fontWeight: 600 }}>达成率 {t.rate}%</span>
-                </div>
-                <div style={{ fontSize: 12.5, color: '#374151', display: 'flex', justifyContent: 'space-between' }}>
-                  <span>目标 <b style={{ color: '#2563EB' }}>¥{t.target.toFixed(2)}</b></span>
-                  <span>实际 <b style={{ color: '#DC2626' }}>¥{t.actual.toFixed(2)}</b></span>
-                  <span style={{ color: '#EF4444', fontWeight: 600 }}>超 ¥{t.diff.toFixed(2)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* ===== 目标成本达成（项目维度紧凑条） ===== */}
+      <div className="content-card" style={{ marginBottom: 14, padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <b style={{ fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 5 }}><AimOutlined style={{ color: '#CF0A2C' }} /> 目标成本达成</b>
+        {missedSorted.length === 0 ? (
+          <Tag color="green" style={{ margin: 0 }}>{summary.targetedProjects > 0 ? '全部达标' : '尚未设定目标'}</Tag>
         ) : (
-          <div style={{ padding: '6px 2px', fontSize: 13, color: '#10B981' }}>
-            {summary.targetedProjects > 0 ? '✓ 所有已设目标的领域均达成（实际 ≤ 目标）' : '尚未设定目标成本'}
-          </div>
+          <>
+            <Tag color="red" style={{ margin: 0 }}>{missedByProject.length} 项目未达标</Tag>
+            {missedByProject.map(m => (
+              <span key={m.projectId} onClick={() => goProject(onNavigate, m.projectId)}
+                title={m.domains.join('、') + ' 未达标'}
+                style={{ border: '1px solid #FECACA', background: '#FFF5F5', borderRadius: 20, padding: '2px 10px', fontSize: 12, cursor: 'pointer' }}>
+                {m.code} · 最差 {m.worstDomain}（达成 {m.worstRate}%）
+              </span>
+            ))}
+          </>
         )}
-        {missedSorted.length > 3 && (
-          <a onClick={() => setTargetOpen(o => !o)} style={{ display: 'inline-block', marginTop: 8, fontSize: 12, color: '#0A84FF' }}>
-            {targetOpen ? '收起 ▲' : '展开全部（' + (missedSorted.length - 3) + ' 条）▼'}
-          </a>
-        )}
-
         {summary.untargetedProjects > 0 && (
-          <div style={{ marginTop: 10, padding: '8px 12px', background: '#FFF7E6', border: '1px solid #FFE7BA', borderRadius: 8, fontSize: 12.5, color: '#B45309', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <AlertOutlined />
-            <span>{summary.untargetedProjects} 个项目尚未设定目标成本（在研项目建议先在「项目管理 → 成本分析」设定领域目标，驾驶舱才会预警）</span>
-            <span style={{ marginLeft: 'auto' }}><a onClick={() => onNavigate?.('projects')}>前往设定 →</a></span>
-          </div>
+          <span style={{ marginLeft: 'auto', fontSize: 11.5, color: '#B45309', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <AlertOutlined /> {summary.untargetedProjects} 项目未设目标
+            <a onClick={() => onNavigate?.('projects')}>前往设定 →</a>
+          </span>
         )}
       </div>
 
-{/* ===== 关键物料洞察（与目标成本达成并排，紧凑） ===== */}
-      <KeyMaterialInsights onNavigate={onNavigate} compact />
+      {/* ===== 第二行：左=关键物料洞察 | 右=AI 洞察建议（合并自主分析结论） ===== */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 14, marginBottom: 14 }}>
+        <KeyMaterialInsights onNavigate={onNavigate} compact />
 
-      {/* ===== ③ AI 洞察建议（本地模型：机会点/占比意见/思路——这才叫 AI；占满整行） ===== */}
-      <div className="content-card" style={{ marginBottom: 16, gridColumn: '1 / -1' }}>
+        <div className="content-card" style={{ marginBottom: 0 }}>
         <div className="card-header">
           <h3><RobotOutlined style={{ color: '#0A84FF' }} /> AI 洞察建议</h3>
           <span style={{ fontSize: 12, color: '#94A3B8' }}>
@@ -328,6 +310,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           </span>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* 🧠 自主分析结论（合并：AI 后台自发分析结果） */}
+          <AutoThinkPanel mode="inline" onNavigate={onNavigate} />
           {/* 自主建议（AI 助理后台分析） */}
           <div style={{ border: '1px solid #E8ECF1', borderRadius: 10, padding: '10px 12px', background: '#FAFBFC' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
