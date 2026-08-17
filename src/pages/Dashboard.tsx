@@ -10,7 +10,7 @@ import DataTable from '../components/DataTable';
 import type { DashboardStats } from '../types';
 import { chartTooltip, chartAxisStyle, chartGrid, chartTextMuted, barGradient } from '../chartTheme';
 import { computeTargetStatuses, summarizeTargets, detectSnapshotChanges, type TargetStatus } from '../targetInsight';
-import { getAuditFindings, markAuditRead, dismissAuditFinding, getRecentPartPriceChanges } from '../auditStore';
+import { getAuditFindings, getRecentPartPriceChanges } from '../auditStore';
 import { getAdvisorInsights } from '../db/advisor';
 import { getDailyCloudUsage } from '../db/settings';
 import { runAutoAudit } from '../autoAudit';
@@ -27,6 +27,11 @@ interface DashboardProps {
 function goProject(onNavigate: ((key: string) => void) | undefined, pid: number) {
   onNavigate?.('projects');
   window.dispatchEvent(new CustomEvent('costhub-open-project', { detail: { pid } }));
+}
+// 打开 AI 情报中心（项目页弹窗：报价差异/自主建议/巡检发现 统一处理，2026-08-17）
+function openAiCenter(onNavigate: ((key: string) => void) | undefined) {
+  onNavigate?.('projects');
+  window.dispatchEvent(new CustomEvent('costhub-open-insights'));
 }
 
 export default function Dashboard({ onNavigate }: DashboardProps) {
@@ -52,26 +57,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [cloudLimit, setCloudLimit] = useState(50);
   // 折叠控制
   const [costOpen, setCostOpen] = useState(false);
-  const [auditOpen, setAuditOpen] = useState(false);
-  const [advisorMore, setAdvisorMore] = useState(false); // AI 自主建议：默认 3 条
   // 洞察直达：objects 里匹配项目代号 → 项目页；器件名 → 器件库搜索
-  const goToAuditObject = (f: any) => {
-    let objs: string[] = [];
-    try { objs = JSON.parse(f.objects || '[]'); } catch { /* ignore */ }
-    for (const o of objs) {
-      const p = projects.find((x: any) => x.code === o);
-      if (p) { goProject(onNavigate, p.id); return; }
-    }
-    for (const o of objs) {
-      const s = String(o || '');
-      if (s && !s.startsWith('part:') && !s.includes('模块') && s !== '未归类') {
-        onNavigate?.('parts');
-        window.dispatchEvent(new CustomEvent('costhub-open-part', { detail: { search: s } }));
-        return;
-      }
-    }
-    onNavigate?.('projects');
-  };
+
 
   useEffect(() => {
     (async () => {
@@ -312,81 +299,20 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
           {/* 🧠 自主分析结论（合并：AI 后台自发分析结果） */}
           <AutoThinkPanel mode="inline" onNavigate={onNavigate} />
-          {/* 自主建议（AI 助理后台分析） */}
-          <div style={{ border: '1px solid #E8ECF1', borderRadius: 10, padding: '10px 12px', background: '#FAFBFC' }}>
+          {/* 📋 待处理事项（统一入口：AI 情报中心——报价差异/自主建议/巡检发现） */}
+          <div style={{ border: '1px solid #E8ECF1', borderRadius: 10, padding: '8px 12px', background: '#FAFBFC', marginTop: 'auto' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
               <RobotOutlined style={{ color: '#0A84FF' }} />
-              <b style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="🤖" /> 自主建议</b>
-              {advisorInsights.length > 0 && <Tag color="purple" style={{ margin: 0 }}>{advisorInsights.length} 条待处理</Tag>}
+              <b style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 4 }}>📋 待处理事项</b>
+              <span style={{ flex: 1 }} />
+              <a style={{ fontSize: 11.5, color: '#0A84FF' }} onClick={() => openAiCenter(onNavigate)}>前往处理 →</a>
             </div>
-            {advisorInsights.length === 0 ? (
-              <div style={{ fontSize: 12, color: '#94A3B8', padding: '8px 0' }}>暂无建议——系统空闲时自动分析成本机会/风险点，有新发现会在这里提醒</div>
-            ) : (
-              <>
-                {advisorInsights.slice(0, advisorMore ? advisorInsights.length : 2).map((a: any) => (
-                  <div key={a.id} style={{ padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: 12 }}>
-                    <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.title}</div>
-                    <div style={{ color: '#64748B', fontSize: 11.5, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.detail}</div>
-                  </div>
-                ))}
-                {advisorInsights.length > 2 && (
-                  <div style={{ marginTop: 4, textAlign: 'center' }}>
-                    <a onClick={() => setAdvisorMore(m => !m)} style={{ fontSize: 12, color: '#0A84FF' }}>
-                      {advisorMore ? '收起 ▲' : '展开全部（' + (advisorInsights.length - 2) + ' 条）▼'}
-                    </a>
-                  </div>
-                )}
-                <div style={{ marginTop: 6, textAlign: 'center' }}>
-                  <a onClick={() => onNavigate?.('localAI')} style={{ fontSize: 12, color: '#0A84FF' }}>查看全部（处理 / 洞察 / 复制提示词）→</a>
-                </div>
-              </>
-            )}
-          </div>
-          {/* 右：AI 巡检发现 */}
-          <div>
-        {(() => {
-          const unreadFindings = auditFindings.filter((f: any) => f.status === 'unread');
-          return unreadFindings.length > 0 ? (
-          <div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {(auditOpen ? unreadFindings : unreadFindings.slice(0, 1)).map((f: any) => (
-                <div key={f.id} onClick={() => goToAuditObject(f)}
-                  style={{ padding: '10px 14px', background: f.level === 'warn' ? '#FFFBEB' : '#F0F7FF', border: f.level === 'warn' ? '1px solid #FDE68A' : '1px solid #BFDBFE', borderRadius: 10, cursor: 'pointer', transition: 'box-shadow 0.2s' }}
-                  onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(10,132,255,0.12)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; }}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4 }}>
-                    <Tag color={f.level === 'warn' ? 'orange' : 'blue'} style={{ margin: 0, flexShrink: 0, fontSize: 11 }}>{f.source === 'ai' ? 'AI 洞察' : '规则发现'}</Tag>
-                    <b style={{ fontSize: 13, color: '#1F2937' }}>{f.title}</b>
-                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94A3B8', flexShrink: 0 }}>点击直达 →</span>
-                    {f.status === 'unread' ? (
-                      <a style={{ fontSize: 11.5, flexShrink: 0 }} onClick={(e) => { e.stopPropagation(); markAuditRead(f.id); setAuditFindings((prev: any[]) => prev.map((x: any) => x.id === f.id ? { ...x, status: 'read' } : x)); }}>标记已读</a>
-                    ) : (
-                      <a style={{ fontSize: 11.5, flexShrink: 0, color: '#94A3B8' }} onClick={(e) => { e.stopPropagation(); dismissAuditFinding(f.id); setAuditFindings((prev: any[]) => prev.filter((x: any) => x.id !== f.id)); }}>忽略</a>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 12, color: '#4B5563', lineHeight: 1.7 }}>{f.detail}</div>
-                  {f.suggestion && (
-                    <div style={{ marginTop: 6, padding: '6px 10px', background: '#EEF2FF', border: '1px solid #C7D2FE', borderRadius: 8, fontSize: 12, color: '#3730A3', lineHeight: 1.6 }}>
-                      <b style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><EmojiIcon e="💡" /> 建议：</b>{f.suggestion}
-                    </div>
-                  )}
-                </div>
-              ))}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Tag color="blue" style={{ margin: 0, cursor: 'pointer' }} onClick={() => openAiCenter(onNavigate)}>📊 报价差异 {unreadInsights.length}</Tag>
+              <Tag color="purple" style={{ margin: 0, cursor: 'pointer' }} onClick={() => openAiCenter(onNavigate)}>💡 自主建议 {advisorInsights.length}</Tag>
+              <Tag color="orange" style={{ margin: 0, cursor: 'pointer' }} onClick={() => openAiCenter(onNavigate)}>🔍 巡检发现 {auditFindings.filter((x: any) => x.status === 'unread').length}</Tag>
             </div>
-            {unreadFindings.length > 1 && (
-              <div style={{ marginTop: 6, textAlign: 'center' }}>
-                <a onClick={() => setAuditOpen(o => !o)} style={{ fontSize: 11.5, color: '#0A84FF' }}>
-                  {auditOpen ? '收起 ▲' : '展开全部（' + (unreadFindings.length - 1) + ' 条）▼'}
-                </a>
-              </div>
-            )}
-          </div>
-          ) : (
-          <div style={{ padding: '6px 2px', fontSize: 13, color: '#94A3B8' }}>
-            暂无待处理洞察。已标记已读/忽略的发现不再提示；若问题内容发生变化（如占比升高、新增情报）会作为新情况重新提醒。
-          </div>
-          );
-        })()}
+            <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 5 }}>三类 AI 情报统一处理：报价差异确认 / 建议处理 / 巡检已读</div>
           </div>
         </div>
       </div>

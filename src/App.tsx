@@ -91,7 +91,15 @@ export default function App() {
   const [insightCount, setInsightCount] = useState(0);
   const autoRunningRef = useRef(false);
   const refreshInsightCount = useCallback(async () => {
-    try { setInsightCount((await getInsights()).filter(i => i.status === 'unread').length); } catch { /* 忽略 */ }
+    try {
+      // AI 情报中心 badge 三合一（2026-08-17）：报价差异未读 + 自主建议待处理 + 巡检发现未读
+      const ins = (await getInsights()).filter((i: any) => i.status === 'unread').length;
+      const { getAdvisorInsights } = await import('./db/advisor');
+      const adv = (await getAdvisorInsights('open')).length;
+      const { getAuditFindings } = await import('./auditStore');
+      const aud = (await getAuditFindings()).filter((x: any) => x.status === 'unread').length;
+      setInsightCount(ins + adv + aud);
+    } catch { /* 忽略 */ }
   }, []);
   useEffect(() => { refreshInsightCount(); }, [refreshInsightCount]);
   const scheduleAppCompare = useCallback(() => {
@@ -419,13 +427,13 @@ export default function App() {
           ))}
 </nav>
 
-        {/* 报价情报（后台自动识别的报价差异提醒）——全局入口，任何页面可见 */}
+        {/* AI 情报中心（报价差异/自主建议/巡检发现 统一处理）——全局入口，任何页面可见 */}
         <div onClick={openInsightsEntry}
           style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 12.5, color: 'var(--color-text-secondary)', borderTop: '1px solid var(--color-border)', userSelect: 'none' }}
           onMouseEnter={e => { e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
           onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
           <BulbOutlined style={{ color: insightCount > 0 ? '#D97706' : 'var(--color-text-tertiary)' }} />
-          <span>报价情报</span>
+          <span>AI 情报</span>
           {insightCount > 0 && <Badge count={insightCount} size="small" style={{ marginLeft: 'auto' }} />}
         </div>
 

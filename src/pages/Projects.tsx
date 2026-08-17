@@ -25,6 +25,8 @@ function appendProjectCode(existing: string | undefined, code: string): string {
 import DataTable, { ColumnSettingsButton } from '../components/DataTable';
 import { chartTooltip, chartAxisStyle, chartTextMuted, chartSplitLine, barGradient } from '../chartTheme';
 import { runAiIdentifyOnce, buildRuleGroups, moduleFingerprint, partKey, buildInsights } from '../autoCompare';
+import { getAdvisorInsights, updateAdvisorStatus } from '../db/advisor';
+import { getAuditFindings, markAuditRead, dismissAuditFinding } from '../auditStore';
 
 export default function Projects() {
   const [projects, setProjects] = useState<any[]>([]);
@@ -326,6 +328,11 @@ export default function Projects() {
   };
   // ====== 报价情报（后台识别由 App 级驱动：空闲/导入/改价自动扫描，发现问题在此提醒） ======
   const [insightModal, setInsightModal] = useState(false);
+  // AI 情报中心（2026-08-17 用户要求统一）：报价差异 / 自主建议 / 巡检发现 三个 tab
+  const [aiTab, setAiTab] = useState<'diff' | 'advice' | 'audit'>('diff');
+  const [adviceList, setAdviceList] = useState<any[]>([]);
+  const [adviceShowDone, setAdviceShowDone] = useState(false);
+  const [auditList, setAuditList] = useState<any[]>([]);
   const [insights, setInsights] = useState<any[]>([]);
   const [insightView, setInsightView] = useState<'pending' | 'all' | 'done'>('pending'); // 待处理/全部/已处理
   const [insightSelected, setInsightSelected] = useState<Set<number>>(new Set()); // 批量选择（模块 id）
@@ -350,8 +357,12 @@ export default function Projects() {
     scheduleAutoCompare(); // 打开项目页立即触发一次（App 空闲监听会继续兜底）
     const onDone = () => loadInsights(); // 识别完成刷新情报红点
     window.addEventListener('costhub-compare-done', onDone);
-    // 侧边栏「报价情报」入口点击 → 打开弹窗
-    const onOpen = () => { loadInsights(); setInsightModal(true); };
+    // 侧边栏「报价情报」入口点击 → 打开弹窗（同时加载自主建议/巡检，2026-08-17 AI 情报中心）
+    const loadAiCenter = async () => {
+      try { setAdviceList(await getAdvisorInsights()); } catch { setAdviceList([]); }
+      try { setAuditList(await getAuditFindings()); } catch { setAuditList([]); }
+    };
+    const onOpen = () => { loadInsights(); loadAiCenter(); setInsightModal(true); };
     window.addEventListener('costhub-open-insights', onOpen);
     // 仪表盘驾驶舱「直达」→ 自动选中项目（costhub-open-project，detail: { pid }）
     const onOpenProject = (e: Event) => {
@@ -3066,8 +3077,67 @@ export default function Projects() {
       </Modal>
 
       {/* ====== 报价情报弹窗（后台自动识别发现的问题） ====== */}
-      <Modal title={<span><BulbOutlined /> 报价情报（AI 后台自动识别）</span>} open={insightModal} onCancel={() => setInsightModal(false)} footer={null} width={820}
+      <Modal title={<span><BulbOutlined /> AI 情报中心（报价差异 · 自主建议 · 巡检发现）</span>} open={insightModal} onCancel={() => setInsightModal(false)} footer={null} width={820}
         styles={{ body: { maxHeight: '72vh', overflow: 'auto' } }}>
+        <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <Segmented size="small" value={aiTab} onChange={(v: any) => setAiTab(v as any)}
+            options={[{ label: '📊 报价差异', value: 'diff' }, { label: '💡 自主建议', value: 'advice' }, { label: '🔍 巡检发现', value: 'audit' }]} />
+          <span style={{ fontSize: 11.5, color: '#94A3B8' }}>
+            {aiTab === 'diff' ? '跨项目同物料报价差异（确认/标记/归档）' : aiTab === 'advice' ? '成本机会/风险点（后台规则发现 + AI 润色）' : '数据质量与风险检查（可标记已读/忽略）'}
+          </span>
+        </div>
+        {aiTab === 'advice' && (
+          <div>
+            <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Button size="small" type={adviceShowDone ? 'default' : 'primary'} onClick={() => setAdviceShowDone(!adviceShowDone)}>
+                {adviceShowDone ? '显示全部' : '仅看待处理'}{(() => { const c = adviceList.filter((x: any) => x.status !== 'open').length; return c > 0 ? `（已处理 ${c}）` : ''; })()}
+              </Button>
+              <span style={{ fontSize: 11.5, color: '#94A3B8' }}>处理入口与完整详情见「本地 AI 助手 → 自主建议」</span>
+            </div>
+            {(() => {
+              const list = adviceShowDone ? adviceList : adviceList.filter((x: any) => x.status === 'open');
+              if (list.length === 0) return <div style={{ textAlign: 'center', padding: 30, color: '#94A3B8', fontSize: 12 }}>暂无建议——系统空闲时自动分析成本机会/风险点</div>;
+              return list.map((a: any) => (
+                <div key={a.id} style={{ border: '1px solid #E9D5FF', borderLeft: '3px solid #7C3AED', borderRadius: 8, padding: '8px 12px', marginBottom: 6, background: a.status === 'open' ? 'var(--color-surface, #fff)' : '#FAFAFA', opacity: a.status === 'open' ? 1 : 0.7 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <b style={{ fontSize: 12.5, flex: 1, minWidth: 0 }}>{a.title}</b>
+                    <Tag color="purple" style={{ margin: 0, fontSize: 10.5 }}>自主建议</Tag>
+                    {a.status !== 'open' && <Tag style={{ margin: 0, fontSize: 10.5 }} color={a.status === 'done' ? 'green' : 'default'}>{a.status === 'done' ? '已处理' : '已忽略'}</Tag>}
+                    <span style={{ fontSize: 11, color: '#94A3B8' }}>{(a.created_at || '').slice(0, 16)}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: '#64748B', lineHeight: 1.6, marginTop: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{a.detail}</div>
+                  {a.status === 'open' && (
+                    <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
+                      <Button size="small" type="primary" onClick={async () => { try { await updateAdvisorStatus(a.id, 'done'); window.dispatchEvent(new CustomEvent('costhub-advisor-done')); const r = await getAdvisorInsights(); setAdviceList(r); } catch (e: any) { message.error('操作失败：' + String(e?.message || e)); } }}>✓ 已处理</Button>
+                      <Button size="small" onClick={async () => { try { await updateAdvisorStatus(a.id, 'dismissed'); window.dispatchEvent(new CustomEvent('costhub-advisor-done')); const r = await getAdvisorInsights(); setAdviceList(r); } catch (e: any) { message.error('操作失败：' + String(e?.message || e)); } }}>忽略</Button>
+                    </div>
+                  )}
+                </div>
+              ));
+            })()}
+          </div>
+        )}
+        {aiTab === 'audit' && (
+          <div>
+            {(() => {
+              const list = auditList;
+              if (list.length === 0) return <div style={{ textAlign: 'center', padding: 30, color: '#94A3B8', fontSize: 12 }}>暂无巡检发现——数据无异常时保持安静</div>;
+              return list.map((ft: any) => (
+                <div key={ft.id} style={{ padding: '9px 12px', background: ft.level === 'warn' ? '#FFFBEB' : '#F0F7FF', border: ft.level === 'warn' ? '1px solid #FDE68A' : '1px solid #BFDBFE', borderRadius: 8, marginBottom: 6 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 3 }}>
+                    <Tag color={ft.level === 'warn' ? 'orange' : 'blue'} style={{ margin: 0, flexShrink: 0, fontSize: 10.5 }}>{ft.source === 'ai' ? 'AI 洞察' : '规则发现'}</Tag>
+                    <b style={{ fontSize: 12.5, flex: 1, minWidth: 0 }}>{ft.title}</b>
+                    <a style={{ fontSize: 11.5, flexShrink: 0 }} onClick={async (e) => { e.stopPropagation(); if (ft.status === 'unread') { try { await markAuditRead(ft.id); } catch {} } else { try { await dismissAuditFinding(ft.id); } catch {} } try { setAuditList(await getAuditFindings()); } catch {} }}>{ft.status === 'unread' ? '标记已读' : '忽略'}</a>
+                  </div>
+                  <div style={{ fontSize: 12, color: '#4B5563', lineHeight: 1.6 }}>{ft.detail}</div>
+                  {ft.suggestion && <div style={{ marginTop: 4, fontSize: 11.5, color: '#3730A3' }}><b>💡 建议：</b>{ft.suggestion}</div>}
+                </div>
+              ));
+            })()}
+          </div>
+        )}
+        {aiTab === 'diff' && (
+        <>
         <div style={{ marginBottom: 10, fontSize: 12, color: '#94A3B8' }}>
           导入 BOM 或报价变动后自动后台识别；发现"疑似同物料但报价差异明显"时在此提醒。
           确认同一 → 沉淀别名自动归组（组即消除，不再重现）；标记不同 → AI 永不再建议；归档（已读）→ 移出待处理，可在「全部」查看或恢复。
@@ -3185,6 +3255,8 @@ export default function Projects() {
                 );
               });
         })()}
+        </>
+        )}
       </Modal>
 
     </div>
