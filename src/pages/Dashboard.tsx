@@ -323,16 +323,16 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
               <div style={{ fontSize: 12, color: '#94A3B8', padding: '8px 0' }}>暂无建议——系统空闲时自动分析成本机会/风险点，有新发现会在这里提醒</div>
             ) : (
               <>
-                {advisorInsights.slice(0, advisorMore ? advisorInsights.length : 3).map((a: any) => (
+                {advisorInsights.slice(0, advisorMore ? advisorInsights.length : 2).map((a: any) => (
                   <div key={a.id} style={{ padding: '6px 0', borderBottom: '1px solid #F1F5F9', fontSize: 12 }}>
                     <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.title}</div>
                     <div style={{ color: '#64748B', fontSize: 11.5, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.detail}</div>
                   </div>
                 ))}
-                {advisorInsights.length > 3 && (
-                  <div style={{ marginTop: 6, textAlign: 'center' }}>
+                {advisorInsights.length > 2 && (
+                  <div style={{ marginTop: 4, textAlign: 'center' }}>
                     <a onClick={() => setAdvisorMore(m => !m)} style={{ fontSize: 12, color: '#0A84FF' }}>
-                      {advisorMore ? '收起 ▲' : '展开全部（' + (advisorInsights.length - 3) + ' 条）▼'}
+                      {advisorMore ? '收起 ▲' : '展开全部（' + (advisorInsights.length - 2) + ' 条）▼'}
                     </a>
                   </div>
                 )}
@@ -349,7 +349,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           return unreadFindings.length > 0 ? (
           <div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {(auditOpen ? unreadFindings : unreadFindings.slice(0, 2)).map((f: any) => (
+              {(auditOpen ? unreadFindings : unreadFindings.slice(0, 1)).map((f: any) => (
                 <div key={f.id} onClick={() => goToAuditObject(f)}
                   style={{ padding: '10px 14px', background: f.level === 'warn' ? '#FFFBEB' : '#F0F7FF', border: f.level === 'warn' ? '1px solid #FDE68A' : '1px solid #BFDBFE', borderRadius: 10, cursor: 'pointer', transition: 'box-shadow 0.2s' }}
                   onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(10,132,255,0.12)'; }}
@@ -373,10 +373,10 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                 </div>
               ))}
             </div>
-            {unreadFindings.length > 2 && (
-              <div style={{ marginTop: 8, textAlign: 'center' }}>
-                <a onClick={() => setAuditOpen(o => !o)} style={{ fontSize: 12, color: '#0A84FF' }}>
-                  {auditOpen ? '收起 ▲' : '展开全部（' + (unreadFindings.length - 2) + ' 条）▼'}
+            {unreadFindings.length > 1 && (
+              <div style={{ marginTop: 6, textAlign: 'center' }}>
+                <a onClick={() => setAuditOpen(o => !o)} style={{ fontSize: 11.5, color: '#0A84FF' }}>
+                  {auditOpen ? '收起 ▲' : '展开全部（' + (unreadFindings.length - 1) + ' 条）▼'}
                 </a>
               </div>
             )}

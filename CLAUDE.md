@@ -1,3 +1,6 @@
+### v2.3.19 驾驶舱缩略紧凑化（2026-08-17，用户反馈：缩略时内容对齐/再短一点/只放一两条）
+- 第二行左右列缩略态各只放 1-2 条：关键物料洞察默认 2 条（建议 1 行 clamp，条目 padding 4px 6px）；AutoThinkPanel inline 结论 2 条（结论 1 行，卡片 padding 5px 8px，「查看全部 →」链接）；AI 洞察建议卡内自主建议默认 2 条、巡检发现默认 1 条（展开按钮吸底保持）；统一行高 1.5、字号 11.5-12——缩略时左右卡内部对齐、高度更矮
+- **验证**：tsc -b 0 错；184 vitest 全过
 ### v2.3.19 驾驶舱第二行等高对齐（2026-08-17，用户反馈：卡片只显示一条/两边要对齐）
 - 第二行 grid 加 alignItems stretch；左卡 KeyMaterialInsights compact 外壳 height 100% + flex column（默认显示 4 条，展开按钮 marginTop auto 吸底）；右卡 AI 洞察建议 height 100% + flex column（内容区 flex:1）——左右卡片边框等高，底部按钮对齐；关键物料洞察默认条数 3→4 与右列协调
 - **验证**：tsc -b 0 错；184 vitest 全过

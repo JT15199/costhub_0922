@@ -105,18 +105,18 @@ export default function AutoThinkPanel({ mode = 'summary', onNavigate }: { mode?
         )}
         {logs.length === 0 ? (
           <div style={{ fontSize: 12, color: '#94A3B8', padding: '2px 0 6px' }}>暂无自主分析记录——AI 后台自发分析后结论会出现在这里</div>
-        ) : logs.slice(0, 3).map((l, i) => (
-          <div key={l.id ?? i} style={{ border: '1px solid #E9D5FF', borderRadius: 8, padding: '7px 10px', marginBottom: 6, background: '#FCFAFF' }}
+        ) : logs.slice(0, 2).map((l, i) => (
+          <div key={l.id ?? i} style={{ border: '1px solid #E9D5FF', borderRadius: 8, padding: '5px 8px', marginBottom: 4, background: '#FCFAFF' }}
             title={l.conclusion || l.thoughts || ''}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <Tag color={l.status === 'done' ? 'green' : l.status === 'error' ? 'red' : 'processing'} style={{ margin: 0, fontSize: 10 }}>{l.status === 'done' ? '✓' : l.status === 'error' ? '✗' : '…'}</Tag>
               <b style={{ flex: 1, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.topic || '自主分析'}</b>
               <span style={{ fontSize: 10.5, color: '#94A3B8', flexShrink: 0 }}>{(l.started_at || l.finished_at || '').slice(5, 16)}</span>
             </div>
-            {l.conclusion && <div style={{ fontSize: 11.5, color: '#6D28D9', lineHeight: 1.55, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{l.conclusion}</div>}
+            {l.conclusion && <div style={{ fontSize: 11.5, color: '#6D28D9', lineHeight: 1.5, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical' }}>{l.conclusion}</div>}
           </div>
         ))}
-        {logs.length > 3 && <a style={{ fontSize: 11.5, color: '#0A84FF' }} onClick={() => onNavigate?.('localAI')}>查看全部（完整思考过程见「本地 AI 助手 → 🧠 自主分析」）→</a>}
+        {logs.length > 2 && <a style={{ fontSize: 11.5, color: '#0A84FF' }} onClick={() => onNavigate?.('localAI')}>查看全部 →</a>}
       </div>
     );
   }
