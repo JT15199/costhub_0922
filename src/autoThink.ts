@@ -71,7 +71,7 @@ export async function runAutoThink(opts?: {
       } catch { /* 指纹读取失败不阻断 */ }
     }
     const { listTools } = await import('./aiTools');
-    const { buildThinkSystemPrompt, runThinkLoop } = await import('./thinkEngine');
+    const { buildThinkSystemPrompt, runThinkLoop, cleanProtocolText } = await import('./thinkEngine');
     const { requestCloudConfirm } = await import('./cloudConfirm');
     const { agentSearchLoop } = await import('./trendService');
     const sysPrompt = buildThinkSystemPrompt(listTools().map(t => t.name)) +
@@ -128,13 +128,14 @@ export async function runAutoThink(opts?: {
       },
       maxRounds: opts?.maxRounds ?? 6,
     });
-    // 主题：取结论第一句做标题
-    const firstLine = (finalText || '').split('\n').find((l: string) => l.trim().length > 4) || '自主分析';
+    // 主题：取结论第一句做标题（先清理协议标记）
+    const cleanConcl = cleanProtocolText(finalText || '');
+    const firstLine = cleanConcl.split('\n').find((l: string) => l.trim().length > 4) || '自主分析';
     const topic = firstLine.trim().slice(0, 40);
     await saveThinkLog({
-      id: logId, status: 'done', topic, overview, thoughts: thoughts.join('\n\n---\n'),
+      id: logId, status: 'done', topic, overview, thoughts: cleanProtocolText(thoughts.join('\n\n---\n')),
       tools_json: JSON.stringify(toolsRec), clouds_json: JSON.stringify(cloudsRec),
-      conclusion: finalText, finished_at: new Date().toLocaleString('zh-CN', { hour12: false }),
+      conclusion: cleanConcl, finished_at: new Date().toLocaleString('zh-CN', { hour12: false }),
     });
     try { await setSetting('ai_think_overview_hash', ovHash); } catch { /* 忽略 */ }
     opts?.onEvent?.({ kind: 'done', topic, conclusion: finalText, rounds, clouds: clouds.length });

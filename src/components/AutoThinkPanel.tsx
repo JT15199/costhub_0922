@@ -9,6 +9,7 @@ import { getThinkLogs, type ThinkLog } from '../db/think';
 import { getInsights } from '../db';
 import { getAdvisorInsights } from '../db/advisor';
 import { getQuickTrendItems } from '../db/trend';
+import { cleanProtocolText } from '../thinkEngine';
 
 interface LiveState {
   status: 'running' | 'done' | 'error';
@@ -114,7 +115,7 @@ export default function AutoThinkPanel() {
           {live.thoughts && (
             <div style={{ fontSize: 12, color: '#6D28D9', lineHeight: 1.65, whiteSpace: 'pre-wrap', marginBottom: 6, background: '#FAF5FF', borderRadius: 8, padding: '6px 10px', maxHeight: 140, overflow: 'auto' }}>
               <b style={{ fontSize: 11 }}>💭 思考</b>
-              <div>{live.thoughts}</div>
+              <div>{cleanProtocolText(live.thoughts)}</div>
             </div>
           )}
           {live.tools.map((t, i) => (
@@ -132,7 +133,7 @@ export default function AutoThinkPanel() {
           {(live.answer || live.status === 'done') && (
             <div style={{ fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', marginTop: 6, borderTop: '1px dashed #E9D5FF', paddingTop: 6 }}>
               <b style={{ fontSize: 11, color: '#7C3AED' }}>📌 结论</b>
-              <div>{live.answer || (live.status === 'done' ? '（本轮未输出结论）' : '')}</div>
+              <div>{cleanProtocolText(live.answer) || (live.status === 'done' ? '（本轮未输出结论）' : '')}</div>
             </div>
           )}
         </div>

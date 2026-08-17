@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildThinkSystemPrompt, buildCloudToolDef, buildLocalToolDefs,
   buildCloudReviewPrompt, formatCloudResult, MAX_THINK_ROUNDS,
+  parseProtocolCalls, cleanProtocolText,
 } from '../thinkEngine';
 
 describe('buildThinkSystemPrompt', () => {
@@ -71,6 +72,49 @@ describe('formatCloudResult', () => {
   });
 });
 
+
+describe('parseProtocolCalls（文本协议 v2）', () => {
+  it('解析 [TOOL] 调用（含 JSON 参数）', () => {
+    const calls = parseProtocolCalls('我先看看项目\n[TOOL] query_project_bom {"project_id":3}\n然后分析');
+    expect(calls.length).toBe(1);
+    expect(calls[0].kind).toBe('tool');
+    expect(calls[0].name).toBe('query_project_bom');
+    expect(calls[0].args).toEqual({ project_id: 3 });
+  });
+  it('解析 [CLOUD] 调用', () => {
+    const calls = parseProtocolCalls('[CLOUD] {"material_name":"液晶面板","category":"硬件类","question":"近1-3月价格趋势?"}');
+    expect(calls.length).toBe(1);
+    expect(calls[0].kind).toBe('cloud');
+    expect(calls[0].args.material_name).toBe('液晶面板');
+  });
+  it('JSON 跨行也能解析（括号平衡）', () => {
+    const calls = parseProtocolCalls('[TOOL] query_project_bom {\n  "project_id": 1,\n  "x": {"y": 2}\n}');
+    expect(calls.length).toBe(1);
+    expect(calls[0].args).toEqual({ project_id: 1, x: { y: 2 } });
+  });
+  it('无调用标记返回空', () => {
+    expect(parseProtocolCalls('只是分析，没有调用')).toEqual([]);
+    expect(parseProtocolCalls('')).toEqual([]);
+  });
+  it('非法 JSON 跳过', () => {
+    const calls = parseProtocolCalls('[TOOL] query_project_bom {broken');
+    expect(calls.length).toBe(0);
+  });
+});
+
+describe('cleanProtocolText', () => {
+  it('移除调用标记保留正文', () => {
+    const t = cleanProtocolText('先查数据\n[TOOL] query_project_bom {"project_id":1}\n结论是成本偏高');
+    expect(t).not.toContain('[TOOL]');
+    expect(t).toContain('先查数据');
+    expect(t).toContain('结论是成本偏高');
+  });
+  it('移除 [CLOUD] 标记', () => {
+    const t = cleanProtocolText('[CLOUD] {"material_name":"PCB"}\n需要行情确认');
+    expect(t).not.toContain('[CLOUD]');
+    expect(t).toContain('需要行情确认');
+  });
+});
 describe('MAX_THINK_ROUNDS', () => {
   it('思考循环有上限防失控', () => {
     expect(MAX_THINK_ROUNDS).toBeGreaterThanOrEqual(5);

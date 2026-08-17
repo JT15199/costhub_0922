@@ -1,3 +1,7 @@
+### v2.3.19 自主分析协议 v2 文本协议 + 建表兜底（2026-08-17，用户反馈：对话里自主分析一直无内容 + no such table: ai_think_logs）
+- **① 无内容根因**：v1 用 Ollama 原生 function calling（tools 参数），但 startOllamaStream 默认 format:'json'——**tools 与 format 冲突**（Ollama 会报错/空输出），且本地小模型（qwythos-9b）对 function calling 支持不稳 → 整轮无输出。修复：**改文本协议 v2**——模型在输出中写 `[TOOL] 工具名 {...}` / `[CLOUD] {...}` 标记行，前端 parseProtocolCalls（括号平衡扫描，支持 JSON 跨行/嵌套）解析执行并回填 `[RESULT]`；不依赖模型 function calling；startOllamaStream 显式 json:false（自由文本）；渲染/存库时 cleanProtocolText 去掉标记；新增 7 个协议测试
+- **② no such table 根因**：ensureSchema 仅启动时执行一次，旧库/热更场景表可能缺失。修复：db/think.ts 运行时兜底 ensureThinkTable()（CREATE TABLE IF NOT EXISTS，模块级缓存标志），saveThinkLog/getThinkLogs/getRunningThinkLog 每次访问前确保
+- **验证**：tsc -b 0 错；184 vitest 全过（17 文件）
 ### v2.3.19 autoThink 避免重复思考（2026-08-17，用户问：思考循环如何避免重复思考）——三层去重
 - **① 轮内去重**（thinkEngine runThinkLoop）：同一轮循环中相同 工具+参数 只执行一次（callCache）——重复调用直接回填上次结果并提示模型结果未变化不要重复调用；重复的云端申请也不重复弹审批
 - **② 轮间去重**（autoThink）：数据概览（buildThinkOverview 输出）指纹 hashString 存 settings ai_think_overview_hash——**数据无变化 → 本轮跳过**（事件 kind=skipped，面板显示「数据无变化，复用上轮结论」），数据一变立即重新分析；手动「现在分析一轮」带 force 强制

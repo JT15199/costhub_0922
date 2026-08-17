@@ -17,6 +17,7 @@ import { getDb, saveProject, getModuleRules, saveModuleRule, deleteModuleRule, c
 import { MAIN_CATEGORIES } from '../constants';
 import { startOllamaStream, logLocalAICall } from '../ollama';
 import { toolIcon } from '../aiTools';
+import { cleanProtocolText } from '../thinkEngine';
 import { getAdvisorInsights, updateAdvisorStatus, getRecentBridgeLog, materialKey } from '../db/advisor';
 import { getDailyCloudUsage } from '../db/settings';
 import { runAutoAdvisor } from '../autoAdvisor';
@@ -2165,7 +2166,7 @@ return (
                   <div style={{ border: '1px dashed #C7D2FE', borderRadius: 10, padding: '8px 12px', marginBottom: 8, background: '#F8FAFF' }}>
                     <div style={{ fontSize: 11, color: '#6366F1', fontWeight: 600, marginBottom: 4 }}>💭 思考过程{thinkRun.status === 'running' ? '（实时）' : ''}</div>
                     {thinkRun.thoughts.map((t, ti) => (t || '').trim() ? (
-                      <div key={ti} style={{ fontSize: 12, color: '#64748B', lineHeight: 1.65, whiteSpace: 'pre-wrap', marginBottom: 4 }}>{t}</div>
+                      <div key={ti} style={{ fontSize: 12, color: '#64748B', lineHeight: 1.65, whiteSpace: 'pre-wrap', marginBottom: 4 }}>{cleanProtocolText(t)}</div>
                     ) : null)}
                   </div>
                 )}
@@ -2193,7 +2194,7 @@ return (
                 <div style={{ border: '1px solid var(--color-border)', borderRadius: 10, padding: '10px 14px', background: 'var(--color-surface)', fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                   {thinkRun.status === 'error'
                     ? <span style={{ color: '#DC2626' }}>分析失败：{thinkRun.error}</span>
-                    : thinkRun.answer || (thinkRun.status === 'done' ? '（未输出结论）' : (
+                    : cleanProtocolText(thinkRun.answer) || (thinkRun.status === 'done' ? '（未输出结论）' : (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Spin size="small" /> 正在思考…</span>
                     ))}
                 </div>
