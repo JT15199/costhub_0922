@@ -1,3 +1,9 @@
+### v2.3.19 后台自主思考引擎 autoThink（2026-08-17，用户澄清：不是用户指挥的分析，而是 AI 自发的分析，并把过程呈现出来；现有比价/巡检/洞察都算它思考的一部分）
+- **调度**（App.tsx scheduleAppThink）：启动立即一轮 + 每 15 分钟一轮 + 数据变更事件（costhub-compare-request）后 5 分钟节流触发；防重入（模块级 + running 日志兜底）
+- **引擎**（src/autoThink.ts）：buildThinkOverview 收集本地概览（项目/BOM 成本/报价情报/自主建议数）→ 复用 runThinkLoop（Ollama 原生 function calling，≤6 轮）→ 模型自主决定深挖方向（工具核实）→ 需要行情时 cloud_market_query → **requestCloudConfirm 审批**（preview 挂底部横幅队列，auto 放行；确认过的物料会话内放行）→ 输出 200-400 字结论（发现/判断/建议）→ 落库 ai_think_logs（thoughts/tools_json/clouds_json/conclusion）→ 广播 costhub-think-event 实时呈现
+- **呈现**（src/components/AutoThinkPanel.tsx，驾驶舱 AIWorkspace 下方）：顶部汇总现有后台引擎状态（报价情报 N 待处理/自主建议 N/物料洞察 N 类——即它思考的一部分）+ 实时区（进行中的一轮：💭 思考流 / 🔧 工具卡 / 🔐 云端申请（等待审批提示） / 📌 结论，事件驱动流式）+ 历史时间线（ai_think_logs 可展开看完整思考/工具/云端/结论）+「现在分析一轮」手动触发
+- **复用**：thinkEngine.ts 抽通用 runThinkLoop（ThinkEventHandlers/ThinkLoopOptions）——前端「🧠 自主分析」sendThinkTask 与后台 autoThink 共用同一循环协议（buildLocalToolDefs/buildCloudToolDef/审批/云端执行器注入）
+- **验证**：tsc -b 0 错；177 vitest 全过
 ### v2.3.19 自主分析引擎（🧠 像 DSH 一样自主思考 + 按需申请云端，2026-08-17 用户核心需求）
 - **背景**：用户要求"按面积算成本只是给本地模型思考的其中一个思路，不能机械执行；要看到调动本地模型思考的过程；自主思考、自主调用云端、遇权限问题就申请（像 DSH harness）；权限=是否可以发送什么样的提示词给 LLM；思考过程渲染流畅，UI 参考 DSH"
 - **设计原则**：本地模型 token 免费不涉安全 → **思考不设限**（多轮自由循环 + 流式渲染思考过程）；云端调用 = **权限申请**（申请"发送什么提示词给云端 LLM"，preview 就地审批弹窗，auto 直接放行）

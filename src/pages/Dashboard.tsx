@@ -15,6 +15,7 @@ import { getAdvisorInsights } from '../db/advisor';
 import { getDailyCloudUsage } from '../db/settings';
 import { runAutoAudit } from '../autoAudit';
 import AIWorkspace from '../components/AIWorkspace';
+import AutoThinkPanel from '../components/AutoThinkPanel';
 import KeyMaterialInsights from '../components/KeyMaterialInsights';
 
 interface DashboardProps {
@@ -226,6 +227,9 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
 
       {/* ===== AI 工作台（一张卡：状态条 + 今日速览） ===== */}
       <AIWorkspace onNavigate={onNavigate} />
+
+      {/* ===== AI 自主分析（后台自发思考，过程实时呈现） ===== */}
+      <AutoThinkPanel />
 
             {/* ===== 状态仪表：一眼扫出哪里需要我 ===== */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 14 }}>

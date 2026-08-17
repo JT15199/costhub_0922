@@ -194,6 +194,34 @@ export default function App() {
     };
   }, [scheduleAppCompare, refreshInsightCount]);
 
+  // ====== 后台自主分析（AI 自发思考，2026-08-17 用户核心需求）：启动 + 每 15 分钟一轮 + 数据变更后 5 分钟节流 ======
+  const thinkRunningRef = useRef(false);
+  const lastThinkAtRef = useRef(0);
+  const scheduleAppThink = useCallback((force = false) => {
+    if (thinkRunningRef.current) return;
+    const now = Date.now();
+    if (!force && now - lastThinkAtRef.current < 5 * 60 * 1000) return; // 数据变更触发节流 5 分钟
+    thinkRunningRef.current = true;
+    lastThinkAtRef.current = now;
+    (async () => {
+      try {
+        const { runAutoThink } = await import('./autoThink');
+        await runAutoThink({
+          onEvent: (ev) => window.dispatchEvent(new CustomEvent('costhub-think-event', { detail: ev })),
+        });
+      } catch { /* 静默：自主分析失败不打扰 */ }
+      thinkRunningRef.current = false;
+    })();
+  }, []);
+  useEffect(() => {
+    const iv = setInterval(() => scheduleAppThink(), 15 * 60 * 1000);
+    scheduleAppThink(); // 打开应用立即自发分析一轮
+    // 数据变化（导入/改价/BOM 变更）后节流触发
+    const onDataChanged = () => scheduleAppThink();
+    window.addEventListener('costhub-compare-request', onDataChanged);
+    return () => { clearInterval(iv); window.removeEventListener('costhub-compare-request', onDataChanged); };
+  }, [scheduleAppThink]);
+
   // 启动时初始化默认密码（仅首次）
   useEffect(() => {
     (async () => {

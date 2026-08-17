@@ -1684,62 +1684,29 @@ export default function LocalAIAssistant() {
       let prefCtx = '';
       try { prefCtx = await import('../aiLearning').then(m => m.buildPreferenceContext()); } catch { prefCtx = ''; }
       const { listTools, executeTool } = await import('../aiTools');
-      const { buildCloudToolDef, buildLocalToolDefs, buildThinkSystemPrompt, buildCloudReviewPrompt, formatCloudResult, MAX_THINK_ROUNDS } = await import('../thinkEngine');
+      const { buildThinkSystemPrompt, buildCloudReviewPrompt, runThinkLoop } = await import('../thinkEngine');
+      const { agentSearchLoop } = await import('../trendService');
       const localTools = listTools();
-      const tools = [...buildLocalToolDefs(localTools), buildCloudToolDef()];
       const sysPrompt = buildThinkSystemPrompt(localTools.map(t => t.name), prefCtx);
-      const messages: any[] = [{ role: 'system', content: sysPrompt }, { role: 'user', content: userContent }];
-      let finalText = '';
-      let rounds = 0;
-      while (rounds < MAX_THINK_ROUNDS) {
-        rounds++;
-        setThinkRun(prev => prev ? { ...prev, round: rounds } : prev);
-        curThinkRef.current = '';
-        setThinkRun(prev => prev ? { ...prev, thoughts: [...(prev.thoughts || []), ''] } : prev);
-        let toolCalls: any[] = [];
-        let roundText = '';
-        await new Promise<void>((resolve, reject) => {
-          startOllamaStream(
-            ollamaUrl, model, messages,
-            (t) => { roundText += t; setThinkRun(prev => prev ? { ...prev, answer: (prev.answer || '') + t } : prev); },
-            (t) => { curThinkRef.current += t; setThinkRun(prev => { const thoughts = [...(prev?.thoughts || [])]; if (thoughts.length > 0) thoughts[thoughts.length - 1] = curThinkRef.current; return prev ? { ...prev, thoughts } : prev; }); },
-            () => resolve(),
-            (e) => reject(new Error(e)),
-            { endpoint: 'native', think: true, tools, onToolCalls: (tcs) => { toolCalls = tcs; } },
-          ).then(c => { cleanupRef.current = c; }).catch(() => { /* 错误走 onError */ });
-        });
-        if (!toolCalls || toolCalls.length === 0) { finalText = roundText; break; }
-        // 执行工具调用（含云端审批）
-        const toolResults: { role: string; content: string }[] = [];
-        for (const tc of toolCalls) {
-          const fn = tc.function || {};
-          const name = String(fn.name || '');
-          let args: any = {};
-          try { args = JSON.parse(fn.arguments || '{}'); } catch { args = {}; }
-          if (name === 'cloud_market_query') {
-            // 云端申请：展示将发送的提示词（脱敏），用户批准才发（DSH 式权限申请）
-            const review = buildCloudReviewPrompt(args);
-            const ok = await requestCloudApproval(review);
-            if (ok) {
-              const { agentSearchLoop } = await import('../trendService');
-              const r = await agentSearchLoop(args.material_name, args.category || '', 'price-trend');
-              const result = formatCloudResult(r);
-              setThinkRun(prev => prev ? { ...prev, clouds: [...(prev.clouds || []), { material: args.material_name, question: args.question || '近1-3月价格趋势', status: 'approved', result }] } : prev);
-              toolResults.push({ role: 'tool', content: result });
-            } else {
-              const denied = '用户拒绝了本次云端申请。你可以基于已有本地数据继续分析，或说明缺少行情数据无法下结论。';
-              setThinkRun(prev => prev ? { ...prev, clouds: [...(prev.clouds || []), { material: args.material_name, question: args.question || '近1-3月价格趋势', status: 'rejected' }] } : prev);
-              toolResults.push({ role: 'tool', content: denied });
-            }
-          } else {
-            const { ok, text } = await executeTool(name, args);
-            setThinkRun(prev => prev ? { ...prev, tools: [...(prev.tools || []), { name, args, result: text, ok }] } : prev);
-            toolResults.push({ role: 'tool', content: (ok ? '' : '[工具失败] ') + text });
-          }
-        }
-        messages.push({ role: 'assistant', content: roundText || '', tool_calls: toolCalls });
-        messages.push(...toolResults);
-      }
+      // 通用思考循环（前端与后台 autoThink 共用同一协议）
+      const { finalText } = await runThinkLoop({
+        baseUrl: ollamaUrl,
+        model,
+        systemPrompt: sysPrompt,
+        userContent,
+        localTools,
+        executeTool,
+        approveCloud: async (call) => requestCloudApproval(buildCloudReviewPrompt(call)),
+        runCloud: async (call) => agentSearchLoop(call.material_name, call.category || '', 'price-trend'),
+        onEvent: {
+          onRoundStart: (round) => { curThinkRef.current = ''; setThinkRun(prev => prev ? { ...prev, round, thoughts: [...(prev.thoughts || []), ''] } : prev); },
+          onThought: (t) => { curThinkRef.current += t; setThinkRun(prev => { const thoughts = [...(prev?.thoughts || [])]; if (thoughts.length > 0) thoughts[thoughts.length - 1] = curThinkRef.current; return prev ? { ...prev, thoughts } : prev; }); },
+          onAnswer: (t) => setThinkRun(prev => prev ? { ...prev, answer: (prev.answer || '') + t } : prev),
+          onToolResult: (name, args, ok, text) => setThinkRun(prev => prev ? { ...prev, tools: [...(prev.tools || []), { name, args, result: text, ok }] } : prev),
+          onCloudResult: (call, ok, result) => setThinkRun(prev => prev ? { ...prev, clouds: [...(prev.clouds || []), { material: call.material_name, question: call.question || '近1-3月价格趋势', status: ok ? 'approved' : 'rejected', result }] } : prev),
+        },
+        maxRounds: 8,
+      });
       setThinkRun(prev => prev ? { ...prev, status: 'done' } : prev);
       await logLocalAICall({ request_type: 'think_run', system_prompt: sysPrompt.slice(0, 3000), user_prompt: userContent.slice(0, 3000), response_summary: (finalText || '').slice(0, 2000), success: true, model_name: model });
       if (finalText) await saveMsg(currentSid, 'assistant', finalText);

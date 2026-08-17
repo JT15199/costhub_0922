@@ -69,6 +69,91 @@ export function buildCloudReviewPrompt(call: { material_name?: string; category?
   );
 }
 
+
+// ===== 通用思考循环（2026-08-17）：前端「自主分析」与后台 autoThink 共用 ======
+// 协议：流式思考（onReasoning）→ tool_calls → 本地工具 execute / cloud_market_query 审批 → 结果回填继续 → 无工具调用输出结论
+export interface ThinkEventHandlers {
+  onThought?: (text: string) => void;
+  onAnswer?: (text: string) => void;
+  onRoundStart?: (round: number) => void;
+  onToolResult?: (name: string, args: any, ok: boolean, text: string) => void;
+  onCloudResult?: (call: any, ok: boolean, result: string) => void;
+}
+export interface ThinkLoopOptions {
+  baseUrl: string;
+  model: string;
+  systemPrompt: string;
+  userContent: string;
+  localTools: { id: string; desc: string; params: { key: string; type: string; required?: boolean; desc: string }[] }[];
+  executeTool: (id: string, args: any) => Promise<{ ok: boolean; text: string }>;
+  approveCloud?: (call: any) => Promise<boolean>;
+  runCloud?: (call: any) => Promise<any>;
+  onEvent?: ThinkEventHandlers;
+  maxRounds?: number;
+}
+export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText: string; rounds: number; clouds: { call: any; ok: boolean; result: string }[] }> {
+  const { startOllamaStream } = await import('./ollama');
+  const tools = [...buildLocalToolDefs(opts.localTools), buildCloudToolDef()];
+  const messages: any[] = [{ role: 'system', content: opts.systemPrompt }, { role: 'user', content: opts.userContent }];
+  const maxRounds = opts.maxRounds || MAX_THINK_ROUNDS;
+  const clouds: { call: any; ok: boolean; result: string }[] = [];
+  let finalText = '';
+  let looped = 0;
+  for (let round = 1; round <= maxRounds; round++) {
+    looped = round;
+    opts.onEvent?.onRoundStart?.(round);
+    let toolCalls: any[] = [];
+    let roundText = '';
+    await new Promise<void>((resolve, reject) => {
+      startOllamaStream(
+        opts.baseUrl, opts.model, messages,
+        (t) => { roundText += t; opts.onEvent?.onAnswer?.(t); },
+        (t) => opts.onEvent?.onThought?.(t),
+        () => resolve(),
+        (e) => reject(new Error(e)),
+        { endpoint: 'native', think: true, tools, onToolCalls: (tcs) => { toolCalls = tcs; } },
+      ).catch(() => { /* 错误走 onError */ });
+    });
+    if (!toolCalls || toolCalls.length === 0) { finalText = roundText; break; }
+    const toolResults: { role: string; content: string }[] = [];
+    for (const tc of toolCalls) {
+      const fn = tc.function || {};
+      const name = String(fn.name || '');
+      let args: any = {};
+      try { args = JSON.parse(fn.arguments || '{}'); } catch { args = {}; }
+      if (name === 'cloud_market_query') {
+        const ok = opts.approveCloud ? await opts.approveCloud(args) : true;
+        let result: string;
+        if (ok && opts.runCloud) {
+          try {
+            const r = await opts.runCloud(args);
+            result = formatCloudResult(r);
+          } catch (e: any) {
+            result = '云端查询失败：' + String(e?.message || e).slice(0, 200);
+            clouds.push({ call: args, ok: false, result });
+            opts.onEvent?.onCloudResult?.(args, false, result);
+            toolResults.push({ role: 'tool', content: result });
+            continue;
+          }
+        } else if (!ok) {
+          result = '用户/策略拒绝了本次云端申请。你可以基于已有本地数据继续分析，或说明缺少行情数据无法下结论。';
+        } else {
+          result = '云端查询不可用（未配置执行器）。请基于本地数据分析。';
+        }
+        clouds.push({ call: args, ok, result });
+        opts.onEvent?.onCloudResult?.(args, ok, result);
+        toolResults.push({ role: 'tool', content: result });
+      } else {
+        const res = await opts.executeTool(name, args);
+        opts.onEvent?.onToolResult?.(name, args, res.ok, res.text);
+        toolResults.push({ role: 'tool', content: (res.ok ? '' : '[工具失败] ') + res.text });
+      }
+    }
+    messages.push({ role: 'assistant', content: roundText || '', tool_calls: toolCalls });
+    messages.push(...toolResults);
+  }
+  return { finalText, rounds: looped, clouds };
+}
 // 云端返回 → 模型可消费的文本（结构来自 trendService agentSearchLoop）
 export function formatCloudResult(r: any): string {
   return (
