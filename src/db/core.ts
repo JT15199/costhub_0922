@@ -132,7 +132,7 @@ async function ensureSchema(d: Database) {
   // 全部用 ignoreSchemaError 包裹，已存在的表会静默跳过
   const coreCreate = [
     `CREATE TABLE IF NOT EXISTS parts (id INTEGER PRIMARY KEY AUTOINCREMENT, main_category TEXT DEFAULT '硬件类', sub_category TEXT DEFAULT '', category TEXT NOT NULL, name TEXT NOT NULL, model TEXT NOT NULL, cost REAL NOT NULL DEFAULT 0, specs TEXT DEFAULT '', projects TEXT DEFAULT '', remark TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`,
-    `CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, project_type TEXT DEFAULT '在研', tier TEXT DEFAULT '主流级', status TEXT DEFAULT '进行中', category TEXT DEFAULT '未分类', screen_size TEXT DEFAULT '', resolution TEXT DEFAULT '', refresh_rate TEXT DEFAULT '', panel_type TEXT DEFAULT '', platform_fee_rate REAL DEFAULT 0, profit_rate REAL DEFAULT 0, image TEXT DEFAULT '', sort_order INTEGER DEFAULT 0, is_deleted INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now','localtime')))`,
+    `CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, project_type TEXT DEFAULT '在研', tier TEXT DEFAULT '主流级', status TEXT DEFAULT '进行中', category TEXT DEFAULT '未分类', screen_size TEXT DEFAULT '', resolution TEXT DEFAULT '', refresh_rate TEXT DEFAULT '', panel_type TEXT DEFAULT '', specs TEXT DEFAULT '', platform_fee_rate REAL DEFAULT 0, profit_rate REAL DEFAULT 0, image TEXT DEFAULT '', sort_order INTEGER DEFAULT 0, is_deleted INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now','localtime')))`,
     `CREATE TABLE IF NOT EXISTS modules (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, name TEXT NOT NULL, module_category TEXT DEFAULT '未分类', description TEXT DEFAULT '', category TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now','localtime')))`,
     `CREATE TABLE IF NOT EXISTS module_items (id INTEGER PRIMARY KEY AUTOINCREMENT, module_id INTEGER NOT NULL, part_id INTEGER, part_name TEXT NOT NULL, part_model TEXT DEFAULT '', main_category TEXT DEFAULT '硬件类', sub_category TEXT DEFAULT '', cost REAL DEFAULT 0, quantity INTEGER DEFAULT 1, remark TEXT DEFAULT '')`,
     `CREATE TABLE IF NOT EXISTS project_boms (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, part_id INTEGER NOT NULL, module_name TEXT DEFAULT '', quantity INTEGER DEFAULT 1, cost REAL DEFAULT 0, remark TEXT DEFAULT '', is_reference INTEGER DEFAULT 0, reference_remark TEXT DEFAULT '', is_deleted INTEGER DEFAULT 0, ref_project_id INTEGER DEFAULT 0)`,
@@ -305,6 +305,7 @@ async function ensureSchema(d: Database) {
 
     // part_insights 补 handled_json（已处理组快照，供「已处理」视图查看/撤销）
   await ignoreSchemaError(d.execute("ALTER TABLE part_insights ADD COLUMN handled_json TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE projects ADD COLUMN specs TEXT DEFAULT ''"));
   await ignoreSchemaError(d.execute("ALTER TABLE ai_bridge_logs ADD COLUMN cloud_prompt TEXT DEFAULT ''"));
 // 为 trend_items 表添加缺失的列
   await ignoreSchemaError(d.execute('ALTER TABLE trend_items ADD COLUMN magnitude_min REAL DEFAULT NULL'));

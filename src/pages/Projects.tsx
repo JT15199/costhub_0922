@@ -10,7 +10,6 @@ import { TIERS, PROJECT_STATUSES, PROJECT_TYPES, SCREEN_SIZES, RESOLUTIONS, REFR
 import { getMainCategories, getSetting } from '../db';
 import { startOllamaStream, logLocalAICall } from '../ollama';
 import { calcSkuCost as calcSkuCostFn, buildSkuBom as buildSkuBomFn } from '../skuCalc';
-import { estimateProjectCost } from '../specEstimate';
 import { computeProjectHealth, type HealthIssue } from '../projectHealth';
 import { computeProjectStatuses, statusPointMeta } from '../projectStatus';
 
@@ -40,31 +39,8 @@ export default function Projects() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form] = Form.useForm();
+  const watchCategory = Form.useWatch('category', form);
   const [selectedPid, setSelectedPid] = useState<number | null>(null);
-  // ====== 规格级项目预估（拿最像的历史项目估成本） ======
-  const [specModalOpen, setSpecModalOpen] = useState(false);
-  const [specForm] = Form.useForm();
-  const [specResult, setSpecResult] = useState<any>(null);
-  const [specLoading, setSpecLoading] = useState(false);
-  const [histCosts, setHistCosts] = useState<Record<number, number>>({});
-  const runSpecEstimate = async () => {
-    const v = await specForm.validateFields();
-    setSpecLoading(true);
-    try {
-      // 历史项目 BOM 成本（缓存，避免每次弹窗重复拉取）
-      if (Object.keys(histCosts).length === 0) {
-        const entries = await Promise.all(projects.map(async (p: any) => {
-          const boms = await getProjectBOMs(p.id);
-          return [p.id, Math.round(boms.reduce((s: number, b: any) => s + (b.part_cost || 0) * (b.quantity || 1), 0) * 100) / 100] as const;
-        }));
-        setHistCosts(Object.fromEntries(entries));
-      }
-      const history = projects.filter((p: any) => !p.is_deleted && (histCosts[p.id] || 0) > 0)
-        .map((p: any) => ({ id: p.id, code: p.code, name: p.name, screen_size: p.screen_size, resolution: p.resolution, refresh_rate: p.refresh_rate, panel_type: p.panel_type, bomCost: histCosts[p.id] || 0 }));
-      setSpecResult(estimateProjectCost(v, history));
-    } catch (e: any) { message.error('估算失败：' + (e?.message || e)); }
-    setSpecLoading(false);
-  };
   const [boms, setBoms] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [costSnapshots, setCostSnapshots] = useState<any[]>([]);
@@ -862,7 +838,11 @@ export default function Projects() {
   const handleSaveProject = async () => {
     try {
       const vals = await form.validateFields();
-      await saveProject({ ...editing, ...vals });
+      // 品类联动规格：显示器存 4 规格字段，其他品类只存关键规格，避免脏数据
+      const clean = vals.category === '显示器'
+        ? { ...vals, specs: '' }
+        : { ...vals, screen_size: '', resolution: '', refresh_rate: '', panel_type: '' };
+      await saveProject({ ...editing, ...clean });
       // 新品类自动入库（保证品类筛选下拉能选到）
       if (vals.category && vals.category !== '未分类') {
         try {
@@ -1147,8 +1127,10 @@ export default function Projects() {
     { title: '类型', dataIndex: 'project_type', width: 75, render: (v: string) => <Tag color={v === '已完成' ? 'green' : 'blue'}>{v || '在研'}</Tag> },
     { title: '状态', dataIndex: 'status', width: 75, render: (v: string) => <Tag color={v === '进行中' ? 'blue' : v === '已完成' ? 'green' : 'default'}>{v}</Tag> },
     { title: '规格', key: 's', width: 190, ellipsis: true, render: (_: any, r: any) => {
-        const specs = [r.screen_size, r.resolution, r.refresh_rate, r.panel_type].filter(Boolean).join(' / ');
-        return specs || (r.category && r.category !== '显示器' ? <span style={{ color: 'var(--color-text-tertiary)' }}>—</span> : '');
+        const specs = r.category === '显示器'
+          ? [r.screen_size, r.resolution, r.refresh_rate, r.panel_type].filter(Boolean).join(' / ')
+          : (r.specs || '');
+        return specs || <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>;
       } },
     { title: '费率', key: 'f', width: 95, render: (_: any, r: any) => `平台${r.platform_fee_rate}% / 利${r.profit_rate}%` },
     {
@@ -1218,7 +1200,6 @@ export default function Projects() {
             <Button size="small" icon={<TagOutlined />} onClick={() => { setCatModalOpen(true); setNewCatName(''); }}>品类管理</Button>
           </Space>
           <Space>
-            <Button icon={<AimOutlined />} onClick={() => { setSpecModalOpen(true); setSpecResult(null); specForm.resetFields(); }}>规格预估</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditing(null); form.resetFields(); setModalOpen(true); }}>新建项目</Button>
           </Space>
         </div>
@@ -2304,63 +2285,8 @@ export default function Projects() {
       )}
 
       {/* Project edit modal */}
-      {/* ====== 规格级项目预估（拿最像的历史项目估成本） ====== */}
-      <Modal
-        title={<span><AimOutlined style={{ color: '#0A84FF', marginRight: 8 }} />规格级项目预估</span>}
-        open={specModalOpen}
-        onCancel={() => setSpecModalOpen(false)}
-        footer={null}
-        width={680}
-      >
-        <Form form={specForm} layout="inline" style={{ marginBottom: 14, rowGap: 10 }}>
-          <Form.Item label="尺寸" name="screen_size" rules={[{ required: true, message: '必填' }]}>
-            <Input placeholder={'如 27英寸 / 23.8"'} style={{ width: 120 }} />
-          </Form.Item>
-          <Form.Item label="分辨率" name="resolution">
-            <Select allowClear style={{ width: 170 }} options={['1920×1080', '2560×1440', '3840×2160'].map(r => ({ label: r, value: r }))} />
-          </Form.Item>
-          <Form.Item label="刷新率" name="refresh_rate">
-            <Select allowClear style={{ width: 100 }} options={['60Hz', '75Hz', '144Hz', '165Hz', '170Hz'].map(r => ({ label: r, value: r }))} />
-          </Form.Item>
-          <Form.Item label="面板" name="panel_type">
-            <Select allowClear style={{ width: 90 }} options={['IPS', 'VA', 'TN', 'OLED'].map(r => ({ label: r, value: r }))} />
-          </Form.Item>
-          <Form.Item>
-            <Button type="primary" icon={<AimOutlined />} loading={specLoading} onClick={runSpecEstimate}>估算</Button>
-          </Form.Item>
-        </Form>
-        <div style={{ fontSize: 11.5, color: '#94A3B8', marginBottom: 10 }}>
-          基于历史项目的 BOM 实际成本按规格相似度加权估算（尺寸 40% / 分辨率 30% / 刷新率 20% / 面板 10%）；无历史数据的项目自动排除。
-        </div>
-        {specResult && (
-          <div>
-            <div style={{ padding: '10px 14px', background: '#F0F7FF', border: '1px solid #BFDBFE', borderRadius: 10, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
-              <b style={{ fontSize: 15 }}>预估 BOM 成本</b>
-              <span style={{ fontSize: 20, fontWeight: 700, color: '#CF0A2C', fontFamily: 'monospace' }}>¥{specResult.estimate.toFixed(2)}</span>
-              <span style={{ fontSize: 11.5, color: '#64748B' }}>（{specResult.matchedCount} 个相似项目加权）</span>
-            </div>
-            <div style={{ fontSize: 12.5, color: '#334155', marginBottom: 6 }}><b>最相似的 {specResult.candidates.length} 个历史项目：</b></div>
-            {specResult.candidates.map((c: any) => (
-              <div key={c.project.id} onClick={() => { selectProject(c.project.id); setSpecModalOpen(false); }}
-                style={{ border: '1px solid #E2E8F0', borderRadius: 8, padding: '8px 12px', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', background: '#FAFBFC' }}
-                onMouseEnter={e => { e.currentTarget.style.background = '#F0F7FF'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = '#FAFBFC'; }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <b style={{ fontSize: 13 }}>{c.project.code}</b>
-                  <span style={{ fontSize: 11.5, color: '#94A3B8', marginLeft: 8 }}>
-                    {c.project.screen_size || '?'} · {c.project.resolution || '?'} · {c.project.refresh_rate || '?'} · {c.project.panel_type || '?'}
-                  </span>
-                </div>
-                <Tag color={c.similarity >= 90 ? 'green' : c.similarity >= 70 ? 'blue' : 'orange'}>相似 {c.similarity}%</Tag>
-                <b style={{ fontFamily: 'monospace', color: '#1F2937' }}>¥{c.project.bomCost.toFixed(2)}</b>
-              </div>
-            ))}
-          </div>
-        )}
-      </Modal>
-
       <Modal title={editing?.id ? '编辑项目' : '新建项目'} open={modalOpen} onOk={handleSaveProject} onCancel={() => { setModalOpen(false); setEditing(null); }} width={640} destroyOnClose>
-        <Form form={form} layout="vertical" initialValues={editing || { project_type: '在研', tier: '主流级', status: '进行中', category: '未分类', platform_fee_rate: 0, profit_rate: 0 }}>
+        <Form form={form} layout="vertical" initialValues={editing || { project_type: '在研', tier: '主流级', status: '进行中', category: '未分类', specs: '', platform_fee_rate: 0, profit_rate: 0 }}>
           <Row gutter={16}>
             <Col span={8}><Form.Item label="项目代号*" name="code" rules={[{ required: true }]}><Input /></Form.Item></Col>
             <Col span={8}><Form.Item label="项目名称*" name="name" rules={[{ required: true }]}><Input /></Form.Item></Col>
@@ -2368,19 +2294,30 @@ export default function Projects() {
           </Row>
           <Row gutter={16}>
             <Col span={8}><Form.Item label="品类" name="category" extra="如：显示器、手写笔、鼠标"><AutoComplete options={categories.map((c: any) => ({ label: c.name, value: c.name }))} placeholder="选择或输入品类" allowClear /></Form.Item></Col>
+            <Col span={8}><Form.Item label="档位" name="tier"><Select options={TIERS.map(t => ({ label: t, value: t }))} /></Form.Item></Col>
+            <Col span={8}><Form.Item label="状态" name="status"><Select options={PROJECT_STATUSES.map(s => ({ label: s, value: s }))} /></Form.Item></Col>
           </Row>
+          {watchCategory === '显示器' ? (
+            <Row gutter={16}>
+              <Col span={8}><Form.Item label="屏幕尺寸" name="screen_size"><Select options={SCREEN_SIZES.map(s => ({ label: s, value: s }))} allowClear /></Form.Item></Col>
+              <Col span={8}><Form.Item label="分辨率" name="resolution"><Select options={RESOLUTIONS.map(r => ({ label: r, value: r }))} allowClear /></Form.Item></Col>
+              <Col span={4}><Form.Item label="刷新率" name="refresh_rate"><Select options={REFRESH_RATES.map(r => ({ label: r, value: r }))} allowClear /></Form.Item></Col>
+              <Col span={4}><Form.Item label="面板" name="panel_type"><Select options={PANEL_TYPES.map(p => ({ label: p, value: p }))} allowClear /></Form.Item></Col>
+            </Row>
+          ) : (
+            <Form.Item label="关键规格" name="specs" extra="该品类的核心规格（如：DPI/传感器/连接方式，或 SoC/内存/存储），用于列表展示与后续成本参考">
+              <Input placeholder="如：无线 / DPI 1600 / 重量 89g" />
+            </Form.Item>
+          )}
           <Row gutter={16}>
-            <Col span={6}><Form.Item label="档位" name="tier"><Select options={TIERS.map(t => ({ label: t, value: t }))} /></Form.Item></Col>
-            <Col span={6}><Form.Item label="状态" name="status"><Select options={PROJECT_STATUSES.map(s => ({ label: s, value: s }))} /></Form.Item></Col>
-            <Col span={6}><Form.Item label="面板" name="panel_type"><Select options={PANEL_TYPES.map(p => ({ label: p, value: p }))} allowClear /></Form.Item></Col>
-            <Col span={6}><Form.Item label="刷新率" name="refresh_rate"><Select options={REFRESH_RATES.map(r => ({ label: r, value: r }))} allowClear /></Form.Item></Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={8}><Form.Item label="屏幕尺寸" name="screen_size"><Select options={SCREEN_SIZES.map(s => ({ label: s, value: s }))} allowClear /></Form.Item></Col>
-            <Col span={8}><Form.Item label="分辨率" name="resolution"><Select options={RESOLUTIONS.map(r => ({ label: r, value: r }))} allowClear /></Form.Item></Col>
             <Col span={8}><Form.Item label="平台费率(%)" name="platform_fee_rate"><InputNumber min={0} max={100} style={{ width: '100%' }} /></Form.Item></Col>
+            <Col span={8}><Form.Item label="利润/管销研费率(%)" name="profit_rate"><InputNumber min={0} max={100} style={{ width: '100%' }} /></Form.Item></Col>
+            {watchCategory === '显示器' && (
+              <Col span={8}>
+                <div style={{ fontSize: 11.5, color: '#94A3B8', paddingTop: 30 }}>显示器规格参与「规格级项目预估」成本估算</div>
+              </Col>
+            )}
           </Row>
-          <Form.Item label="利润/管销研费率(%)" name="profit_rate"><InputNumber min={0} max={100} style={{ width: '100%' }} /></Form.Item>
         </Form>
       </Modal>
 

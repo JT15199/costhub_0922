@@ -117,7 +117,9 @@ export default function Reports() {
             <h2 style={{ color: '#CF0A2C', margin: 0 }}>{project.name} ({project.code})</h2>
             <p style={{ color: '#64748B', marginTop: 8 }}>
               档位: {project.tier} | 状态: {project.status} |
-              屏幕: {[project.screen_size, project.resolution, project.refresh_rate, project.panel_type].filter(Boolean).join(' / ')}
+              {project.category === '显示器'
+                ? `屏幕: ${[project.screen_size, project.resolution, project.refresh_rate, project.panel_type].filter(Boolean).join(' / ')}`
+                : `规格: ${project.specs || '—'}`}
             </p>
             <Row gutter={16} style={{ marginTop: 16 }}>
               <Col span={8}><Card size="small"><Statistic title="BOM总成本" value={total} precision={2} prefix="¥" valueStyle={{ color: '#CF0A2C' }} /></Card></Col>

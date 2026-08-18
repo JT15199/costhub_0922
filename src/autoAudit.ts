@@ -179,7 +179,9 @@ export async function buildAuditContext(
   projects.forEach(p => {
     const boms = bomsByProject[p.id] || [];
     const total = boms.reduce((s, b) => s + (b.part_cost || 0) * (b.quantity || 1), 0);
-    const specs = [p.screen_size, p.resolution, p.refresh_rate, p.panel_type].filter(Boolean).join('/');
+    const specs = p.category === '显示器'
+      ? [p.screen_size, p.resolution, p.refresh_rate, p.panel_type].filter(Boolean).join('/')
+      : (p.specs || '');
     const t = (targetsByProject[p.id] || []).map(x => `${x.domain}:${x.target_cost}`).join(',') || '无目标';
     const snaps = snapshotsByProject[p.id] || [];
     const snapInfo = snaps.length >= 2

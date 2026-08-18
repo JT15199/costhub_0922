@@ -23,12 +23,12 @@ export async function getProject(id: number) { const r = await (await getDb()).s
 export async function saveProject(data: any) {
   const d = await getDb();
   if (data.id) {
-    await d.execute(`UPDATE projects SET code=?,name=?,project_type=?,tier=?,status=?,category=?,screen_size=?,resolution=?,refresh_rate=?,panel_type=?,platform_fee_rate=?,profit_rate=?,image=? WHERE id=?`,
-      [data.code, data.name, data.project_type || '在研', data.tier, data.status, data.category || '未分类', data.screen_size || '', data.resolution || '', data.refresh_rate || '', data.panel_type || '', data.platform_fee_rate || 0, data.profit_rate || 0, data.image || '', data.id]);
+    await d.execute(`UPDATE projects SET code=?,name=?,project_type=?,tier=?,status=?,category=?,screen_size=?,resolution=?,refresh_rate=?,panel_type=?,specs=?,platform_fee_rate=?,profit_rate=?,image=? WHERE id=?`,
+      [data.code, data.name, data.project_type || '在研', data.tier, data.status, data.category || '未分类', data.screen_size || '', data.resolution || '', data.refresh_rate || '', data.panel_type || '', data.specs || '', data.platform_fee_rate || 0, data.profit_rate || 0, data.image || '', data.id]);
     return data.id;
   } else {
-    const r = await d.execute(`INSERT INTO projects (code,name,project_type,tier,status,category,screen_size,resolution,refresh_rate,panel_type,platform_fee_rate,profit_rate,image) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [data.code, data.name, data.project_type || '在研', data.tier, data.status, data.category || '未分类', data.screen_size || '', data.resolution || '', data.refresh_rate || '', data.panel_type || '', data.platform_fee_rate || 0, data.profit_rate || 0, data.image || '']);
+    const r = await d.execute(`INSERT INTO projects (code,name,project_type,tier,status,category,screen_size,resolution,refresh_rate,panel_type,specs,platform_fee_rate,profit_rate,image) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [data.code, data.name, data.project_type || '在研', data.tier, data.status, data.category || '未分类', data.screen_size || '', data.resolution || '', data.refresh_rate || '', data.panel_type || '', data.specs || '', data.platform_fee_rate || 0, data.profit_rate || 0, data.image || '']);
     return r.lastInsertId;
   }
 }
@@ -82,8 +82,8 @@ export async function ensureDefaultCategories() {
 export async function copyProject(id: number, newCode: string, newName: string) {
   const d = await getDb(); const src = await d.select<any[]>('SELECT * FROM projects WHERE id = ? AND COALESCE(is_deleted, 0) = 0', [id]);
   if (!src[0]) return 0;
-  const r = await d.execute(`INSERT INTO projects (code,name,project_type,tier,status,screen_size,resolution,refresh_rate,panel_type,platform_fee_rate,profit_rate) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-    [newCode, newName, '在研', src[0].tier, '进行中', src[0].screen_size, src[0].resolution, src[0].refresh_rate, src[0].panel_type, src[0].platform_fee_rate, src[0].profit_rate]);
+  const r = await d.execute(`INSERT INTO projects (code,name,project_type,tier,status,screen_size,resolution,refresh_rate,panel_type,specs,platform_fee_rate,profit_rate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [newCode, newName, '在研', src[0].tier, '进行中', src[0].screen_size, src[0].resolution, src[0].refresh_rate, src[0].panel_type, src[0].specs || '', src[0].platform_fee_rate, src[0].profit_rate]);
   const boms = await d.select<any[]>('SELECT * FROM project_boms WHERE project_id = ? AND COALESCE(is_deleted, 0) = 0', [id]);
   for (const b of boms) {
     // 复制完整快照列（名称/型号/单价/分类/标记），保证复制项目与源项目显示一致

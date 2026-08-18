@@ -1,3 +1,10 @@
+### v2.3.19 新建项目品类联动规格 + 删除规格预估（2026-08-18，用户：新建项目弹默认显示器填写内容，应支持鼠标/手机/手写笔/平板/PC/包等；规格预估按钮没用删掉）
+- **方案（用户选定）**：统一模板 + 品类联动规格——基础字段（代号/名称/类型/品类/档位/状态/平台费率/利润费率）所有品类共用一张表单，规格区按品类联动（Form.useWatch('category')）
+- **① 品类联动**：品类=显示器 → 显示 屏幕尺寸/分辨率/刷新率/面板（原 4 字段，列表规格列/报告/导出继续使用）；其他品类 → 隐藏显示器字段，改显示通用「关键规格」自由文本（Input，placeholder 如 DPI/传感器/连接方式）
+- **② 数据层**：projects 表新增 specs TEXT 列（CREATE TABLE + ensureSchema ALTER 迁移）；saveProject UPDATE/INSERT/copyProject 全带 specs；handleSaveProject 保存时按品类清理无关字段（非显示器清 4 规格字段、显示器清 specs），杜绝 A002 手写笔填显示器规格的脏数据
+- **③ 展示一致性**：项目列表规格列/autoAudit 巡检概览/Reports 报告/Settings Excel 导出 全部改为 品类=显示器→4 字段，否则→specs
+- **④ 删除规格预估**：用户反馈"规格预估按钮没用"——移除工具栏「规格预估」按钮、规格级项目预估 Modal、runSpecEstimate/histCosts 等状态、specEstimate.ts 与 specEstimate.test.ts（整文件删除）；spec 字段仍保留（列表展示用）
+- **验证**：tsc -b 0 错；175 vitest 全过（16 文件，specEstimate 9 用例随功能删除）
 ### v2.3.19 识别超时降噪（2026-08-18，用户反馈：后台识别完成经常弹模型太慢超时提示）
 - ①autoCompare 单模块 AI 识别超时 60s → 120s（本地模型推理慢，给足时间）；超时文案改"模型响应较慢，将在下一轮自动续试"（无需手动操作）
 - ②App scheduleAppCompare 失败提示静默：移除 message.warning"N 个识别失败（模型太慢/超时已跳过）"——超时/失败模块下一轮 60s 轮询自动重试，不再打扰；只保留发现情报时的提示（剩余提示也只在有情报时显示）

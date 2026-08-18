@@ -183,7 +183,7 @@ export default function Settings({ embedded }: { embedded?: boolean }) {
             { '项目信息': '名称', '': p.name },
             { '项目信息': '类型 / 档位', '': `${p.project_type || ''} / ${p.tier || ''}` },
             { '项目信息': '状态 / 品类', '': `${p.status || ''} / ${p.category || ''}` },
-            { '项目信息': '规格', '': `${p.screen_size || ''} ${p.resolution || ''} ${p.refresh_rate || ''} ${p.panel_type || ''}`.trim() },
+            { '项目信息': '规格', '': (p.category === '显示器' ? `${p.screen_size || ''} ${p.resolution || ''} ${p.refresh_rate || ''} ${p.panel_type || ''}` : (p.specs || '')).trim() },
             { '项目信息': '平台费率 / 利润率', '': `${p.platform_fee_rate || 0}% / ${p.profit_rate || 0}%` },
           ];
           const ws = XLSX.utils.json_to_sheet([]);
