@@ -211,6 +211,47 @@ export async function buildAuditContext(
   return lines.join('\n');
 }
 
+// ============ 语义去重（2026-08-18：用户反馈"查到6条就反复是那6条，重复就不要报了"） ============
+// AI 层容易换说法重复规则层/历史发现（如 AI"驱动板模块价格严重偏离市场均值" ≈ 规则"MNT-3201「驱动板」成本高于均值 99%"），
+// 归一化 + 4-gram 交叉包含 + 「实体」引用三重判定，重复的直接丢弃不产生新 unread
+
+export function normalizeFindingTitle(t: string): string {
+  return String(t || '')
+    .replace(/\d+(?:\.\d+)?/g, '')
+    .replace(/[¥￥%％·×xX()（）:：,，。.、+±\-\s]/g, '')
+    .toLowerCase();
+}
+
+function contains4gram(hay: string, needle: string): boolean {
+  for (let i = 0; i + 4 <= needle.length; i++) {
+    if (hay.includes(needle.slice(i, i + 4))) return true;
+  }
+  return false;
+}
+
+// 判定某条新发现是否与已有发现重复（标题语义相似 / 提到同一「实体」）
+export function isDuplicateFinding(title: string, existing: { title: string; detail?: string }[]): boolean {
+  const n = normalizeFindingTitle(title);
+  if (!n || n.length < 4) return false;
+  for (const e of existing) {
+    const m = normalizeFindingTitle(e.title);
+    if (!m || m.length < 4) continue;
+    if (n === m || n.includes(m) || m.includes(n)) return true;
+    // 4-gram 交叉包含：AI"缺失目标成本设定" vs 规则"未设定目标成本"
+    if (m.length >= 6 && contains4gram(n, m)) return true;
+    if (n.length >= 6 && contains4gram(m, n)) return true;
+  }
+  // 「实体」引用：已有发现的「驱动板」「显示模块」等实体词出现在新标题里 → 视为重复
+  for (const e of existing) {
+    const ents = e.title.match(/「([^」]+)」/g) || [];
+    for (const ent of ents) {
+      const core = ent.slice(1, -1);
+      if (core.length >= 2 && title.includes(core)) return true;
+    }
+  }
+  return false;
+}
+
 // ============ 主流程 ============
 
 export interface AutoAuditResult { rules: number; ai: number; aiFailed: boolean; aiSkipped: boolean; }
@@ -284,9 +325,24 @@ export async function runAutoAudit(): Promise<AutoAuditResult | null> {
       console.warn('AI 巡检失败（规则层仍生效）:', e);
       aiFailed = true;
     }
-    findings.push(...aiFindings);
+    // ⚠️ 语义去重（2026-08-18）：AI 发现与规则层/历史发现换说法重复 → 丢弃，不产生新 unread
+    let aiKept = aiFindings;
+    if (aiFindings.length > 0) {
+      try {
+        const { getAuditFindings } = await import('./auditStore');
+        const known: { title: string; detail?: string }[] = [
+          ...findings.map(f => ({ title: f.title, detail: f.detail })),
+          ...(await getAuditFindings()).map(f => ({ title: f.title, detail: f.detail })),
+        ];
+        aiKept = aiFindings.filter(f => !isDuplicateFinding(f.title, known));
+        if (aiKept.length < aiFindings.length) {
+          console.info('[巡检去重] 丢弃 ' + (aiFindings.length - aiKept.length) + ' 条与规则/历史重复的 AI 发现');
+        }
+      } catch { /* 去重失败不阻断 */ }
+    }
+    findings.push(...aiKept);
     await replaceAuditFindings(findings);
-    return { rules: rules.length, ai: aiFindings.length, aiFailed, aiSkipped };
+    return { rules: rules.length, ai: aiKept.length, aiFailed, aiSkipped };
   } catch (e) {
     console.warn('自主巡检失败:', e);
     return null;

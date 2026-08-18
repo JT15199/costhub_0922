@@ -50,6 +50,10 @@ export async function getUnreadAuditCount(): Promise<number> {
 export async function replaceAuditFindings(findings: Omit<AuditFinding, 'id' | 'created_at'>[]): Promise<number> {
   await ensureAuditTable();
   const d = await getDb();
+  // 陈旧已读自动归档（2026-08-18 用户反馈：反复是那几条）：已读超 7 天的发现不再长期挂着，自动隐藏
+  try {
+    await d.execute("UPDATE audit_findings SET status='dismissed' WHERE status='read' AND created_at < datetime('now','localtime','-7 days')");
+  } catch { /* 忽略 */ }
   const old = await d.select<{ id: number; type: string; title: string; detail: string; objects: string; status: string }[]>('SELECT id, type, title, detail, objects, status FROM audit_findings');
   // 稳定键 = 类型 + 涉及对象（不含 title/detail 的动态数字）：
   // 已读/忽略的同源发现即使数字微变（如占比 89%→90%）也保持原状态，不重新弹出；

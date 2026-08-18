@@ -17,15 +17,57 @@ export async function buildThinkOverview(): Promise<string> {
   try {
     const projs = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
     if (projs.length === 0) return '暂无项目数据。';
+    const bomsByP: Record<number, any[]> = {};
+    for (const p of projs.slice(0, 8)) {
+      try { bomsByP[p.id] = await getProjectBOMs(p.id); } catch { bomsByP[p.id] = []; }
+    }
     lines.push('在研项目 ' + projs.filter((p: any) => p.project_type === '在研').length + ' 个，已完成 ' + projs.filter((p: any) => p.project_type === '已完成').length + ' 个：');
     for (const p of projs.slice(0, 8)) {
-      try {
-        const boms = await getProjectBOMs(p.id);
-        const bomCost = boms.reduce((s: number, b: any) => s + (b.part_cost || 0) * (b.quantity || 1), 0);
-        const items = boms.length;
-        lines.push('- ' + (p.code || p.name) + '（' + (p.project_type || '') + '）BOM ¥' + Math.round(bomCost * 100) / 100 + '，' + items + ' 项');
-      } catch { /* 单项目失败跳过 */ }
+      const boms = bomsByP[p.id] || [];
+      const bomCost = boms.reduce((s: number, b: any) => s + (b.part_cost || 0) * (b.quantity || 1), 0);
+      lines.push('- ' + (p.code || p.name) + '（' + (p.project_type || '') + '）BOM ¥' + Math.round(bomCost * 100) / 100 + '，' + boms.length + ' 项');
     }
+    // 目标达成（领域级，2026-08-18 加入概览供模型规划目标差距分析任务）
+    try {
+      const { getTargets } = await import('./db');
+      const { computeTargetStatuses } = await import('./targetInsight');
+      const tByP: Record<number, any[]> = {};
+      for (const p of projs.slice(0, 8)) { try { tByP[p.id] = await getTargets(p.id); } catch { tByP[p.id] = []; } }
+      const st = computeTargetStatuses(projs, tByP, bomsByP);
+      const missed = st.filter(s => s.missed);
+      if (missed.length) lines.push('目标达成：' + missed.length + ' 个领域超目标（' + missed.slice(0, 4).map(s => s.code + '·' + s.domain + ' ' + s.rate + '%').join('、') + '）');
+      const untargeted = projs.filter((p: any) => p.project_type !== '已完成' && !(tByP[p.id] || []).length).length;
+      if (untargeted) lines.push('另有 ' + untargeted + ' 个在研项目未设定目标成本。');
+    } catch { /* 忽略 */ }
+    // 成本结构信号：关键模块占比 + 跨项目同模块价差（议价机会线索）
+    try {
+      const modAgg: Record<string, { cost: number; count: number; projCosts: Record<number, number> }> = {};
+      projs.slice(0, 8).forEach(p => {
+        const boms = bomsByP[p.id] || [];
+        const total = boms.reduce((s, b) => s + (b.part_cost || 0) * (b.quantity || 1), 0);
+        if (total <= 0) return;
+        const byMod: Record<string, number> = {};
+        boms.forEach(b => { const m = b.module_name || '未归类'; byMod[m] = (byMod[m] || 0) + (b.part_cost || 0) * (b.quantity || 1); });
+        const top = Object.entries(byMod).sort((a, b) => b[1] - a[1])[0];
+        if (top && top[1] / total >= 0.4) lines.push(p.code + ' 模块「' + top[0] + '」占比 ' + Math.round(top[1] / total * 100) + '%（关键依赖）');
+        Object.entries(byMod).forEach(([m, cost]) => {
+          if (!modAgg[m]) modAgg[m] = { cost: 0, count: 0, projCosts: {} };
+          modAgg[m].cost += cost; modAgg[m].count += 1; modAgg[m].projCosts[p.id] = cost;
+        });
+      });
+      const gaps: string[] = [];
+      Object.entries(modAgg).forEach(([m, agg]) => {
+        if (agg.count < 2 || agg.cost <= 0) return;
+        const avg = agg.cost / agg.count;
+        Object.entries(agg.projCosts).forEach(([pid, cost]) => {
+          if (avg > 0 && (cost - avg) / avg >= 0.2 && (cost - avg) >= 50) {
+            const p = projs.find(x => x.id === Number(pid));
+            gaps.push((p?.code || pid) + '「' + m + '」高' + Math.round((cost - avg) / avg * 100) + '%');
+          }
+        });
+      });
+      if (gaps.length) lines.push('跨项目价差：' + gaps.slice(0, 4).join('、') + '（值得议价核实）');
+    } catch { /* 忽略 */ }
   } catch { lines.push('项目数据读取失败。'); }
   try {
     const ins = await getInsights();
@@ -75,9 +117,9 @@ export async function runAutoThink(opts?: {
     const { requestCloudConfirm } = await import('./cloudConfirm');
     const { agentSearchLoop } = await import('./trendService');
     const sysPrompt = buildThinkSystemPrompt(listTools().map(t => t.name)) +
-      '\n【任务】你现在是后台自主分析员：阅读上面的数据概览，自主决定分析方向（如成本异常/机会/风险/需要核实的数字），' +
-      '先调用本地工具核实与深挖，需要行情时申请云端；最后输出一段 200-400 字的分析结论：' +
-      '①发现（事实+数字依据）②判断（机会/风险/正常）③建议行动（具体到项目/物料）。没有值得深挖的就说明并结束。';
+      '\n【任务】你现在是后台成本分析员：请先规划 2-4 个本地分析任务（候选方向：目标达成差距核实 / 模块成本结构与关键依赖 / 跨项目同模块价差与议价机会 / 大额物料供应商集中度 / 成本异常数字核实），' +
+      '逐个调用本地工具执行（每个任务先查数据再下结论）；本地数据能回答的就不要申请云端；只有决策确实需要外部行情（如某物料近期市场价趋势）时才申请 cloud_market_query；' +
+      '最后输出一段 200-400 字的分析结论：①发现（事实+数字依据）②判断（机会/风险/正常）③建议行动（具体到项目/物料）。没有值得深挖的就说明并结束。';
     const logId = await saveThinkLog({ status: 'running', topic: '', overview, thoughts: '', tools_json: '[]', clouds_json: '[]', conclusion: '', started_at: '' });
     opts?.onEvent?.({ kind: 'start', logId });
     const thoughts: string[] = [];

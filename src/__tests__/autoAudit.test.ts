@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ruleFindings, computeAuditFingerprint, AUDIT_PERSPECTIVES } from '../autoAudit';
+import { ruleFindings, computeAuditFingerprint, AUDIT_PERSPECTIVES, isDuplicateFinding, normalizeFindingTitle } from '../autoAudit';
 
 const ctx = {
   projects: [
@@ -92,6 +92,32 @@ describe('computeAuditFingerprint — 防重复思考指纹', () => {
     const a = computeAuditFingerprint(projects, boms, sup, skus, insights, []);
     const b = computeAuditFingerprint([...projects, { id: 2, code: 'P2' }], { ...boms, 2: [] }, sup, skus, insights, []);
     expect(a).not.toBe(b);
+  });
+});
+
+describe('isDuplicateFinding — AI 发现语义去重（2026-08-18：重复就不要报了）', () => {
+  it('完全一致 → 重复', () => {
+    expect(isDuplicateFinding('MNT-3201「驱动板」成本高于同类项目均值 99%', [{ title: 'MNT-3201「驱动板」成本高于同类项目均值 99%' }])).toBe(true);
+  });
+
+  it('数字不同但归一化一致 → 重复', () => {
+    expect(isDuplicateFinding('MNT-3201「驱动板」成本高于均值 98%', [{ title: 'MNT-3201「驱动板」成本高于均值 99%' }])).toBe(true);
+  });
+
+  it('AI 换说法提到同一「实体」模块 → 重复', () => {
+    expect(isDuplicateFinding('驱动板模块价格严重偏离市场均值', [{ title: 'MNT-3201「驱动板」成本高于同类项目均值 99%', detail: '该模块 ¥500 vs 其他项目均值 ¥300' }])).toBe(true);
+  });
+
+  it('4-gram 交叉包含（缺失目标 vs 未设定目标）→ 重复', () => {
+    expect(isDuplicateFinding('多个在研项目缺失目标成本设定', [{ title: 'MNT-2401 未设定目标成本' }])).toBe(true);
+  });
+
+  it('完全不同 → 不重复', () => {
+    expect(isDuplicateFinding('面板模块集中度过高，需引入二供或重新议价', [{ title: 'SKU P1-HIGH 较基座 +61%' }])).toBe(false);
+  });
+
+  it('归一化去掉金额/百分号/标点', () => {
+    expect(normalizeFindingTitle('该模块 ¥1,200.50 成本 +79%（结构件）')).toBe('该模块成本结构件');
   });
 });
 

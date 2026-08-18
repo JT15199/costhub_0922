@@ -99,7 +99,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           setRecentPriceChanges(await getRecentPartPriceChanges(8));
           const fs2 = await getAuditFindings();
           setAuditFindings(fs2);
-          if (fs2.length === 0) refreshAudit();
+          if (fs2.length === 0) refreshAudit(true);
         } catch { /* 忽略 */ }
         // 自主建议（AI 助理后台分析）
         try { setAdvisorInsights(await getAdvisorInsights('open')); } catch { /* 忽略 */ }
@@ -121,7 +121,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   }, []);
 
   // 立即巡检（规则 + 本地 AI 深度洞察；后台执行，完成后刷新列表）
-  const refreshAudit = async () => {
+  const refreshAudit = async (silent = false) => {
     if (auditRunning) return;
     setAuditRunning(true);
     try {
@@ -130,8 +130,11 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         setAuditFindings(await getAuditFindings());
         setRecentPriceChanges(await getRecentPartPriceChanges(8));
         setAuditLastAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
-        if ((r as any).aiSkipped) message.info('数据无变化，AI 未重复思考（规则检查已更新）');
-        else if ((r as any).aiFailed) message.warning('规则发现已更新；AI 深度洞察暂不可用（本地模型未连接或失败），可修复连接后重试');
+        // ⚠️ 2026-08-18：自动触发静默——「数据无变化/AI 失败」只在手动点击「AI 自主巡检」时提示，避免反复打扰
+        if (!silent) {
+          if ((r as any).aiSkipped) message.info('数据无变化，AI 未重复思考（规则检查已更新）');
+          else if ((r as any).aiFailed) message.warning('规则发现已更新；AI 深度洞察暂不可用（本地模型未连接或失败），可修复连接后重试');
+        }
       }
     } catch (e) { console.warn('巡检失败:', e); }
     setAuditRunning(false);
@@ -290,7 +293,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         <div className="card-header">
           <h3><RobotOutlined style={{ color: '#0A84FF' }} /> AI 洞察建议</h3>
           <span style={{ fontSize: 12, color: '#94A3B8' }}>
-            <Button size="small" icon={<RobotOutlined />} loading={auditRunning} onClick={refreshAudit} style={{ fontSize: 11.5 }}>
+            <Button size="small" icon={<RobotOutlined />} loading={auditRunning} onClick={() => refreshAudit()} style={{ fontSize: 11.5 }}>
               {auditRunning ? 'AI 巡检中…' : 'AI 自主巡检'}
             </Button>
             {auditLastAt && <span style={{ marginLeft: 8 }}>上次 {auditLastAt}</span>}
