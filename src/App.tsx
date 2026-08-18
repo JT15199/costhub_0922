@@ -114,16 +114,14 @@ export default function App() {
       // ⚠️ 只有真实识别了模块才广播"完成"（2026-08-17 修复：缓存全命中时不再每 60 秒闪现"刚刚完成 报价识别"）
       if (didWork) window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: '报价识别', done: true } }));
       refreshInsightCount();
-            // 分批提示：一轮只识别 3 个模块（60 秒后自动续下一批）；有情报/失败才提醒，全部无异常静默
+            // 分批提示：一轮只识别 3 个模块（60 秒后自动续下一批）；⚠️ 2026-08-18 失败静默（超时/失败模块下一轮自动续试，不再弹"模型太慢"打扰），只有发现情报才提示
       if (r) {
         if (r.remaining > 0) {
-          if (r.insights > 0 || r.failed > 0) {
-            message.info(`本批识别 ${r.scanned} 个模块${r.insights > 0 ? `，发现 ${r.insights} 条报价情报（见「报价情报」）` : ''}${r.failed > 0 ? `，${r.failed} 个失败` : ''}；剩余 ${r.remaining} 个模块将自动继续`);
+          if (r.insights > 0) {
+            message.info(`本批识别发现 ${r.insights} 条报价情报（见「AI 情报」）；剩余 ${r.remaining} 个模块自动继续`);
           }
-        } else if (r.failed > 0) {
-          message.warning(`后台识别完成：${r.scanned} 个模块，${r.failed} 个识别失败（模型太慢/超时已跳过，可打开模块「跨项目比对」手动重试）`);
         } else if (r.scanned > 0 && r.insights > 0) {
-          message.success(`识别完成：发现 ${r.insights} 条报价情报（见「报价情报」）`);
+          message.success(`识别完成：发现 ${r.insights} 条报价情报（见「AI 情报」）`);
         }
       }
     })();

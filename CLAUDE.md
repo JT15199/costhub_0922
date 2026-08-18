@@ -1,3 +1,7 @@
+### v2.3.19 识别超时降噪（2026-08-18，用户反馈：后台识别完成经常弹模型太慢超时提示）
+- ①autoCompare 单模块 AI 识别超时 60s → 120s（本地模型推理慢，给足时间）；超时文案改"模型响应较慢，将在下一轮自动续试"（无需手动操作）
+- ②App scheduleAppCompare 失败提示静默：移除 message.warning"N 个识别失败（模型太慢/超时已跳过）"——超时/失败模块下一轮 60s 轮询自动重试，不再打扰；只保留发现情报时的提示（剩余提示也只在有情报时显示）
+- **验证**：tsc -b 0 错；184 vitest 全过
 ### v2.3.19 输入区横排 + Agent DSH 循环 + emoji 图标化（2026-08-18，用户反馈：模式图标竖排撑高输入区/Agent逻辑参考DSH/新对话两个+/emoji按规则改）
 - ①输入区：模式切换竖排图标列 → 输入框上方横排一行（MessageOutlined/RobotOutlined/BulbOutlined 30×24 高亮选中+模式说明小字），不再撑高输入框
 - ②Agent 改造为 DSH 式循环（sendAgentTask 复用 runThinkLoop 文本协议）：替代原「计划(非流式JSON)→顺序执行→总结」三段式——模型在一次流式对话中自主 思考→[TOOL]→结果回填→继续→结论（≤8 轮），执行轨迹卡实时呈现，云端走 requestCloudApproval 就地审批；requestCloudApproval 上移定义（依赖顺序）

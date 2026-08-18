@@ -156,7 +156,8 @@ export async function runAiIdentifyOnce(rows: any[], aliases: any[]): Promise<an
       try { if (typeof cleanupFn === 'function') cleanupFn(); } catch { /* 取消监听失败忽略 */ }
       fn();
     };
-    const timer = setTimeout(() => finish(() => reject(new Error('识别超时（60s）——模型响应太慢，该模块已跳过，可稍后手动重试'))), 60000);
+    // ⚠️ 超时 120s（2026-08-18 用户反馈：本地模型慢，60s 经常超时提示太频繁）——超时模块下一轮轮询自动续试
+    const timer = setTimeout(() => finish(() => reject(new Error('识别超时（120s）——模型响应较慢，该模块将在下一轮自动续试'))), 120000);
     startOllamaStream(url, model,
       [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }],
       t => { full += t; }, () => {},
