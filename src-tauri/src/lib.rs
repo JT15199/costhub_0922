@@ -423,21 +423,23 @@ async fn send_http(method: &str, request: HttpRequest) -> Result<HttpResponse, S
         hdrs.join("; ")
     } else { String::new() };
 
-    // 改进错误处理：提供更详细的错误信息
-    let mut body = match response.text().await {
-        Ok(text) => text,
+    // 读取响应体：宽容解码——网络截断导致的多字节字符被切断/非 UTF-8 内容不再硬失败
+    //（否则前端报"HTTP 0: error decoding response body"吓人错误），转 lossy 字符串交给前端 JSON 解析兜底；
+    // 仅真实读取中断（连接断开）才报错
+    let bytes = match response.bytes().await {
+        Ok(b) => b,
         Err(e) => {
             let error_detail = format!(
                 "Failed to read response body: {}. This may be caused by: \
-                1) Response timeout (current limit: 120s), \
-                2) Invalid response encoding, \
-                3) Network interruption. \
-                Please check if the API endpoint is correct and the response is not too large.",
+                1) Network interruption / connection closed mid-body, \
+                2) Response too large. \
+                (total request timeout: 20 minutes)",
                 e
             );
             return Err(error_detail);
         }
     };
+    let mut body = String::from_utf8_lossy(&bytes).into_owned();
 
     // 诊断：504/502/408 打印代理标识头 + 正文片段，实锤返回方（Ollama JSON vs 公司代理 HTML 错误页）。
     // 诊断同时塞进返回 body 开头 → 前端报错弹窗直接显示，无需打开日志文件

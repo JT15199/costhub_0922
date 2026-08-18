@@ -1,3 +1,9 @@
+### v2.3.19 DeepSeek 原生搜索报错降噪（2026-08-18，用户反馈：物料趋势洞察经常弹"原生搜索 HTTP 0: Failed to read response body: error decoding response body"）
+- **根因**：Rust send_http 用 response.text() 严格 UTF-8 解码——响应体被网络截断（多字节字符切一半）即硬失败 → 前端 rustPost 包装 {status:0, body:错误} → 原生搜索抛错 → console.warn"[DeepSeek原生搜索] 调用失败，退回标准流程"（恢复成功的噪音，洞察实际已自动切换标准流程完成）
+- **① Rust 宽容解码**（src-tauri/src/lib.rs send_http）：response.text() → response.bytes() + String::from_utf8_lossy——截断/非 UTF-8 不再硬失败，转 lossy 字符串交前端 JSON 解析兜底；仅真实连接断开才报错；错误文案去掉过时的"120s"模板（实际总超时 20 分钟），改"连接中断/响应过大"
+- **② 原生搜索失败自动重试一次**（trendService tryDeepSeekNativeInsight）：首次调用失败（网络抖动/公司代理常见）自动重试，再失败才切换标准流程
+- **③ 噪音降级**：console.warn → console.info 中性文案（"已自动切换标准搜索流程"，不再"调用失败"字样），用户 DevTools 不再看到吓人红色/黄色报错；审计日志（logOutboundRequest/ai_request_logs）不受影响
+- **验证**：cargo check 0 错；tsc -b 0 错；175 vitest 全过
 ### v2.3.19 新建项目品类联动规格 + 删除规格预估（2026-08-18，用户：新建项目弹默认显示器填写内容，应支持鼠标/手机/手写笔/平板/PC/包等；规格预估按钮没用删掉）
 - **方案（用户选定）**：统一模板 + 品类联动规格——基础字段（代号/名称/类型/品类/档位/状态/平台费率/利润费率）所有品类共用一张表单，规格区按品类联动（Form.useWatch('category')）
 - **① 品类联动**：品类=显示器 → 显示 屏幕尺寸/分辨率/刷新率/面板（原 4 字段，列表规格列/报告/导出继续使用）；其他品类 → 隐藏显示器字段，改显示通用「关键规格」自由文本（Input，placeholder 如 DPI/传感器/连接方式）

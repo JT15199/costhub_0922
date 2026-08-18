@@ -1576,7 +1576,15 @@ ${skill.systemPrompt || ''}
 
     const userPrompt = `请分析物料「${materialName}」的市场成本趋势（${categoryType === '原材料映射' ? '原材料' : '电器件'}）。请先联网搜索最新行情，再给出结构化结论。`;
 
-    const { text, sources } = await deepSeekNativeSearch(llmConfig, systemPrompt, userPrompt);
+    // 网络抖动（公司代理/弱网）常见：首次失败自动重试一次，再失败交外层兜底切换标准流程
+    let native;
+    try {
+      native = await deepSeekNativeSearch(llmConfig, systemPrompt, userPrompt);
+    } catch (firstErr) {
+      console.info('[原生搜索] 首次调用未成功，自动重试一次...');
+      native = await deepSeekNativeSearch(llmConfig, systemPrompt, userPrompt);
+    }
+    const { text, sources } = native;
 
     // 解析 JSON
     let parsed: any;
@@ -1584,7 +1592,7 @@ ${skill.systemPrompt || ''}
       parsed = extractJSON(text);
       if (parsed._parse_error) throw new Error(parsed._parse_error);
     } catch (e: any) {
-      console.warn('[DeepSeek原生搜索] 解析失败，退回标准流程:', e.message);
+      console.info('[原生搜索] 返回内容无法解析，已自动切换标准搜索流程');
       return null;
     }
 
@@ -1616,7 +1624,7 @@ ${skill.systemPrompt || ''}
     };
     return normalizeResult(result);
   } catch (e: any) {
-    console.warn('[DeepSeek原生搜索] 调用失败，退回标准流程:', e.message);
+    console.info('[原生搜索] 调用未成功（' + (e?.message || '').slice(0, 100) + '），已自动切换标准搜索流程');
     return null;
   }
 }
