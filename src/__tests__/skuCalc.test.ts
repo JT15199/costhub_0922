@@ -75,6 +75,45 @@ describe('calcSkuCost — SKU 成本 = 基座 BOM + Σ差异（原始值）', ()
   });
 });
 
+describe('SKU 变体减/换器件（2026-08-18：outbox/inbox 简包装、8GB→16GB 内存场景）', () => {
+  it('remove：outbox → inbox 简包装（移除包装盒）', () => {
+    const boms2 = [
+      { id: 1, module_name: '包装模块', part_name: '外包装盒', part_model: 'BOX-OUT', part_cost: 12, quantity: 1 },
+      { id: 2, module_name: '结构模块', part_name: '内衬', part_model: 'IN-1', part_cost: 3, quantity: 1 },
+    ];
+    const r = calcSkuCost(boms2, [{ id: 201, diff_type: 'remove', module_name: '包装模块', part_name: '外包装盒', part_model: 'BOX-OUT' }], 15);
+    expect(r.cost).toBe(15 - 12);
+    expect(r.delta).toBe(-12);
+    const { rows } = buildSkuBom(boms2, [{ id: 201, diff_type: 'remove', module_name: '包装模块', part_name: '外包装盒', part_model: 'BOX-OUT' }]);
+    expect(rows.find((x: any) => x.part_name === '外包装盒')?._skuStatus).toBe('removed');
+  });
+
+  it('replace 带 new_model：8GB 内存 → 16GB（换型号 + 换单价）', () => {
+    const boms2 = [
+      { id: 1, module_name: '核心模块', part_name: '内存', part_model: '8GB DDR4', part_cost: 45, quantity: 1 },
+    ];
+    const diff = { id: 202, diff_type: 'replace' as const, module_name: '核心模块', part_name: '内存', part_model: '8GB DDR4', new_model: '16GB DDR4', unit_cost: 85, quantity: 1 };
+    const r = calcSkuCost(boms2, [diff], 45);
+    expect(r.cost).toBe(85); // -45 + 85
+    const { rows } = buildSkuBom(boms2, [diff]);
+    const row = rows.find((x: any) => x.part_name === '内存');
+    expect(row?._skuStatus).toBe('replaced');
+    expect(row?._newModel).toBe('16GB DDR4');
+    expect(row?._newCost).toBe(85);
+  });
+
+  it('replace 不带 new_model：只换单价/数量，型号沿用基座', () => {
+    const boms2 = [
+      { id: 1, module_name: '核心模块', part_name: '内存', part_model: '8GB DDR4', part_cost: 45, quantity: 1 },
+    ];
+    const diff = { id: 203, diff_type: 'replace' as const, module_name: '核心模块', part_name: '内存', part_model: '8GB DDR4', unit_cost: 40, quantity: 2 };
+    const { rows } = buildSkuBom(boms2, [diff]);
+    const row = rows.find((x: any) => x.part_name === '内存');
+    expect(row?._newModel).toBe('');
+    expect(row?._newQty).toBe(2);
+  });
+});
+
 describe('buildSkuBom — 合并 BOM 展示', () => {
   it('差异合成：added/removed/replaced 标注正确', () => {
     const { rows } = buildSkuBom(boms, [

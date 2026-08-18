@@ -148,7 +148,7 @@ async function ensureSchema(d: Database) {
     `CREATE TABLE IF NOT EXISTS product_scores (id INTEGER PRIMARY KEY AUTOINCREMENT, ref_type TEXT NOT NULL, ref_id INTEGER NOT NULL, feature_id INTEGER NOT NULL, score REAL DEFAULT 0)`,
     `CREATE TABLE IF NOT EXISTS module_feature_links (id INTEGER PRIMARY KEY AUTOINCREMENT, module_name TEXT NOT NULL, feature_id INTEGER NOT NULL, created_at TEXT DEFAULT (datetime('now','localtime')), UNIQUE(module_name, feature_id))`,
     `CREATE TABLE IF NOT EXISTS project_skus (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, sku_code TEXT NOT NULL, sku_name TEXT DEFAULT '', spec_desc TEXT DEFAULT '', remark TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now','localtime')))`,
-    `CREATE TABLE IF NOT EXISTS sku_diffs (id INTEGER PRIMARY KEY AUTOINCREMENT, sku_id INTEGER NOT NULL, diff_type TEXT NOT NULL, module_name TEXT DEFAULT '', part_name TEXT DEFAULT '', part_model TEXT DEFAULT '', quantity REAL DEFAULT 1, unit_cost REAL DEFAULT 0, remark TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now','localtime')))`,
+    `CREATE TABLE IF NOT EXISTS sku_diffs (id INTEGER PRIMARY KEY AUTOINCREMENT, sku_id INTEGER NOT NULL, diff_type TEXT NOT NULL, module_name TEXT DEFAULT '', part_name TEXT DEFAULT '', part_model TEXT DEFAULT '', new_model TEXT DEFAULT '', quantity REAL DEFAULT 1, unit_cost REAL DEFAULT 0, remark TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now','localtime')))`,
     `CREATE TABLE IF NOT EXISTS part_aliases (id INTEGER PRIMARY KEY AUTOINCREMENT, module_name TEXT DEFAULT '', alias_name TEXT NOT NULL, alias_model TEXT DEFAULT '', canonical_name TEXT NOT NULL, canonical_model TEXT DEFAULT '', main_category TEXT DEFAULT '', sub_category TEXT DEFAULT '', source TEXT DEFAULT 'user_confirmed', created_at TEXT DEFAULT (datetime('now','localtime')))`,
     `CREATE TABLE IF NOT EXISTS part_compare_cache (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT DEFAULT '', module_name TEXT NOT NULL, fingerprint TEXT NOT NULL, result_json TEXT DEFAULT '', identified_at TEXT DEFAULT (datetime('now','localtime')), UNIQUE(category, module_name))`,
     `CREATE TABLE IF NOT EXISTS ai_think_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT DEFAULT (datetime('now','localtime')), finished_at TEXT DEFAULT '', status TEXT DEFAULT 'running', topic TEXT DEFAULT '', overview TEXT DEFAULT '', thoughts TEXT DEFAULT '', tools_json TEXT DEFAULT '[]', clouds_json TEXT DEFAULT '[]', conclusion TEXT DEFAULT '', error TEXT DEFAULT '')`,
@@ -306,6 +306,7 @@ async function ensureSchema(d: Database) {
     // part_insights 补 handled_json（已处理组快照，供「已处理」视图查看/撤销）
   await ignoreSchemaError(d.execute("ALTER TABLE part_insights ADD COLUMN handled_json TEXT DEFAULT ''"));
   await ignoreSchemaError(d.execute("ALTER TABLE projects ADD COLUMN specs TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE sku_diffs ADD COLUMN new_model TEXT DEFAULT ''"));
   await ignoreSchemaError(d.execute("ALTER TABLE ai_bridge_logs ADD COLUMN cloud_prompt TEXT DEFAULT ''"));
 // 为 trend_items 表添加缺失的列
   await ignoreSchemaError(d.execute('ALTER TABLE trend_items ADD COLUMN magnitude_min REAL DEFAULT NULL'));

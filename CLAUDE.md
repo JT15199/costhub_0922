@@ -1,3 +1,10 @@
+### v2.3.19 SKU 变体减/换器件 + 列表/树展示（2026-08-18，用户：SKU只有增加器件，还需减器件（outbox/inbox包装简化）和替换器件（8GB→16GB内存）；项目列表展示变体；SKU树里也体现）
+- **① 替换型号能力**（数据层）：sku_diffs 新增 new_model 列（CREATE + ensureSchema ALTER），saveSkuDiff 全带；skuCalc 透传 _newModel——replace 支持「换型号+换单价」（8GB→16GB），new_model 空 = 只换单价/数量
+- **② 对比表编辑增强**（SKU 变体 tab）：点格子编辑态新增「换型号」输入（输入 ≠ 基座型号 = 替换，悬停显示 基座型号→新型号，黄色高亮）＋「⊖ 移除」按钮（基座行=remove/新增行=删除 add，替代"数量改0"隐晦约定）；提示文案更新（outbox→inbox 简包装示例）
+- **③ 差异弹窗/详情弹窗**：diffModal replace 加「新型号（可选）」输入；详情合并 BOM 型号列、差异规则表型号列显示 旧→新
+- **④ 项目列表「SKU 变体」列**：每个项目行显示 SKU Tag（代号 + 较基座 ±¥，橙=高/绿=低/蓝=平），点击直达该项目 SKU tab；数据来自全局 skuCostMap（allBomsMap+allSkuDiffs 计算，项目加载时填充）
+- **⑤ SKU 树体现**：品类→项目→SKU 树——SKU 节点标题带整机成本与较基座差（¥xxx +xx/−xx）、Tag 颜色随成本高低（橙/绿/蓝）；项目节点标题带 [N SKU] 计数
+- **验证**：tsc -b 0 错；186 vitest 全过（+3 SKU 减/换用例：outbox 去包装、8GB→16GB 换型号、只换单价）
 ### v2.3.19 巡检已读条目反复弹出修复（2026-08-18，用户反馈：巡检发现标记已读了还在反复弹出）
 - **根因①（稳定键失配）**：replaceAuditFindings 稳定键=type+objects，AI 发现 objects 是模型自由输出（同一发现各轮可能 ["M270"] / ["M270","电源"] / []）→ 已读条目匹配不上 → 当新发现重新插入 unread
 - **根因②（AI 发现只活一轮）**：AI 层被指纹跳过时 findings 里没有 AI 条目 → replaceAuditFindings 把旧 AI 发现全 dismiss（隐藏）→ 指纹一变 AI 重新生成类似发现 → 弹出循环

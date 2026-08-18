@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { EmojiIcon } from '../iconMap';
 import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Segmented, Tag, message, notification, Popconfirm, Tabs, Row, Col, Tooltip, Card, Statistic, Upload, Alert, DatePicker, Checkbox, AutoComplete, Radio, Tree, Badge } from 'antd';
-import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined, InboxOutlined, DollarOutlined, TagOutlined, LineChartOutlined, BarChartOutlined, ToolOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, AimOutlined, BuildOutlined, HistoryOutlined, EyeOutlined, CheckOutlined, CloseOutlined, RobotOutlined, BulbOutlined } from '@ant-design/icons';
+import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined, InboxOutlined, DollarOutlined, TagOutlined, LineChartOutlined, BarChartOutlined, ToolOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, AimOutlined, BuildOutlined, HistoryOutlined, EyeOutlined, CheckOutlined, CloseOutlined, RobotOutlined, BulbOutlined, MinusCircleOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
@@ -103,28 +103,60 @@ export default function Projects() {
         const tByP: Record<number, any[]> = {}; const bByP: Record<number, any[]> = {}; const sByP: Record<number, any[]> = {};
         list.forEach((p: any, i: number) => { tByP[p.id] = targetsByP[i]; bByP[p.id] = bomsByP[i]; sByP[p.id] = snapsByP[i]; });
         setProjectStatuses(computeProjectStatuses(list, tByP, bByP, insights, sByP));
+        setAllBomsMap(bByP); // SKU 成本（列表/树展示）
+        try {
+          const skus = await getAllSkus();
+          setAllSkus(skus);
+          setAllSkuDiffs(await getAllSkuDiffs(skus.map((s: any) => s.id)));
+        } catch { /* 忽略 */ }
       } catch (e) { console.warn('状态点计算失败:', e); }
     })();
   }, []);
   // 品类→项目→SKU 树：全部 SKU（一次拉齐，与品类/项目组装成树）
   const [allSkus, setAllSkus] = useState<any[]>([]);
+  const [allSkuDiffs, setAllSkuDiffs] = useState<Record<number, any[]>>({});
+  const [allBomsMap, setAllBomsMap] = useState<Record<number, any[]>>({});
   const [skuTreeOpen, setSkuTreeOpen] = useState(false);
-  useEffect(() => { getAllSkus().then(setAllSkus); }, []);
+  useEffect(() => {
+    getAllSkus().then(async (l) => {
+      setAllSkus(l);
+      try { setAllSkuDiffs(await getAllSkuDiffs(l.map((s: any) => s.id))); } catch { /* 忽略 */ }
+    });
+  }, []);
+  // 全部 SKU 成本（列表/树展示：较基座 ±），依赖项目 BOM 与差异
+  const skuCostMap = useMemo(() => {
+    const map: Record<number, { cost: number; delta: number }> = {};
+    allSkus.forEach((s: any) => {
+      const boms = allBomsMap[s.project_id] || [];
+      const base = boms.reduce((sum: number, b: any) => sum + (b.part_cost || 0) * (b.quantity || 1), 0);
+      const r = calcSkuCostFn(boms, allSkuDiffs[s.id] || [], base);
+      map[s.id] = { cost: r.cost, delta: r.delta };
+    });
+    return map;
+  }, [allSkus, allSkuDiffs, allBomsMap]);
   const skuTreeData = useMemo(() => {
     const cats = [...new Set(projects.map(p => p.category || '未分类'))].sort();
     return cats.map(cat => {
       const projs = projects.filter(p => (p.category || '未分类') === cat);
       return {
         key: `cat-${cat}`, title: cat, type: 'category',
-        children: projs.map(p => ({
-          key: `proj-${p.id}`, title: `${p.code} ${p.name}`, type: 'project', projectId: p.id,
-          children: allSkus.filter(s => s.project_id === p.id).map(s => ({
-            key: `sku-${s.id}`, title: `${s.sku_code}${s.sku_name ? '  ' + s.sku_name : ''}`, type: 'sku', projectId: p.id, skuId: s.id, skuCode: s.sku_code,
-          })),
-        })),
+        children: projs.map(p => {
+          const skuCount = allSkus.filter((s: any) => s.project_id === p.id).length;
+          return {
+          key: `proj-${p.id}`, title: `${p.code} ${p.name}${skuCount ? `  [${skuCount} SKU]` : ''}`, type: 'project' as const, projectId: p.id,
+          children: allSkus.filter(s => s.project_id === p.id).map(s => {
+            const c = skuCostMap[s.id];
+            const d = c ? c.delta : 0;
+            return {
+              key: `sku-${s.id}`,
+              title: `${s.sku_code}${s.sku_name ? '  ' + s.sku_name : ''}${c ? '  ¥' + c.cost.toFixed(0) + (d > 0 ? ' +' : d < 0 ? ' ' : ' ') + d.toFixed(0) : ''}`,
+              type: 'sku' as const, projectId: p.id, skuId: s.id, skuCode: s.sku_code, costDelta: d,
+            };
+          }),
+        }}),
       };
     });
-  }, [projects, allSkus]);
+  }, [projects, allSkus, skuCostMap]);
   // 加载品类列表
   useEffect(() => {
     import('../db').then(async (m) => {
@@ -162,6 +194,7 @@ export default function Projects() {
   const [editingCell, setEditingCell] = useState<{ skuId: number; rowKey: string } | null>(null);
   const [edQty, setEdQty] = useState<number>(1);
   const [edCost, setEdCost] = useState<number>(0);
+  const [edModel, setEdModel] = useState<string>(''); // 编辑态型号（输入不同值 = 替换型号，如 8GB→16GB）
   // 添加中的临时行：module → 名称/型号（未保存）
   const [addingRows, setAddingRows] = useState<Record<string, { name: string; model: string }>>({});
   const [addPartModal, setAddPartModal] = useState(false);
@@ -170,8 +203,8 @@ export default function Projects() {
     const l = await getSkus(selectedPid!); setSkus(l);
     setSkuDiffsMap(await getAllSkuDiffs(l.map(s => s.id)));
   };
-  // 行内保存：qty<=0 → 移除（基座行）/ 删除（新增行）；恢复基座值 → 自动还原
-  const applyCell = async (skuId: number, row: any, qty: number, cost: number) => {
+  // 行内保存：qty<=0 → 移除（基座行）/ 删除（新增行）；恢复基座值 → 自动还原；model ≠ 基座型号 → 替换型号（8GB→16GB）
+  const applyCell = async (skuId: number, row: any, qty: number, cost: number, model?: string) => {
     const diffs = skuDiffsMap[skuId] || [];
     const matchBase = (d: any) => d.part_name === row.name && d.part_model === row.model && (!d.module_name || d.module_name === row.module);
     const clearBase = async () => { for (const d of diffs.filter((d: any) => d.diff_type !== 'add' && matchBase(d))) await deleteSkuDiff(d.id); };
@@ -183,13 +216,33 @@ export default function Projects() {
     } else if (qty <= 0) {
       await clearBase();
       await saveSkuDiff({ sku_id: skuId, diff_type: 'remove', module_name: row.module, part_name: row.name, part_model: row.model });
-    } else if (qty === row.baseQty && cost === row.baseCost) {
+    } else if (qty === row.baseQty && cost === row.baseCost && (!model || model === row.model)) {
       await clearBase(); // 改回基座值 → 还原
     } else {
       await clearBase();
-      await saveSkuDiff({ sku_id: skuId, diff_type: 'replace', module_name: row.module, part_name: row.name, part_model: row.model, quantity: qty, unit_cost: cost });
+      await saveSkuDiff({ sku_id: skuId, diff_type: 'replace', module_name: row.module, part_name: row.name, part_model: row.model, new_model: model && model !== row.model ? model : '', quantity: qty, unit_cost: cost });
     }
     await refreshSkus();
+  };
+  // 从某 SKU 明确移除该器件（基座行 → remove；新增行 → 删除 add 差异）
+  const removeCell = async () => {
+    if (!editingCell) return;
+    const row = skuCompareRows.find(r => r.key === editingCell.rowKey);
+    if (!row) { cancelEdit(); return; }
+    const skuId = editingCell.skuId;
+    const diffs = skuDiffsMap[skuId] || [];
+    if (row._isAdd) {
+      for (const d of diffs.filter((x: any) => x.diff_type === 'add' && x.part_name === row.name && x.part_model === row.model && x.module_name === row.module)) {
+        await deleteSkuDiff(d.id);
+      }
+    } else {
+      for (const d of diffs.filter((x: any) => x.diff_type !== 'add' && x.part_name === row.name && x.part_model === row.model && (!x.module_name || x.module_name === row.module))) {
+        await deleteSkuDiff(d.id);
+      }
+      await saveSkuDiff({ sku_id: skuId, diff_type: 'remove', module_name: row.module, part_name: row.name, part_model: row.model });
+    }
+    await refreshSkus();
+    cancelEdit();
   };
   // 开始编辑某单元格（新增行还需先填名称/型号）
   const startEdit = (sku: any, row: any) => {
@@ -198,6 +251,7 @@ export default function Projects() {
     setEditingCell({ skuId: sku.id, rowKey: row.key });
     setEdQty(cell && cell.qty != null ? cell.qty : (row.baseQty ?? 1));
     setEdCost(cell && cell.cost != null ? cell.cost : (row.baseCost ?? 0));
+    setEdModel((cell && cell.newModel) || row.model || '');
   };
   const cancelEdit = () => setEditingCell(null);
   const saveEdit = async () => {
@@ -205,7 +259,7 @@ export default function Projects() {
     const row = skuCompareRows.find(r => r.key === editingCell.rowKey);
     if (!row) { cancelEdit(); return; }
     if (row._isAdd && (!row.name || !row.model)) { message.warning('请先填写器件名称和型号'); return; }
-    await applyCell(editingCell.skuId, row, edQty, edCost);
+    await applyCell(editingCell.skuId, row, edQty, edCost, edModel.trim());
     cancelEdit();
   };
   // 保存模块内新增器件（点某 SKU 列的 ＋ 后编辑数量/单价）
@@ -621,7 +675,7 @@ export default function Projects() {
           const rm = diffs.find(d => d.diff_type === 'remove' && matchBase(d, b));
           if (rm) return { status: 'removed' as const };
           const rp = diffs.find(d => d.diff_type === 'replace' && matchBase(d, b));
-          if (rp) return { status: 'replaced' as const, cost: rp.unit_cost || 0, qty: rp.quantity ?? (b.quantity || 1) };
+          if (rp) return { status: 'replaced' as const, cost: rp.unit_cost || 0, qty: rp.quantity ?? (b.quantity || 1), newModel: rp.new_model || '' };
           return { status: 'base' as const, cost: b.part_cost || 0, qty: b.quantity || 1 };
         }),
       });
@@ -1126,6 +1180,28 @@ export default function Projects() {
     { title: '品类', dataIndex: 'category', width: 75, render: (v: string) => <Tag color={v && v !== '显示器' ? 'purple' : 'default'}>{v || '显示器'}</Tag> },
     { title: '类型', dataIndex: 'project_type', width: 75, render: (v: string) => <Tag color={v === '已完成' ? 'green' : 'blue'}>{v || '在研'}</Tag> },
     { title: '状态', dataIndex: 'status', width: 75, render: (v: string) => <Tag color={v === '进行中' ? 'blue' : v === '已完成' ? 'green' : 'default'}>{v}</Tag> },
+    {
+      title: 'SKU 变体', key: 'skuv', width: 240,
+      render: (_: any, r: any) => {
+        const sks = allSkus.filter((s: any) => s.project_id === r.id);
+        if (sks.length === 0) return <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>;
+        return (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {sks.map((s: any) => {
+              const c = skuCostMap[s.id];
+              const d = c ? c.delta : 0;
+              return (
+                <Tag key={s.id} color={d > 0 ? 'orange' : d < 0 ? 'green' : 'blue'} style={{ margin: 0, cursor: 'pointer' }}
+                  onClick={(ev) => { ev.stopPropagation(); selectProject(r.id); setActiveTab('sku'); }}
+                  title={`${s.sku_name || ''} 整机 ¥${c ? c.cost.toFixed(2) : '?'}（较基座 ${d > 0 ? '+' : ''}${d.toFixed(2)}）· 点击查看 SKU`}>
+                  {s.sku_code}{c ? ` ${d > 0 ? '+' : ''}${d.toFixed(2)}` : ''}
+                </Tag>
+              );
+            })}
+          </div>
+        );
+      }
+    },
     { title: '规格', key: 's', width: 190, ellipsis: true, render: (_: any, r: any) => {
         const specs = r.category === '显示器'
           ? [r.screen_size, r.resolution, r.refresh_rate, r.panel_type].filter(Boolean).join(' / ')
@@ -1228,7 +1304,7 @@ export default function Projects() {
                 }}
                 titleRender={(node: any) => (
                   <span style={{ fontSize: 12.5, color: node.type === 'category' ? '#0A84FF' : node.type === 'project' ? '#334155' : '#64748B', fontWeight: node.type === 'project' ? 600 : undefined }}>
-                    {node.type === 'sku' && <Tag color="blue" style={{ fontSize: 10, marginRight: 4 }}>SKU</Tag>}{node.title}
+                    {node.type === 'sku' && <Tag color={node.costDelta > 0 ? 'orange' : node.costDelta < 0 ? 'green' : 'blue'} style={{ fontSize: 10, marginRight: 4 }}>SKU</Tag>}{node.title}
                   </span>
                 )}
               />
@@ -2099,7 +2175,7 @@ export default function Projects() {
                         <Upload beforeUpload={handleSkuImportFile} showUploadList={false} accept=".xlsx,.xls"><Button size="small" icon={<UploadOutlined />}>导入差异（Excel）</Button></Upload>
                         {skus.length > 0 && <Button size="small" icon={<EyeOutlined />} onClick={() => setSkuDetail(skus[0])}>查看全量 BOM</Button>}
                         <span style={{ fontSize: 11.5, color: '#94A3B8' }}>
-                          表格里改哪个 SKU 的哪一行，就是它的差异（黄色 = 与基座不同）；改回基座的值自动还原；基座降价自动联动所有 SKU
+                          点某 SKU 的格子编辑：数量/单价直接改，填「换型号」= 替换（如 8GB→16GB），⊖ 移除（如 outbox→inbox 简包装）；改回基座值自动还原；基座降价自动联动所有 SKU
                         </span>
                       </Space>
                     </div>
@@ -2167,10 +2243,17 @@ export default function Projects() {
                                           return (
                                             <td key={s.id} style={{ ...tdBase, textAlign: 'right' }}>
                                               <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }}>
-                                                <InputNumber size="small" autoFocus value={edQty} onChange={v => setEdQty(v ?? 0)} min={0} step={0.000001} style={{ width: 62 }} onPressEnter={saveEdit} />
-                                                <InputNumber size="small" value={edCost} onChange={v => setEdCost(v ?? 0)} min={0} precision={4} style={{ width: 76 }} onPressEnter={saveEdit} />
+                                                <InputNumber size="small" autoFocus value={edQty} onChange={v => setEdQty(v ?? 0)} min={0} step={0.000001} style={{ width: 56 }} onPressEnter={saveEdit} />
+                                                <InputNumber size="small" value={edCost} onChange={v => setEdCost(v ?? 0)} min={0} precision={4} style={{ width: 70 }} onPressEnter={saveEdit} />
+                                                {!r._isAdd && (
+                                                  <Input size="small" value={edModel} onChange={e => setEdModel(e.target.value)} placeholder="换型号(可选)" style={{ width: 108 }}
+                                                    title="输入新型号 = 替换型号（如 8GB → 16GB）；留空 = 只改数量/单价" onPressEnter={saveEdit} />
+                                                )}
                                                 <Button size="small" type="link" icon={<CheckOutlined />} onClick={saveEdit} />
                                                 <Button size="small" type="link" icon={<CloseOutlined />} onClick={cancelEdit} />
+                                                {!r._isAdd && (
+                                                  <Button size="small" type="text" danger icon={<MinusCircleOutlined />} title="从该 SKU 移除此器件" onClick={removeCell} />
+                                                )}
                                               </span>
                                             </td>
                                           );
@@ -2192,10 +2275,16 @@ export default function Projects() {
                                         }
                                         const isDiff = c.status === 'replaced' || c.status === 'added';
                                         const amt = (c.cost ?? 0) * (c.qty ?? 1);
+                                        const modelTip = c.newModel && c.newModel !== r.model
+                                          ? '替换型号：' + r.model + ' → ' + c.newModel
+                                          : (c.status === 'replaced' ? '已替换（单价/数量不同）' : '点击编辑：改数量/单价，或输入新型号=替换，点 ⊖ 移除');
                                         return (
                                           <td key={s.id} style={{ ...tdBase, textAlign: 'right' }}>
-                                            <div onClick={() => startEdit(s, r)} title="点击编辑（数量改 0 = 移除）" style={{ cursor: 'pointer', background: isDiff ? '#FEF3C7' : 'transparent', borderRadius: 4, padding: '2px 6px' }}>
-                                              <div style={{ fontVariantNumeric: 'tabular-nums' }}>¥{(c.cost ?? 0).toFixed(2)} × {c.qty ?? 1}</div>
+                                            <div onClick={() => startEdit(s, r)} title={modelTip} style={{ cursor: 'pointer', background: isDiff ? '#FEF3C7' : 'transparent', borderRadius: 4, padding: '2px 6px' }}>
+                                              <div style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                                {c.newModel && c.newModel !== r.model ? <b style={{ color: '#D97706' }}>{c.newModel} </b> : null}
+                                                ¥{(c.cost ?? 0).toFixed(2)} × {c.qty ?? 1}
+                                              </div>
                                               <div style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>¥{amt.toFixed(2)}</div>
                                             </div>
                                           </td>
@@ -2782,7 +2871,9 @@ export default function Projects() {
                     </div>
                     <Table size="small" pagination={false} rowKey={(r: any) => String(r.id)} dataSource={m.items} columns={[
                       { title: '名称', dataIndex: 'part_name', width: 170, ellipsis: true, render: (v: string, r: any) => <span style={{ textDecoration: r._skuStatus === 'removed' ? 'line-through' : 'none', color: r._skuStatus === 'removed' ? '#94A3B8' : undefined }}>{v}</span> },
-                      { title: '型号', dataIndex: 'part_model', width: 140, ellipsis: true },
+                      { title: '型号', dataIndex: 'part_model', width: 160, ellipsis: true, render: (v: string, r: any) => r._skuStatus === 'replaced' && r._newModel
+                        ? <span><span style={{ textDecoration: 'line-through', color: '#94A3B8' }}>{v}</span> <b style={{ color: '#D97706' }}>→ {r._newModel}</b></span>
+                        : v },
                       { title: '单价', key: 'cost', width: 140, align: 'right' as const, render: (_: any, r: any) => r._skuStatus === 'replaced'
                         ? <span><span style={{ textDecoration: 'line-through', color: '#94A3B8' }}>{(r.part_cost || 0).toFixed(4)}</span> <b style={{ color: '#D97706' }}>→ {(r._newCost || 0).toFixed(4)}</b></span>
                         : <span style={{ fontVariantNumeric: 'tabular-nums' }}>{(r.part_cost || 0).toFixed(4)}</span> },
@@ -2806,7 +2897,9 @@ export default function Projects() {
                   { title: '动作', dataIndex: 'diff_type', width: 70, render: (v: string) => v === 'add' ? <Tag color="green">加</Tag> : v === 'remove' ? <Tag color="red">减</Tag> : <Tag color="orange">换</Tag> },
                   { title: '模块', dataIndex: 'module_name', width: 120, ellipsis: true },
                   { title: '器件', dataIndex: 'part_name', width: 170, ellipsis: true },
-                  { title: '型号', dataIndex: 'part_model', width: 140, ellipsis: true },
+                  { title: '型号', dataIndex: 'part_model', width: 160, ellipsis: true, render: (v: string, r: any) => r.diff_type === 'replace' && r.new_model
+                    ? <span><span style={{ color: '#94A3B8' }}>{v}</span> <b style={{ color: '#D97706' }}>→ {r.new_model}</b></span>
+                    : v },
                   { title: '数量', dataIndex: 'quantity', width: 60, align: 'center' as const },
                   { title: '单价', dataIndex: 'unit_cost', width: 100, align: 'right' as const, render: (v: number, r: any) => r.diff_type === 'remove' ? <span style={{ color: '#94A3B8' }}>—</span> : <span style={{ fontVariantNumeric: 'tabular-nums' }}>¥{Number(v || 0).toFixed(4)}</span> },
                   { title: '备注', dataIndex: 'remark', ellipsis: true },
@@ -2874,6 +2967,11 @@ export default function Projects() {
                     {(t === 'add' || t === 'replace') && <Col span={8}><Form.Item label={t === 'replace' ? '新单价(¥)' : '单价(¥)'} name="unit_cost" rules={[{ required: true }]}><InputNumber min={0} precision={4} style={{ width: '100%' }} /></Form.Item></Col>}
                     <Col span={t === 'add' || t === 'replace' ? 8 : 16}><Form.Item label="备注" name="remark"><Input /></Form.Item></Col>
                   </Row>
+                  {t === 'replace' && (
+                    <Form.Item label="新型号（可选）" name="new_model" extra="留空 = 只换单价/数量；填写 = 替换型号（如 8GB → 16GB）">
+                      <Input placeholder="如：16GB" />
+                    </Form.Item>
+                  )}
                   {(t === 'remove' || t === 'replace') && (
                     <div style={{ fontSize: 11.5, color: '#94A3B8', marginTop: -4 }}>
                       {t === 'remove' ? '移除后该器件从 SKU 中删除（成本扣除基座小计）' : '替换后按新单价/数量计成本，自动计算与基座的差额'}

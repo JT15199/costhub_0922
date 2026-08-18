@@ -11,6 +11,7 @@ export interface SkuDiff {
   module_name?: string;
   part_name: string;
   part_model?: string;
+  new_model?: string; // replace 时替换后的新型号（8GB→16GB）；空=只换单价/数量
   quantity?: number | null;
   unit_cost?: number;
   remark?: string;
@@ -58,6 +59,7 @@ export function buildSkuBom(boms: BomRow[], diffs: SkuDiff[]) {
       _skuStatus: rm ? 'removed' : rp ? 'replaced' : 'base',
       _newCost: rp ? (rp.unit_cost || 0) : null,
       _newQty: rp ? (rp.quantity ?? (b.quantity || 1)) : null,
+      _newModel: rp ? (rp.new_model || '') : null,
     };
   });
   diffs.filter(d => d.diff_type === 'add').forEach(d => {

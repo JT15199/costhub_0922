@@ -616,12 +616,12 @@ export async function getSkuDiffs(skuId: number) {
 export async function saveSkuDiff(data: any) {
   const d = await getDb();
   if (data.id) {
-    await d.execute('UPDATE sku_diffs SET diff_type=?, module_name=?, part_name=?, part_model=?, quantity=?, unit_cost=?, remark=? WHERE id=?',
-      [data.diff_type, data.module_name || '', data.part_name || '', data.part_model || '', data.quantity ?? 1, data.unit_cost || 0, data.remark || '', data.id]);
+    await d.execute('UPDATE sku_diffs SET diff_type=?, module_name=?, part_name=?, part_model=?, new_model=?, quantity=?, unit_cost=?, remark=? WHERE id=?',
+      [data.diff_type, data.module_name || '', data.part_name || '', data.part_model || '', data.new_model || '', data.quantity ?? 1, data.unit_cost || 0, data.remark || '', data.id]);
     return data.id;
   }
-  const r = await d.execute('INSERT INTO sku_diffs (sku_id, diff_type, module_name, part_name, part_model, quantity, unit_cost, remark) VALUES (?,?,?,?,?,?,?,?)',
-    [data.sku_id, data.diff_type, data.module_name || '', data.part_name || '', data.part_model || '', data.quantity ?? 1, data.unit_cost || 0, data.remark || '']);
+  const r = await d.execute('INSERT INTO sku_diffs (sku_id, diff_type, module_name, part_name, part_model, new_model, quantity, unit_cost, remark) VALUES (?,?,?,?,?,?,?,?,?)',
+    [data.sku_id, data.diff_type, data.module_name || '', data.part_name || '', data.part_model || '', data.new_model || '', data.quantity ?? 1, data.unit_cost || 0, data.remark || '']);
   return r.lastInsertId;
 }
 
