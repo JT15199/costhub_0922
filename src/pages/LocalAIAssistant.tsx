@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, createElement } from 'react';
-import { Button, Input, InputNumber, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Switch, Segmented, Radio, Dropdown, Drawer, notification } from 'antd';
+import { Button, Input, InputNumber, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Switch, Radio, Dropdown, Drawer, notification } from 'antd';
 import { CopyOutlined, RadarChartOutlined, LockOutlined } from '@ant-design/icons';
 import {
   SendOutlined, RobotOutlined, PlusOutlined, HistoryOutlined,
@@ -2012,7 +2012,16 @@ return (
             </div>
           )}
         </div>
-        <Button size="small" block icon={<PlusOutlined />} onClick={() => startSession()} style={{ margin: '2px 12px 8px', width: 'auto', borderRadius: 9, borderColor: '#E5E9F0', background: '#FAFBFF', color: '#4338CA', fontWeight: 500 }}>＋ 新对话</Button>
+        {/* 视图切换（2026-08-17 收纳：从顶部导航移到这里，顶部只留对话） */}
+        <div style={{ display: 'flex', gap: 6, padding: '0 12px 8px' }}>
+          <div onClick={() => setAdvisorTab('advice')} title="自主建议：成本机会/风险点"
+            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '5px 0', borderRadius: 8, fontSize: 11.5, cursor: 'pointer', background: advisorTab === 'advice' ? '#F3E8FF' : '#FAFAFC', border: advisorTab === 'advice' ? '1px solid #D8B4FE' : '1px solid var(--color-border)', color: advisorTab === 'advice' ? '#7C3AED' : '#6B7280', fontWeight: advisorTab === 'advice' ? 600 : 400 }}>
+            🤖 建议{advisorList.filter((x: any) => x.status === 'open').length > 0 ? <span style={{ background: '#EF4444', color: '#fff', fontSize: 9, borderRadius: 9, padding: '0 5px' }}>{advisorList.filter((x: any) => x.status === 'open').length}</span> : null}
+          </div>
+          <div onClick={() => setAdvisorTab('think')} title="自主分析：AI 后台深度思考全过程"
+            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '5px 0', borderRadius: 8, fontSize: 11.5, cursor: 'pointer', background: advisorTab === 'think' ? '#EEF2FF' : '#FAFAFC', border: advisorTab === 'think' ? '1px solid #A5B4FC' : '1px solid var(--color-border)', color: advisorTab === 'think' ? '#4338CA' : '#6B7280', fontWeight: advisorTab === 'think' ? 600 : 400 }}>🧠 分析</div>
+        </div>
+        <Button size="small" block icon={<PlusOutlined />} onClick={() => startSession()} style={{ margin: '0 12px 8px', width: 'auto', borderRadius: 9, borderColor: '#E5E9F0', background: '#FAFBFF', color: '#4338CA', fontWeight: 500 }}>＋ 新对话</Button>
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px' }}>
           {sessions.map(s => (
             <div key={s.id} onClick={() => switchSession(s.id)} style={{ padding: '9px 10px', borderRadius: 9, cursor: 'pointer', marginBottom: 2, background: s.id === sessionId ? '#EEF2FF' : 'transparent', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -2034,13 +2043,7 @@ return (
             本地 AI 助手
           </div>
           <div onClick={() => setAdvisorTab('chat')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', background: advisorTab === 'chat' ? '#EEF2FF' : 'transparent', color: advisorTab === 'chat' ? '#4338CA' : '#6B7280', fontWeight: advisorTab === 'chat' ? 600 : 400 }}>💬 对话</div>
-          <div onClick={() => setAdvisorTab('advice')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', background: advisorTab === 'advice' ? '#EEF2FF' : 'transparent', color: advisorTab === 'advice' ? '#4338CA' : '#6B7280', fontWeight: advisorTab === 'advice' ? 600 : 400 }}>
-            🤖 自主建议
-            {advisorList.filter((x: any) => x.status === 'open').length > 0 && <span style={{ background: '#EF4444', color: '#fff', fontSize: 9, borderRadius: 9, padding: '1px 5px' }}>{advisorList.filter((x: any) => x.status === 'open').length}</span>}
-          </div>
-          <div onClick={() => setAdvisorTab('think')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', background: advisorTab === 'think' ? '#EEF2FF' : 'transparent', color: advisorTab === 'think' ? '#4338CA' : '#6B7280', fontWeight: advisorTab === 'think' ? 600 : 400 }}>🧠 自主分析</div>
-          <div onClick={async () => { setShowContext(true); setMemories(await loadMemories(50)); }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', color: '#6B7280' }}>📚 知识库</div>
-          <div onClick={async () => { setShowLearn(true); await loadLearnData(); }} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', color: '#6B7280' }}>🧠 学习档案</div>
+          <span style={{ fontSize: 11, color: '#B0B7C3' }}>（自主建议 / 自主分析在左侧切换）</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ fontSize: 11, color: connStatus === 'ok' ? '#16A34A' : connStatus === 'fail' ? '#DC2626' : '#6B7280', background: connStatus === 'ok' ? '#F0FDF4' : connStatus === 'fail' ? '#FEF2F2' : '#F3F4F8', border: '1px solid ' + (connStatus === 'ok' ? '#BBF7D0' : connStatus === 'fail' ? '#FECACA' : '#E5E9F0'), borderRadius: 20, padding: '3px 11px', display: 'flex', alignItems: 'center', gap: 5 }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: connStatus === 'ok' ? '#22C55E' : connStatus === 'fail' ? '#EF4444' : '#D1D5DB' }} />
@@ -2049,10 +2052,14 @@ return (
             <Dropdown
               menu={{
                 items: [
-                  { key: 'tools', label: '🛠 数据分析工具（注入 BOM/器件数据）' },
+                  { key: 'tools', label: '🛠 数据分析工具' },
                   { key: 'import', label: '📥 智能 BOM 导入' },
                   { key: 'demo', label: '📄 演示生成（HTML/PPTX）' },
                   { key: 'rules', label: '🗂 分类规则管理' },
+                  { type: 'divider' },
+                  { key: 'memory', label: '📚 知识库（AI 记忆）' },
+                  { key: 'learn', label: '🧠 学习档案（关注/偏好）' },
+                  { key: 'logs', label: '📋 AI 活动记录' },
                   { type: 'divider' },
                   { key: 'settings', label: '⚙️ 连接设置' },
                 ],
@@ -2061,6 +2068,9 @@ return (
                   else if (key === 'import') setImportModalOpen(true);
                   else if (key === 'demo') setShowDemo(true);
                   else if (key === 'rules') { setShowRules(true); getModuleRules().then(setRules).catch(() => {}); }
+                  else if (key === 'memory') { setShowContext(true); loadMemories(50).then(setMemories).catch(() => {}); }
+                  else if (key === 'learn') { setShowLearn(true); loadLearnData().catch(() => {}); }
+                  else if (key === 'logs') { setLogsOpen(true); if (aiLogs.length === 0) loadAiLogs(); }
                   else if (key === 'settings') { setShowSettings(true); refreshNetStatus(); }
                 },
               }}
@@ -2260,18 +2270,17 @@ return (
               )}
             </div>
           )}
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            {/* 模式切换（2026-08-17 收纳为紧凑图标列，不再占一整行） */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingBottom: 1 }}>
+              <div title="普通对话（默认）" onClick={() => { if (!streaming) setChatMode('chat'); }}
+                style={{ width: 30, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, borderRadius: 8, cursor: streaming ? 'not-allowed' : 'pointer', background: chatMode === 'chat' ? '#EEF2FF' : 'transparent', border: chatMode === 'chat' ? '1px solid #C7D2FE' : '1px solid transparent', opacity: chatMode === 'chat' ? 1 : 0.5 }}>💬</div>
+              <div title="Agent 任务：自动调用工具完成多步任务（只读）" onClick={() => { if (!streaming) setChatMode('agent'); }}
+                style={{ width: 30, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, borderRadius: 8, cursor: streaming ? 'not-allowed' : 'pointer', background: chatMode === 'agent' ? '#EEF2FF' : 'transparent', border: chatMode === 'agent' ? '1px solid #C7D2FE' : '1px solid transparent', opacity: chatMode === 'agent' ? 1 : 0.5 }}>🤖</div>
+              <div title="自主分析：本地模型自由思考 + 按需申请云端" onClick={() => { if (!streaming) setChatMode('think'); }}
+                style={{ width: 30, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, borderRadius: 8, cursor: streaming ? 'not-allowed' : 'pointer', background: chatMode === 'think' ? '#EEF2FF' : 'transparent', border: chatMode === 'think' ? '1px solid #C7D2FE' : '1px solid transparent', opacity: chatMode === 'think' ? 1 : 0.5 }}>🧠</div>
+            </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ marginBottom: 4 }}>
-                <Segmented size="small" value={chatMode} disabled={streaming} onChange={(v: any) => setChatMode(v as any)}
-                  options={[
-                    { label: '💬 普通对话', value: 'chat' },
-                    { label: '🤖 Agent 任务', value: 'agent' },
-                    { label: '🧠 自主分析', value: 'think' },
-                  ]} />
-                {chatMode === 'agent' && <span style={{ fontSize: 10.5, color: '#94A3B8', marginLeft: 6 }}>AI 自动调用工具完成多步任务（全部只读，数据不出本机）</span>}
-                {chatMode === 'think' && <span style={{ fontSize: 10.5, color: '#94A3B8', marginLeft: 6 }}>本地模型自主思考 + 按需申请云端（思考过程实时可见，云端发送需你审批）</span>}
-              </div>
               <Input.TextArea value={input} onChange={e => setInput(e.target.value)} placeholder={chatMode === 'agent' ? '例如：分析 M270 成本结构，找出 top3 风险物料并洞察行情，最后总结 200 字' : chatMode === 'think' ? '例如：评估 M270 的 PCB 成本是否合理，贵的话分析贵在哪（可申请云端查行情）' : '输入问题，或使用左侧工具注入数据分析…'} autoSize={{ minRows: 1, maxRows: 5 }} onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); if (chatMode === 'agent') sendAgentTask(input); else if (chatMode === 'think') sendThinkTask(input); else sendMessage(input); } }} style={{ borderRadius: 10 }} />
             </div>
             {streaming
