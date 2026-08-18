@@ -13,3 +13,4 @@ export * from './db/settings';
 export * from './db/worklog';
 export * from './db/dashboard';
 export * from './db/think';
+export * from './db/goals';

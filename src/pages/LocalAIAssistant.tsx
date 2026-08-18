@@ -40,6 +40,7 @@ import { isProjectInsight } from '../aiBridge';
 import { EmojiIcon } from '../iconMap';
 import DemoGenerator from '../components/DemoGenerator';
 import AutoThinkPanel from '../components/AutoThinkPanel';
+import GoalsCard from '../components/GoalsCard';
 
 // ===== Types =====
 interface ChatMessage { id?: number; role: 'user' | 'assistant'; content: string; reasoning?: string; steps?: string[]; created_at?: string; }
@@ -2273,6 +2274,7 @@ return (
         ) : advisorTab === 'think' ? (
         <div key="think" className="view-enter" style={{ flex: 1, overflowY: 'auto', padding: '16px 0 24px' }}>
           <div style={{ maxWidth: 860, margin: '0 auto', padding: '0 20px' }}>
+            <GoalsCard />
             <AutoThinkPanel mode="full" />
           </div>
         </div>

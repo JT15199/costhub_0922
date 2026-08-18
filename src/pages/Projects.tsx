@@ -368,11 +368,14 @@ export default function Projects() {
   const [insightSelected, setInsightSelected] = useState<Set<number>>(new Set()); // 批量选择（模块 id）
   const [insightBusyKey, setInsightBusyKey] = useState<string | null>(null); // 正在处理的 模块id|组index
   const [unreadMods, setUnreadMods] = useState<Set<string>>(new Set());
+  // 2026-08-18 重写：逐行「不是同一器件」乐观排除集（标记后行保留原位变灰+可撤销，而不是立即消失无反馈）
+  const [rowExcluded, setRowExcluded] = useState<Set<string>>(new Set());
   const loadInsights = async () => {
     try { await cleanupInsightStatus(); } catch { /* 清理失败不影响加载 */ } // 历史脏数据：已核对/已处理完的模块不再停在待处理
     const list = await getInsights();
     setInsights(list);
     setUnreadMods(new Set(list.filter(i => i.status === 'unread').map(i => i.module_name)));
+    setRowExcluded(new Set()); // 每次重载清空乐观排除标记（库中数据已是最新）
   };
   // 变更后触发全局识别（App 监听 costhub-compare-request 立即执行；空闲时也会自动扫描）
   const scheduleAutoCompare = () => window.dispatchEvent(new CustomEvent('costhub-compare-request'));
@@ -465,10 +468,11 @@ export default function Projects() {
       const maxP = Math.max(...prices), minP = Math.min(...prices);
       const save = (maxP - minP) * Math.max(...g.rows.map((r: any) => r.quantity || 1));
       await loadInsights(); // 后台校正
+      const remGroups = (() => { try { const d = JSON.parse(ins.insight_json || '[]'); return d.length - 1; } catch { return 0; } })();
       notification.success({
         message: '已确认「' + g.name + '」为同一物料',
-        description: save > 0.01 ? '若按最低价 ¥' + minP.toFixed(2) + ' 谈，每台最多可省 ¥' + save.toFixed(2) : '别名已沉淀，下次自动归组',
-        placement: 'bottomRight', duration: 4,
+        description: (save > 0.01 ? '若按最低价 ¥' + minP.toFixed(2) + ' 谈，每台最多可省 ¥' + save.toFixed(2) + '；' : '别名已沉淀，下次自动归组；') + (remGroups > 0 ? '本模块还剩 ' + remGroups + ' 组待处理，处理完自动归档' : '本模块情报已处理完，自动归档'),
+        placement: 'bottomRight', duration: 5,
         btn: <Button size="small" type="link" onClick={() => undoHandledInsight(ins, handledIdx)}>撤销</Button>,
       });
     } catch (e: any) {
@@ -493,9 +497,11 @@ export default function Projects() {
       });
       window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
       await loadInsights(); // 后台校正
+      const remGroups2 = (() => { try { const d = JSON.parse(ins.insight_json || '[]'); return d.length - 1; } catch { return 0; } })();
       notification.success({
         message: '已标记不同，AI 不再建议该组合',
-        placement: 'bottomRight', duration: 4,
+        description: remGroups2 > 0 ? '本模块还剩 ' + remGroups2 + ' 组待处理（误标记可在「已处理」撤销恢复）' : '本模块情报已处理完，自动归档（误标记可在「已处理」撤销恢复）',
+        placement: 'bottomRight', duration: 5,
         btn: <Button size="small" type="link" onClick={() => undoHandledInsight(ins, handledIdx)}>撤销</Button>,
       });
     } catch (e: any) {
@@ -505,33 +511,51 @@ export default function Projects() {
     }
     setInsightBusyKey(null);
   };
-  // 逐行标记「不是同一器件」（2026-08-17 用户需求：组内可能有部分行不是同一物料）：#ROWDIFF# 别名沉淀，该行从情报消失（可撤销）
+  // 逐行标记「不是同一器件」（2026-08-18 重写）：#ROWDIFF# 别名沉淀 + 乐观行级反馈——
+  // 行不消失，原位变灰+「已排除」Tag（可立即撤销），剩余行继续可操作；后台照常重建识别
   const markRowDifferent = async (ins: any, g: any, gi: number, ri: number) => {
     const r = (g.rows || [])[ri];
     if (!r) return;
     const key = ins.id + '|' + gi + '|' + ri;
     setInsightBusyKey(key);
+    setRowExcluded(prev => new Set(prev).add(key)); // ① 立即行级反馈
     try {
       await savePartAlias({ module_name: ins.module_name, alias_name: '#ROWDIFF#' + partKey(r), alias_model: '', canonical_name: '', canonical_model: '', source: 'marked_different' });
-      await rebuildModuleInsight(ins);
+      await rebuildModuleInsight(ins); // 后台照常重建（下次识别/重开不再建议该行）
       const handledIdx = await appendHandledInsight(ins.category, ins.module_name, {
         name: r.name, type: 'row', action: 'row_different', rows: [r], diff: 0,
         handled_at: new Date().toLocaleString('zh-CN', { hour12: false }),
       });
       window.dispatchEvent(new CustomEvent('costhub-insights-changed'));
-      await loadInsights();
+      const remain = (g.rows || []).length - 1;
       notification.success({
-        message: '已标记「' + r.name + '」不是同一器件',
-        description: '该行不再参与该组识别与价差计算（可在「已处理」撤销）',
-        placement: 'bottomRight', duration: 4,
-        btn: <Button size="small" type="link" onClick={() => undoHandledInsight(ins, handledIdx)}>撤销</Button>,
+        message: '已排除「' + r.name + '」',
+        description: remain > 0
+          ? '该行不参与识别与价差；本组剩余 ' + remain + ' 行可继续确认/标记'
+          : '该行不参与识别与价差；本组已无对比行，将不再提醒（已处理可撤销）',
+        placement: 'bottomRight', duration: 5,
+        btn: <Button size="small" type="link" onClick={() => undoRowExclude(ins, handledIdx, key, r)}>撤销</Button>,
       });
     } catch (e: any) {
       console.error('标记行不同失败:', e);
+      setRowExcluded(prev => { const n = new Set(prev); n.delete(key); return n; }); // 失败回滚行级标记
       message.error('操作失败：' + (e?.message || e));
-      await loadInsights();
     }
     setInsightBusyKey(null);
+  };
+  // 撤销行排除：删别名 → 删已处理记录 → 重建 → 重载（行恢复参与识别）
+  const undoRowExclude = async (ins: any, hi: number, key: string, r: any) => {
+    try {
+      await deletePartAliasExact(ins.module_name, '#ROWDIFF#' + partKey(r), '', 'marked_different');
+      await removeHandledInsight(ins.category, ins.module_name, hi);
+      await rebuildModuleInsight(ins);
+      setRowExcluded(prev => { const n = new Set(prev); n.delete(key); return n; });
+      await loadInsights();
+      message.success('已撤销，该行恢复参与识别');
+    } catch (e: any) {
+      console.error('撤销行标记失败:', e);
+      message.error('撤销失败：' + (e?.message || e));
+    }
   };
   // 知道了 = 归档（已读）：从「待处理」消失，留在「全部」可查看可恢复；不重算，数据变化后新情报自动重新出现
   const markKnownInsight = async (ins: any) => {
@@ -3255,6 +3279,7 @@ export default function Projects() {
                     <b style={{ fontSize: 12.5, color: g.type === 'ai' ? '#4F46E5' : '#334155' }}><EmojiIcon e={g.type === 'ai' ? '❓' : '📌'} /> {g.name}</b>
                     <Tag color={g.type === 'ai' ? 'purple' : 'orange'} style={{ margin: 0 }}>{g.type === 'ai' ? '疑似同一物料' : '报价差异明显'}</Tag>
                     <Tag color="red" style={{ margin: 0 }}>价差 ¥{(g.diff || 0).toFixed(2)}</Tag>
+                    {(() => { let exCnt = 0; (g.rows || []).forEach((_: any, rri: number) => { if (rowExcluded.has(ins.id + '|' + gi + '|' + rri)) exCnt++; }); return exCnt > 0 ? <Tag color="volcano" style={{ margin: 0, fontSize: 10.5 }}>已排除 {exCnt} 行</Tag> : null; })()}
                   </div>
                   {g.reason && <div style={{ fontSize: 11.5, color: '#64748B', marginBottom: 4 }}>{g.reason}</div>}
                   {g.dimension && <div style={{ fontSize: 11.5, marginBottom: 4, color: '#1D4ED8', background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 6, padding: '3px 8px', whiteSpace: 'pre-wrap' }}>{g.dimension}</div>}
@@ -3268,16 +3293,24 @@ export default function Projects() {
                       </div>
                     ) : null;
                   })()}
-                  {g.rows.map((r: any, ri: number) => (
-                    <div key={ri} style={{ fontSize: 12, display: 'flex', gap: 8, padding: '2px 0', alignItems: 'center' }}>
-                      <b style={{ width: 60, flexShrink: 0 }}>{r.project}</b>
-                      {r.sub_category && <Tag color="geekblue" style={{ margin: 0, fontSize: 10.5, flexShrink: 0 }}>{r.sub_category}</Tag>}
-                      <span style={{ flex: 1, minWidth: 0, color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'default' }}
-                        title={`${r.name} ${r.model}${r.specs ? '\n规格：' + r.specs : ''}`}>{r.name} {r.model}</span>
-                      <span style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>¥{r.cost.toFixed(4)} × {r.quantity}</span>
-                      <Button size="small" type="text" danger style={{ fontSize: 11, padding: '0 4px', flexShrink: 0 }} loading={insightBusyKey === (ins.id + '|' + gi + '|' + ri)} onClick={() => markRowDifferent(ins, g, gi, ri)}>✗ 不是同一器件</Button>
-                    </div>
-                  ))}
+                  {g.rows.map((r: any, ri: number) => {
+                    const exKey = ins.id + '|' + gi + '|' + ri;
+                    const isEx = rowExcluded.has(exKey);
+                    return (
+                      <div key={ri} style={{ fontSize: 12, display: 'flex', gap: 8, padding: '2px 0', alignItems: 'center', opacity: isEx ? 0.55 : 1 }}>
+                        <b style={{ width: 60, flexShrink: 0, textDecoration: isEx ? 'line-through' : undefined }}>{r.project}</b>
+                        {r.sub_category && <Tag color="geekblue" style={{ margin: 0, fontSize: 10.5, flexShrink: 0 }}>{r.sub_category}</Tag>}
+                        <span style={{ flex: 1, minWidth: 0, color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'default', textDecoration: isEx ? 'line-through' : undefined }}
+                          title={`${r.name} ${r.model}${r.specs ? '\n规格：' + r.specs : ''}`}>{r.name} {r.model}</span>
+                        <span style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>¥{r.cost.toFixed(4)} × {r.quantity}</span>
+                        {isEx ? (
+                          <Tag color="red" style={{ margin: 0, fontSize: 10.5, flexShrink: 0 }}>已排除</Tag>
+                        ) : (
+                          <Button size="small" type="text" danger style={{ fontSize: 11, padding: '0 4px', flexShrink: 0 }} loading={insightBusyKey === exKey} onClick={() => markRowDifferent(ins, g, gi, ri)}>✗ 不是同一器件</Button>
+                        )}
+                      </div>
+                    );
+                  })}
                   <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <Button size="small" type="primary" loading={insightBusyKey === (ins.id + '|' + gi)} onClick={() => confirmInsightGroup(ins, g, gi)}>✓ 确认同一器件</Button>
                     <Button size="small" loading={insightBusyKey === (ins.id + '|' + gi)} onClick={() => rejectInsightGroup(ins, g, gi)}>标记不同</Button>

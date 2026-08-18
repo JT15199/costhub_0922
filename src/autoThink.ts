@@ -14,6 +14,15 @@ export interface AutoThinkResult { topic: string; logId: number; rounds: number;
 // 本轮数据概览（模型自主探索的起点；纯本地规则收集，失败不阻断）
 export async function buildThinkOverview(): Promise<string> {
   const lines: string[] = [];
+  // 阶段①目标注入（2026-08-18）：未完成目标优先进入概览，AI 围绕目标分析
+  try {
+    const { getActiveGoals } = await import('./db/goals');
+    const goals = await getActiveGoals();
+    if (goals.length > 0) {
+      lines.push('【用户目标（优先围绕这些分析）】');
+      goals.slice(0, 3).forEach((g: any) => lines.push('- ' + g.text + (g.linked_project ? '（项目 ' + g.linked_project + '）' : '') + (g.progress ? '；已推进：' + g.progress.split('\n').pop() : '')));
+    }
+  } catch { /* 目标读取失败不阻断 */ }
   try {
     const projs = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
     if (projs.length === 0) return '暂无项目数据。';
@@ -116,7 +125,12 @@ export async function runAutoThink(opts?: {
     const { buildThinkSystemPrompt, runThinkLoop, cleanProtocolText } = await import('./thinkEngine');
     const { requestCloudConfirm } = await import('./cloudConfirm');
     const { agentSearchLoop } = await import('./trendService');
+    const { getActiveGoals, appendGoalProgress } = await import('./db/goals');
+    const activeGoals = await getActiveGoals();
     const sysPrompt = buildThinkSystemPrompt(listTools().map(t => t.name)) +
+      (activeGoals.length > 0
+        ? '\n【当前目标】用户下达了目标：' + activeGoals.slice(0, 3).map((g: any) => '「' + g.text + '」' + (g.linked_project ? '(' + g.linked_project + ')' : '')).join('、') + '。请优先围绕这些目标做深入分析，结论要直接回应目标。'
+        : '') +
       '\n【任务】你现在是后台成本分析员：请先规划 2-4 个本地分析任务（候选方向：目标达成差距核实 / 模块成本结构与关键依赖 / 跨项目同模块价差与议价机会 / 大额物料供应商集中度 / 成本异常数字核实），' +
       '逐个调用本地工具执行（每个任务先查数据再下结论）；本地数据能回答的就不要申请云端；只有决策确实需要外部行情（如某物料近期市场价趋势）时才申请 cloud_market_query；' +
       '最后输出一段 200-400 字的分析结论：①发现（事实+数字依据）②判断（机会/风险/正常）③建议行动（具体到项目/物料）。没有值得深挖的就说明并结束。';
@@ -180,6 +194,10 @@ export async function runAutoThink(opts?: {
       conclusion: cleanConcl, finished_at: new Date().toLocaleString('zh-CN', { hour12: false }),
     });
     try { await setSetting('ai_think_overview_hash', ovHash); } catch { /* 忽略 */ }
+    // 阶段①目标进度回写（2026-08-18）：结论摘要追加到第一个未完成目标，用户可见推进痕迹
+    if (cleanConcl && activeGoals.length > 0) {
+      try { await appendGoalProgress(activeGoals[0].id, cleanConcl.slice(0, 200)); } catch { /* 忽略 */ }
+    }
     opts?.onEvent?.({ kind: 'done', topic, conclusion: finalText, rounds, clouds: clouds.length });
     return { topic, logId, rounds, clouds: clouds.length };
   } catch (e: any) {
