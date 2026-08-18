@@ -20,8 +20,8 @@ export async function getCompetitor(id: number) { const r = await (await getDb()
 
 export async function saveCompetitor(data: any) {
   const d = await getDb();
-  if (data.id) { await d.execute('UPDATE competitors SET brand=?,model=?,tier=?,category=?,market_price=?,bom_cost=?,platform_fee_rate=?,remark=? WHERE id=?', [data.brand, data.model, data.tier, data.category || '未分类', data.market_price || 0, data.bom_cost || 0, data.platform_fee_rate || 0, data.remark || '', data.id]); return data.id; }
-  else { const r = await d.execute('INSERT INTO competitors (brand,model,tier,category,market_price,bom_cost,platform_fee_rate,remark) VALUES (?,?,?,?,?,?,?,?)', [data.brand, data.model, data.tier, data.category || '未分类', data.market_price || 0, data.bom_cost || 0, data.platform_fee_rate || 0, data.remark || '']); return r.lastInsertId; }
+  if (data.id) { await d.execute('UPDATE competitors SET brand=?,model=?,tier=?,category=?,screen_size=?,resolution=?,refresh_rate=?,panel_type=?,specs=?,market_price=?,bom_cost=?,platform_fee_rate=?,remark=? WHERE id=?', [data.brand, data.model, data.tier, data.category || '未分类', data.screen_size || '', data.resolution || '', data.refresh_rate || '', data.panel_type || '', data.specs || '', data.market_price || 0, data.bom_cost || 0, data.platform_fee_rate || 0, data.remark || '', data.id]); return data.id; }
+  else { const r = await d.execute('INSERT INTO competitors (brand,model,tier,category,screen_size,resolution,refresh_rate,panel_type,specs,market_price,bom_cost,platform_fee_rate,remark) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [data.brand, data.model, data.tier, data.category || '未分类', data.screen_size || '', data.resolution || '', data.refresh_rate || '', data.panel_type || '', data.specs || '', data.market_price || 0, data.bom_cost || 0, data.platform_fee_rate || 0, data.remark || '']); return r.lastInsertId; }
 }
 
 

@@ -15,6 +15,7 @@ export default function Competitors() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form] = Form.useForm();
+  const watchCompCategory = Form.useWatch('category', form);
   const [selectedCid, setSelectedCid] = useState<number | null>(null);
   const [boms, setBoms] = useState<any[]>([]);
   const [cparts, setCparts] = useState<any[]>([]);
@@ -98,7 +99,16 @@ export default function Competitors() {
   const compCols = [
     { title: '品牌', dataIndex: 'brand', width: 100, render: (v: string) => <b>{v}</b> },
     { title: '型号', dataIndex: 'model' },
-    { title: '品类', dataIndex: 'category', width: 80, render: (v: string) => <Tag color={v && v !== '显示器' ? 'purple' : 'default'}>{v || '显示器'}</Tag> },
+    { title: '品类', dataIndex: 'category', width: 80, render: (v: string) => <Tag color={v && v !== '未分类' ? 'purple' : 'default'}>{v || '未分类'}</Tag> },
+    {
+      title: '规格', key: 'cspec', width: 170, ellipsis: true,
+      render: (_: any, r: any) => {
+        const s = r.category === '显示器'
+          ? [r.screen_size, r.resolution, r.refresh_rate, r.panel_type].filter(Boolean).join(' / ')
+          : (r.specs || '');
+        return s || <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>;
+      }
+    },
     { title: '档位', dataIndex: 'tier', width: 80, render: (v: string) => <Tag>{v}</Tag> },
     { title: '市场价(¥)', dataIndex: 'market_price', width: 110, align: 'right' as const, render: (v: number) => v?.toLocaleString() },
     { title: 'BOM成本(¥)', dataIndex: 'bom_cost', width: 110, align: 'right' as const, render: (v: number) => v?.toLocaleString() },
@@ -127,7 +137,7 @@ export default function Competitors() {
             onChange={v => setCompCategoryFilter(v || '')}
             options={productCategories.map((c: any) => ({ label: c.name, value: c.name }))}
           />
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditing(null); form.resetFields(); setModalOpen(true); }}>新增竞品</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditing(null); form.resetFields(); form.setFieldsValue({ category: compCategoryFilter || '未分类' }); setModalOpen(true); }}>新增竞品</Button>
         </div>
         <DataTable tableId="comp_list" dataSource={comps} columns={compCols} rowKey="id" size="middle" onRow={(r) => ({ onClick: () => selectComp(r.id), style: { cursor: 'pointer', background: selectedCid === r.id ? '#FFF1F0' : undefined } })} pagination={{ pageSize: 10 }} />
       </div>
@@ -273,10 +283,22 @@ export default function Competitors() {
         )}
       </Modal>
 
-      <Modal title={editing?.id ? '编辑竞品' : '新增竞品'} open={modalOpen} onOk={async () => { const v = await form.validateFields(); await saveCompetitor({ ...editing, ...v }); setModalOpen(false); setEditing(null); form.resetFields(); setComps(await getCompetitors()); message.success('已保存'); }} onCancel={() => { setModalOpen(false); setEditing(null); }} width={500}>
+      <Modal title={editing?.id ? '编辑竞品' : '新增竞品'} open={modalOpen} onOk={async () => { const v = await form.validateFields(); const clean = v.category === '显示器' ? { ...v, specs: '' } : { ...v, screen_size: '', resolution: '', refresh_rate: '', panel_type: '' }; await saveCompetitor({ ...editing, ...clean }); setModalOpen(false); setEditing(null); form.resetFields(); setComps(await getCompetitors(compCategoryFilter)); message.success('已保存'); }} onCancel={() => { setModalOpen(false); setEditing(null); }} width={500}>
         <Form form={form} layout="vertical" initialValues={{ tier: '主流级', market_price: 0, bom_cost: 0, platform_fee_rate: 0 }}>
           <Row gutter={16}><Col span={12}><Form.Item label="品牌 *" name="brand" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item label="型号 *" name="model" rules={[{ required: true }]}><Input /></Form.Item></Col></Row>
           <Row gutter={16}><Col span={8}><Form.Item label="档位" name="tier"><Select options={TIERS.map(t => ({ label: t, value: t }))} /></Form.Item></Col><Col span={8}><Form.Item label="品类" name="category"><Select options={productCategories.map((c: any) => ({ label: c.name, value: c.name }))} /></Form.Item></Col><Col span={8}><Form.Item label="市场价(¥)" name="market_price"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col></Row>
+          {watchCompCategory === '显示器' ? (
+            <Row gutter={16}>
+              <Col span={6}><Form.Item label="屏幕尺寸" name="screen_size"><Input placeholder="如 27英寸" /></Form.Item></Col>
+              <Col span={6}><Form.Item label="分辨率" name="resolution"><Input placeholder="如 2560×1440" /></Form.Item></Col>
+              <Col span={6}><Form.Item label="刷新率" name="refresh_rate"><Input placeholder="如 144Hz" /></Form.Item></Col>
+              <Col span={6}><Form.Item label="面板" name="panel_type"><Input placeholder="如 IPS" /></Form.Item></Col>
+            </Row>
+          ) : (
+            <Form.Item label="关键规格" name="specs" extra="该品类的核心规格（如：手写笔压感等级/鼠标 DPI/手机 SoC 内存）">
+              <Input placeholder="如：压感 4096 级 / 无线" />
+            </Form.Item>
+          )}
           <Row gutter={16}><Col span={8}><Form.Item label="平台费率(%)" name="platform_fee_rate"><InputNumber min={0} max={100} style={{ width: '100%' }} /></Form.Item></Col><Col span={16}><Form.Item label="BOM成本(¥)" name="bom_cost"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col></Row>
           <Form.Item label="备注" name="remark"><Input /></Form.Item>
         </Form>

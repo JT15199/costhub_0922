@@ -219,20 +219,23 @@ export default function ModuleLibrary() {
   // - 选了项目：按"项目+模块名"精确过滤，只显示该项目专属的模块实例，同名模块也分开
   const filteredGroups = modGroups
     .filter(group => !categoryFilter || (group.module_category || '未分类') === categoryFilter)
+    // ⚠️ 品类筛选（2026-08-18 修复）：选了品类后组内只保留该品类的项目实例——
+    // 之前用 .some() 只要组里有一个该品类项目就保留整组，导致其他品类的模块实例混在一起对比
     .filter(group => !prodCategoryFilter || group.projects.some((p: any) => p.prod_category === prodCategoryFilter))
     // 项目筛选：只保留属于该项目的模块实例；同名模块在其他项目的实例不混入
     .filter(group => !projectFilter || group.projects.some((p: any) => p.project_id === projectFilter))
     .map(group => {
-      if (!projectFilter) return group;
-      // 选项目后：只保留该项目的实例，分组名带上项目标识避免同名混淆
-      const projInstances = group.projects.filter((p: any) => p.project_id === projectFilter);
-      if (projInstances.length === 0) return null;
-      const proj = projInstances[0];
+      if (!prodCategoryFilter && !projectFilter) return group;
+      // 选品类/项目后：组内只保留符合的实例（跨品类模块不再混在一起对比）
+      const keep = group.projects.filter((p: any) =>
+        (!prodCategoryFilter || p.prod_category === prodCategoryFilter) &&
+        (!projectFilter || p.project_id === projectFilter));
+      if (keep.length === 0) return null;
+      const proj = keep[0];
       return {
         ...group,
-        name: `${group.name}`, // 显示名保持原名
-        _projCode: proj.project_code,
-        projects: projInstances,
+        _projCode: projectFilter ? proj.project_code : group._projCode,
+        projects: keep,
       };
     })
     .filter(Boolean);

@@ -1,3 +1,8 @@
+### v2.3.19 模块库品类隔离 + 竞品统一资料/品类筛选（2026-08-18，用户：模块库选了品类只显示该品类模块不要跨品类对比；竞品管理像项目一样支持多品类+统一填写+品类筛选只显示该品类）
+- **① 模块库品类筛选修复**（ModuleLibrary filteredGroups）：根因——原 prodCategoryFilter 用 .some() 过滤组，只要组里有一个该品类项目就保留整组，组内仍混着其他品类项目实例（跨品类模块对比）。修复：选了品类后**组内 projects 也只保留该品类实例**（与项目筛选同款处理，keep 过滤 + 空组剔除），对比视图（勾选参与对比）自然不再跨品类
+- **② 竞品统一资料（品类联动规格，与项目一致）**：competitors 表新增 screen_size/resolution/refresh_rate/panel_type/specs 5 列（CREATE + ALTER 迁移）；saveCompetitor 全带；表单 Form.useWatch('category')——品类=显示器 → 4 规格字段；其他品类 → 「关键规格」自由文本；保存时按品类清理无关字段（与项目管理同口径）
+- **③ 竞品品类筛选**：已存在（getCompetitors(category) WHERE category=? 生效），修复两处体验——a) 列表品类列空值显示"显示器"误导 → 改"未分类"（default Tag）b) 新增竞品默认带当前筛选品类（在筛选下新增直接落入该品类）；列表新增「规格」列（显示器→4 字段拼接，其他→specs）
+- **验证**：tsc -b 0 错；186 vitest 全过
 ### v2.3.19 SKU 变体减/换器件 + 列表/树展示（2026-08-18，用户：SKU只有增加器件，还需减器件（outbox/inbox包装简化）和替换器件（8GB→16GB内存）；项目列表展示变体；SKU树里也体现）
 - **① 替换型号能力**（数据层）：sku_diffs 新增 new_model 列（CREATE + ensureSchema ALTER），saveSkuDiff 全带；skuCalc 透传 _newModel——replace 支持「换型号+换单价」（8GB→16GB），new_model 空 = 只换单价/数量
 - **② 对比表编辑增强**（SKU 变体 tab）：点格子编辑态新增「换型号」输入（输入 ≠ 基座型号 = 替换，悬停显示 基座型号→新型号，黄色高亮）＋「⊖ 移除」按钮（基座行=remove/新增行=删除 add，替代"数量改0"隐晦约定）；提示文案更新（outbox→inbox 简包装示例）

@@ -137,7 +137,7 @@ async function ensureSchema(d: Database) {
     `CREATE TABLE IF NOT EXISTS module_items (id INTEGER PRIMARY KEY AUTOINCREMENT, module_id INTEGER NOT NULL, part_id INTEGER, part_name TEXT NOT NULL, part_model TEXT DEFAULT '', main_category TEXT DEFAULT '硬件类', sub_category TEXT DEFAULT '', cost REAL DEFAULT 0, quantity INTEGER DEFAULT 1, remark TEXT DEFAULT '')`,
     `CREATE TABLE IF NOT EXISTS project_boms (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, part_id INTEGER NOT NULL, module_name TEXT DEFAULT '', quantity INTEGER DEFAULT 1, cost REAL DEFAULT 0, remark TEXT DEFAULT '', is_reference INTEGER DEFAULT 0, reference_remark TEXT DEFAULT '', is_deleted INTEGER DEFAULT 0, ref_project_id INTEGER DEFAULT 0)`,
     `CREATE TABLE IF NOT EXISTS part_price_history (id INTEGER PRIMARY KEY AUTOINCREMENT, part_id INTEGER NOT NULL, old_cost REAL NOT NULL, new_cost REAL NOT NULL, changed_at TEXT DEFAULT (datetime('now','localtime')))`,
-    `CREATE TABLE IF NOT EXISTS competitors (id INTEGER PRIMARY KEY AUTOINCREMENT, brand TEXT NOT NULL, model TEXT NOT NULL, tier TEXT DEFAULT '主流级', category TEXT DEFAULT '未分类', market_price REAL DEFAULT 0, bom_cost REAL DEFAULT 0, platform_fee_rate REAL DEFAULT 0, remark TEXT DEFAULT '', sort_order INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now','localtime')))`,
+    `CREATE TABLE IF NOT EXISTS competitors (id INTEGER PRIMARY KEY AUTOINCREMENT, brand TEXT NOT NULL, model TEXT NOT NULL, tier TEXT DEFAULT '主流级', category TEXT DEFAULT '未分类', screen_size TEXT DEFAULT '', resolution TEXT DEFAULT '', refresh_rate TEXT DEFAULT '', panel_type TEXT DEFAULT '', specs TEXT DEFAULT '', market_price REAL DEFAULT 0, bom_cost REAL DEFAULT 0, platform_fee_rate REAL DEFAULT 0, remark TEXT DEFAULT '', sort_order INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now','localtime')))`,
     `CREATE TABLE IF NOT EXISTS competitor_boms (id INTEGER PRIMARY KEY AUTOINCREMENT, competitor_id INTEGER NOT NULL, part_id INTEGER, part_name TEXT NOT NULL, part_model TEXT DEFAULT '', module_name TEXT DEFAULT '', estimated_cost REAL DEFAULT 0, quantity INTEGER DEFAULT 1, is_mapped INTEGER DEFAULT 0, our_part_name TEXT DEFAULT '', our_part_model TEXT DEFAULT '', our_cost REAL DEFAULT 0, our_quantity INTEGER DEFAULT 0)`,
     `CREATE TABLE IF NOT EXISTS competitor_parts (id INTEGER PRIMARY KEY AUTOINCREMENT, main_category TEXT DEFAULT '硬件类', sub_category TEXT DEFAULT '', category TEXT NOT NULL, name TEXT NOT NULL, model TEXT NOT NULL, cost REAL DEFAULT 0, specs TEXT DEFAULT '', remark TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`,
     `CREATE TABLE IF NOT EXISTS project_cost_reviews (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, stage TEXT NOT NULL, reviewed_cost REAL NOT NULL, reviewer TEXT DEFAULT '', reviewed_at TEXT DEFAULT (datetime('now','localtime')), remark TEXT DEFAULT '')`,
@@ -307,6 +307,11 @@ async function ensureSchema(d: Database) {
   await ignoreSchemaError(d.execute("ALTER TABLE part_insights ADD COLUMN handled_json TEXT DEFAULT ''"));
   await ignoreSchemaError(d.execute("ALTER TABLE projects ADD COLUMN specs TEXT DEFAULT ''"));
   await ignoreSchemaError(d.execute("ALTER TABLE sku_diffs ADD COLUMN new_model TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE competitors ADD COLUMN screen_size TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE competitors ADD COLUMN resolution TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE competitors ADD COLUMN refresh_rate TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE competitors ADD COLUMN panel_type TEXT DEFAULT ''"));
+  await ignoreSchemaError(d.execute("ALTER TABLE competitors ADD COLUMN specs TEXT DEFAULT ''"));
   await ignoreSchemaError(d.execute("ALTER TABLE ai_bridge_logs ADD COLUMN cloud_prompt TEXT DEFAULT ''"));
 // 为 trend_items 表添加缺失的列
   await ignoreSchemaError(d.execute('ALTER TABLE trend_items ADD COLUMN magnitude_min REAL DEFAULT NULL'));
