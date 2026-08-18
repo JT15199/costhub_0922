@@ -1,3 +1,9 @@
+### v2.3.19 输入区横排 + Agent DSH 循环 + emoji 图标化（2026-08-18，用户反馈：模式图标竖排撑高输入区/Agent逻辑参考DSH/新对话两个+/emoji按规则改）
+- ①输入区：模式切换竖排图标列 → 输入框上方横排一行（MessageOutlined/RobotOutlined/BulbOutlined 30×24 高亮选中+模式说明小字），不再撑高输入框
+- ②Agent 改造为 DSH 式循环（sendAgentTask 复用 runThinkLoop 文本协议）：替代原「计划(非流式JSON)→顺序执行→总结」三段式——模型在一次流式对话中自主 思考→[TOOL]→结果回填→继续→结论（≤8 轮），执行轨迹卡实时呈现，云端走 requestCloudApproval 就地审批；requestCloudApproval 上移定义（依赖顺序）
+- ③「＋ 新对话」按钮 icon 与文本双加号 → 文本去 ＋（保留 icon）
+- ④emoji→antd 图标（ui-ux-pro-max 规则：SVG 图标不用 emoji）：模式图标/左侧建议分析钮/顶部对话/⚡菜单 8 项/功能按钮/立即分析/自主分析标题/学习档案标题；正文文本 emoji 保留
+- **验证**：tsc -b 0 错；184 vitest 全过
 ### v2.3.19 丝滑交互动效（2026-08-18，用户要求按钮打开/切换动画流畅）
 - index.css 新增 .view-enter（视图切换淡入+上移 220ms cubic-bezier(0.23,1,0.32,1)，will-change 优化）、.tappable（可点击元素 transition 160ms + :active scale 0.96 按压缩放）、.pop-in（小元素弹性缩放 200ms spring）；data-lowfx 仍全局禁 animation（现有规则），弹层动画走 antd motion（未禁用）
 - LocalAIAssistant：三视图（对话/建议/分析）容器加 key+view-enter 丝滑切换；输入模式 💬🤖🧠 图标、侧边栏 建议/分析 按钮、顶部导航项 加 tappable

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, createElement } from 'react';
 import { Button, Input, InputNumber, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Switch, Radio, Dropdown, Drawer, notification } from 'antd';
-import { CopyOutlined, RadarChartOutlined, LockOutlined } from '@ant-design/icons';
+import { CopyOutlined, RadarChartOutlined, LockOutlined, MessageOutlined, AppstoreOutlined } from '@ant-design/icons';
 import {
   SendOutlined, RobotOutlined, PlusOutlined, HistoryOutlined,
   ThunderboltOutlined, TeamOutlined, ClearOutlined,
@@ -1560,6 +1560,18 @@ export default function LocalAIAssistant() {
   }, [sendMessage]);
 
   // ===== Agent 任务（P1）：计划-执行-总结，工具轨迹可见 =====
+  // 云端审批（Agent/自主分析共用）：preview 就地弹窗展示将发送的脱敏提示词，auto 直接放行
+  const requestCloudApproval = useCallback(async (prompt: string): Promise<boolean> => {
+    try {
+      const mode = await getSetting('ai_bridge_review', 'auto');
+      if (mode !== 'preview') return true;
+    } catch { return true; }
+    return new Promise<boolean>(resolve => {
+      setBridgeReviewPrompt(prompt);
+      setBridgeReviewResolve(() => (ok: boolean) => resolve(ok));
+    });
+  }, []);
+
   const sendAgentTask = useCallback(async (userContent: string) => {
     if (!userContent.trim() || streaming) return;
     if (!model) { message.warning('请先连接Ollama并选择模型'); return; }
@@ -1577,76 +1589,51 @@ export default function LocalAIAssistant() {
     setAgentTraceOpen(true);
     setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
     const currentSid = sid;
-    const ollamaBase = ollamaUrl.replace(/\/$/, '');
     let full = '', reasoning = '';
 
     try {
-      // ① 计划：本地模型输出工具调用序列（非流式）
-      setPhase('fetching');
-      const { buildToolsPrompt, buildPlanSystemPrompt, parseAgentPlan, unknownTools, runAgentPlan, buildAnswerSystemPrompt } = await import('../aiAgent');
-      const { listTools } = await import('../aiTools');
-      // AI 学习：记录关注主题 + 注入偏好上下文
+      // ⚠️ DSH 式循环（2026-08-18 重构）：一次流式对话中模型自主 思考→[TOOL]→结果回填→继续→结论
+      // 替代原「计划(非流式JSON)→顺序执行→总结」三段式：不再要求模型先输出完整计划，模型自己决定何时调什么工具，
+      // 轨迹卡实时呈现每次工具调用（复用 runThinkLoop 文本协议，与自主分析同一引擎）
+      setPhase('thinking');
+      const { listTools, executeTool } = await import('../aiTools');
+      const { buildThinkSystemPrompt, runThinkLoop, buildCloudReviewPrompt } = await import('../thinkEngine');
+      const { agentSearchLoop } = await import('../trendService');
       import('../aiLearning').then(m => m.trackUserFocus(userContent)).catch(() => {});
       let prefCtx = '';
       try { prefCtx = await import('../aiLearning').then(m => m.buildPreferenceContext()); } catch { prefCtx = ''; }
-      const planPrompt = buildPlanSystemPrompt(buildToolsPrompt(listTools())) + (prefCtx ? '\n\n' + prefCtx : '');
-      const planResp = await invoke<{ status: number; body: string; success: boolean }>('http_post', {
-        request: {
-          url: ollamaBase + '/api/chat',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model, messages: [{ role: 'system', content: planPrompt }, { role: 'user', content: userContent }], stream: false, options: { temperature: 0.1 } }),
-        },
-      });
-      if (!planResp.success) throw new Error('HTTP ' + planResp.status);
-      const planBody = JSON.parse(planResp.body);
-      const planText: string = planBody?.message?.content || '';
-      await logLocalAICall({ request_type: 'agent_plan', system_prompt: planPrompt.slice(0, 3000), user_prompt: userContent.slice(0, 3000), response_summary: planText.slice(0, 1500), success: true, model_name: model });
-      const plan = parseAgentPlan(planText);
-      // 无有效计划或无需工具 → 降级普通对话
-      if (!plan || plan.steps.length === 0) {
-        setAgentTraceOpen(false);
-        setStreaming(false);
-        message.info('这个任务不需要工具执行，已按普通对话处理');
-        await sendMessage(userContent);
-        return;
-      }
-      // ② 执行：顺序跑工具，轨迹实时更新
-      const unknown = unknownTools(plan);
-      const steps = plan.steps.filter(s => !unknown.includes(s.tool));
-      if (steps.length === 0) throw new Error('计划中的工具不可用');
-      const { report } = await runAgentPlan({ steps }, (trace) => {
-        setAgentTrace(prev => {
-          const arr = [...prev];
-          const idx = arr.findIndex(x => x.tool === trace.tool && x.argsText === trace.argsText && x.status === 'running');
-          if (idx >= 0) arr[idx] = { ...trace };
-          else arr.push({ ...trace });
-          return arr;
-        });
-        window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: 'Agent：' + trace.name + (trace.status === 'running' ? '…' : ' ✓') } }));
-      });
-      setPhase('thinking');
-      // ③ 总结：基于执行报告流式生成最终回答
-      const ansSystem = buildAnswerSystemPrompt() + (prefCtx ? '\n\n' + prefCtx : '') + '\n\n【工具执行报告】\n' + report.slice(0, 6000);
-      const apiMessages = [
-        { role: 'system', content: ansSystem },
-        { role: 'user', content: userContent },
-      ];
-      await new Promise<void>((resolve, reject) => {
-        startOllamaStream(
-          ollamaUrl, model, apiMessages,
-          (token) => {
+      const localTools = listTools();
+      const sysPrompt = buildThinkSystemPrompt(localTools.map(t => t.name), prefCtx) +
+        '\n【任务】' + userContent + '\n这是一个需要调用工具完成的多步分析任务：先想清楚需要哪些数据（BOM/供应商/目标/快照/工作手账/报价情报等），' +
+        '逐步输出 [TOOL] 调用获取，观察结果后继续；数据齐了直接给出结构化结论（发现/判断/建议行动）。';
+      const { finalText } = await runThinkLoop({
+        baseUrl: ollamaUrl,
+        model,
+        systemPrompt: sysPrompt,
+        userContent,
+        localTools,
+        executeTool,
+        approveCloud: async (call) => requestCloudApproval(buildCloudReviewPrompt(call)),
+        runCloud: async (call) => agentSearchLoop(call.material_name, call.category || '', 'price-trend'),
+        onEvent: {
+          onToolResult: (name, args, ok, text) => {
+            const tool = localTools.find(t => t.id === name);
+            setAgentTrace(prev => [...prev, { tool: name, name: tool?.name || name, argsText: JSON.stringify(args || {}) === '{}' ? '无参数' : JSON.stringify(args || {}), status: ok ? 'ok' : 'fail', result: text }]);
+            window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: 'Agent：' + (tool?.name || name) + (ok ? ' ✓' : ' ✗') } }));
+          },
+          onAnswer: (t) => {
             setPhase('streaming');
-            full += token;
+            full += t;
             setMessages(prev => { const arr = [...prev]; arr[arr.length - 1] = { role: 'assistant', content: full, reasoning }; return arr; });
           },
-          (token) => { reasoning += token; setPhase('thinking'); },
-          () => resolve(),
-          (err) => reject(new Error(err)),
-          { endpoint: 'native', think: false },
-        ).then(c => { cleanupRef.current = c; }).catch(() => { /* 错误走 onError */ });
+          onThought: (t) => { reasoning += t; setPhase('thinking'); },
+        },
+        maxRounds: 8,
       });
-      await logLocalAICall({ request_type: 'agent_answer', system_prompt: ansSystem.slice(0, 3000), user_prompt: userContent.slice(0, 3000), response_summary: (full || '').slice(0, 2000), success: true, model_name: model });
-      if (full) await saveMsg(currentSid, 'assistant', full, reasoning);
+      const resultText = finalText || full;
+      await logLocalAICall({ request_type: 'agent_answer', system_prompt: sysPrompt.slice(0, 3000), user_prompt: userContent.slice(0, 3000), response_summary: (resultText || '').slice(0, 2000), success: true, model_name: model });
+      if (resultText) await saveMsg(currentSid, 'assistant', resultText, reasoning);
+      if (!full) setMessages(prev => { const arr = [...prev]; arr[arr.length - 1] = { role: 'assistant', content: resultText || '（未输出结论）', reasoning }; return arr; });
     } catch (e: any) {
       const err = e?.message || String(e);
       await logLocalAICall({ request_type: 'agent_answer', system_prompt: '', user_prompt: userContent.slice(0, 3000), response_summary: '', success: false, error_message: String(err).slice(0, 500), model_name: model });
@@ -1657,20 +1644,9 @@ export default function LocalAIAssistant() {
       setStreaming(false);
       setPhase('idle');
     }
-  }, [streaming, model, sessionId, ollamaUrl, sendMessage]);
+  }, [streaming, model, sessionId, ollamaUrl, sendMessage, requestCloudApproval]);
 
   // ===== 自主分析（think）：本地模型自由思考 + 按需申请云端（2026-08-17 用户需求，DSH 式过程渲染） ======
-  // 本地 token 免费不涉安全 → 思考不限；云端调用=申请"发送什么提示词给云端 LLM"，preview 就地审批 / auto 放行
-  const requestCloudApproval = useCallback(async (prompt: string): Promise<boolean> => {
-    try {
-      const mode = await getSetting('ai_bridge_review', 'auto');
-      if (mode !== 'preview') return true;
-    } catch { return true; }
-    return new Promise<boolean>(resolve => {
-      setBridgeReviewPrompt(prompt);
-      setBridgeReviewResolve(() => (ok: boolean) => resolve(ok));
-    });
-  }, []);
   const sendThinkTask = useCallback(async (userContent: string) => {
     if (!userContent.trim() || streaming) return;
     if (!model) { message.warning('请先连接Ollama并选择模型'); return; }
@@ -2016,12 +1992,12 @@ return (
         <div style={{ display: 'flex', gap: 6, padding: '0 12px 8px' }}>
           <div onClick={() => setAdvisorTab('advice')} title="自主建议：成本机会/风险点" className="tappable"
             style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '5px 0', borderRadius: 8, fontSize: 11.5, cursor: 'pointer', background: advisorTab === 'advice' ? '#F3E8FF' : '#FAFAFC', border: advisorTab === 'advice' ? '1px solid #D8B4FE' : '1px solid var(--color-border)', color: advisorTab === 'advice' ? '#7C3AED' : '#6B7280', fontWeight: advisorTab === 'advice' ? 600 : 400 }}>
-            🤖 建议{advisorList.filter((x: any) => x.status === 'open').length > 0 ? <span style={{ background: '#EF4444', color: '#fff', fontSize: 9, borderRadius: 9, padding: '0 5px' }}>{advisorList.filter((x: any) => x.status === 'open').length}</span> : null}
+            <RobotOutlined style={{ fontSize: 12 }} /> 建议{advisorList.filter((x: any) => x.status === 'open').length > 0 ? <span style={{ background: '#EF4444', color: '#fff', fontSize: 9, borderRadius: 9, padding: '0 5px' }}>{advisorList.filter((x: any) => x.status === 'open').length}</span> : null}
           </div>
           <div onClick={() => setAdvisorTab('think')} title="自主分析：AI 后台深度思考全过程" className="tappable"
-            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '5px 0', borderRadius: 8, fontSize: 11.5, cursor: 'pointer', background: advisorTab === 'think' ? '#EEF2FF' : '#FAFAFC', border: advisorTab === 'think' ? '1px solid #A5B4FC' : '1px solid var(--color-border)', color: advisorTab === 'think' ? '#4338CA' : '#6B7280', fontWeight: advisorTab === 'think' ? 600 : 400 }}>🧠 分析</div>
+            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '5px 0', borderRadius: 8, fontSize: 11.5, cursor: 'pointer', background: advisorTab === 'think' ? '#EEF2FF' : '#FAFAFC', border: advisorTab === 'think' ? '1px solid #A5B4FC' : '1px solid var(--color-border)', color: advisorTab === 'think' ? '#4338CA' : '#6B7280', fontWeight: advisorTab === 'think' ? 600 : 400 }}><ExperimentOutlined style={{ fontSize: 12 }} /> 分析</div>
         </div>
-        <Button size="small" block icon={<PlusOutlined />} onClick={() => startSession()} style={{ margin: '0 12px 8px', width: 'auto', borderRadius: 9, borderColor: '#E5E9F0', background: '#FAFBFF', color: '#4338CA', fontWeight: 500 }}>＋ 新对话</Button>
+        <Button size="small" block icon={<PlusOutlined />} onClick={() => startSession()} style={{ margin: '0 12px 8px', width: 'auto', borderRadius: 9, borderColor: '#E5E9F0', background: '#FAFBFF', color: '#4338CA', fontWeight: 500 }}>新对话</Button>
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px' }}>
           {sessions.map(s => (
             <div key={s.id} onClick={() => switchSession(s.id)} style={{ padding: '9px 10px', borderRadius: 9, cursor: 'pointer', marginBottom: 2, background: s.id === sessionId ? '#EEF2FF' : 'transparent', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -2042,7 +2018,7 @@ return (
             <span style={{ width: 26, height: 26, borderRadius: 8, background: 'linear-gradient(135deg,#0A84FF,#6366F1)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}><RobotOutlined /></span>
             本地 AI 助手
           </div>
-          <div onClick={() => setAdvisorTab('chat')} className="tappable" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', background: advisorTab === 'chat' ? '#EEF2FF' : 'transparent', color: advisorTab === 'chat' ? '#4338CA' : '#6B7280', fontWeight: advisorTab === 'chat' ? 600 : 400 }}>💬 对话</div>
+          <div onClick={() => setAdvisorTab('chat')} className="tappable" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', background: advisorTab === 'chat' ? '#EEF2FF' : 'transparent', color: advisorTab === 'chat' ? '#4338CA' : '#6B7280', fontWeight: advisorTab === 'chat' ? 600 : 400 }}><MessageOutlined style={{ fontSize: 13 }} /> 对话</div>
           <span style={{ fontSize: 11, color: '#B0B7C3' }}>（自主建议 / 自主分析在左侧切换）</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ fontSize: 11, color: connStatus === 'ok' ? '#16A34A' : connStatus === 'fail' ? '#DC2626' : '#6B7280', background: connStatus === 'ok' ? '#F0FDF4' : connStatus === 'fail' ? '#FEF2F2' : '#F3F4F8', border: '1px solid ' + (connStatus === 'ok' ? '#BBF7D0' : connStatus === 'fail' ? '#FECACA' : '#E5E9F0'), borderRadius: 20, padding: '3px 11px', display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -2052,16 +2028,16 @@ return (
             <Dropdown
               menu={{
                 items: [
-                  { key: 'tools', label: '🛠 数据分析工具' },
-                  { key: 'import', label: '📥 智能 BOM 导入' },
-                  { key: 'demo', label: '📄 演示生成（HTML/PPTX）' },
-                  { key: 'rules', label: '🗂 分类规则管理' },
+                  { key: 'tools', label: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><ToolOutlined /> 数据分析工具</span> },
+                  { key: 'import', label: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><UploadOutlined /> 智能 BOM 导入</span> },
+                  { key: 'demo', label: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><FilePptOutlined /> 演示生成（HTML/PPTX）</span> },
+                  { key: 'rules', label: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><AppstoreOutlined /> 分类规则管理</span> },
                   { type: 'divider' },
-                  { key: 'memory', label: '📚 知识库（AI 记忆）' },
-                  { key: 'learn', label: '🧠 学习档案（关注/偏好）' },
-                  { key: 'logs', label: '📋 AI 活动记录' },
+                  { key: 'memory', label: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><BookOutlined /> 知识库（AI 记忆）</span> },
+                  { key: 'learn', label: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><BulbOutlined /> 学习档案（关注/偏好）</span> },
+                  { key: 'logs', label: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><HistoryOutlined /> AI 活动记录</span> },
                   { type: 'divider' },
-                  { key: 'settings', label: '⚙️ 连接设置' },
+                  { key: 'settings', label: <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}><SettingOutlined /> 连接设置</span> },
                 ],
                 onClick: ({ key }) => {
                   if (key === 'tools') setToolsOpen(true);
@@ -2075,7 +2051,7 @@ return (
                 },
               }}
             >
-              <Button size="small" icon={<ThunderboltOutlined />} style={{ borderRadius: 8, fontSize: 12 }}>⚡ 功能</Button>
+              <Button size="small" icon={<ThunderboltOutlined />} style={{ borderRadius: 8, fontSize: 12 }}>功能</Button>
             </Dropdown>
           </div>
         </div>
@@ -2176,7 +2152,7 @@ return (
               <div style={{ width: 28, height: 28, borderRadius: 8, background: '#EEF2FF', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 10, flexShrink: 0, marginTop: 2 }}><ExperimentOutlined style={{ color: '#6366F1', fontSize: 14 }} /></div>
               <div style={{ maxWidth: '82%', flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <b style={{ fontSize: 12.5 }}>🧠 自主分析</b>
+                  <b style={{ fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 5 }}><ExperimentOutlined /> 自主分析</b>
                   {thinkRun.status === 'running' && <Tag color="processing">思考中 · 第 {thinkRun.round} 轮</Tag>}
                   {thinkRun.status === 'done' && <Tag color="green">完成</Tag>}
                   {thinkRun.status === 'error' && <Tag color="red">失败</Tag>}
@@ -2271,16 +2247,18 @@ return (
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-            {/* 模式切换（2026-08-17 收纳为紧凑图标列，不再占一整行） */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingBottom: 1 }}>
-              <div title="普通对话（默认）" className="tappable" onClick={() => { if (!streaming) setChatMode('chat'); }}
-                style={{ width: 30, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, borderRadius: 8, cursor: streaming ? 'not-allowed' : 'pointer', background: chatMode === 'chat' ? '#EEF2FF' : 'transparent', border: chatMode === 'chat' ? '1px solid #C7D2FE' : '1px solid transparent', opacity: chatMode === 'chat' ? 1 : 0.5 }}>💬</div>
-              <div title="Agent 任务：自动调用工具完成多步任务（只读）" className="tappable" onClick={() => { if (!streaming) setChatMode('agent'); }}
-                style={{ width: 30, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, borderRadius: 8, cursor: streaming ? 'not-allowed' : 'pointer', background: chatMode === 'agent' ? '#EEF2FF' : 'transparent', border: chatMode === 'agent' ? '1px solid #C7D2FE' : '1px solid transparent', opacity: chatMode === 'agent' ? 1 : 0.5 }}>🤖</div>
-              <div title="自主分析：本地模型自由思考 + 按需申请云端" className="tappable" onClick={() => { if (!streaming) setChatMode('think'); }}
-                style={{ width: 30, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, borderRadius: 8, cursor: streaming ? 'not-allowed' : 'pointer', background: chatMode === 'think' ? '#EEF2FF' : 'transparent', border: chatMode === 'think' ? '1px solid #C7D2FE' : '1px solid transparent', opacity: chatMode === 'think' ? 1 : 0.5 }}>🧠</div>
-            </div>
             <div style={{ flex: 1, minWidth: 0 }}>
+              {/* 模式切换（2026-08-18 修复：横排一行图标不再撑高输入区；emoji 换 antd 图标） */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                <div title="普通对话（默认）" className="tappable" onClick={() => { if (!streaming) setChatMode('chat'); }}
+                  style={{ width: 30, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, cursor: streaming ? 'not-allowed' : 'pointer', color: chatMode === 'chat' ? '#4338CA' : '#94A3B8', background: chatMode === 'chat' ? '#EEF2FF' : 'transparent', border: chatMode === 'chat' ? '1px solid #C7D2FE' : '1px solid transparent' }}><MessageOutlined style={{ fontSize: 13 }} /></div>
+                <div title="Agent 任务：自动调用工具完成多步任务（只读）" className="tappable" onClick={() => { if (!streaming) setChatMode('agent'); }}
+                  style={{ width: 30, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, cursor: streaming ? 'not-allowed' : 'pointer', color: chatMode === 'agent' ? '#4338CA' : '#94A3B8', background: chatMode === 'agent' ? '#EEF2FF' : 'transparent', border: chatMode === 'agent' ? '1px solid #C7D2FE' : '1px solid transparent' }}><RobotOutlined style={{ fontSize: 13 }} /></div>
+                <div title="自主分析：本地模型自由思考 + 按需申请云端" className="tappable" onClick={() => { if (!streaming) setChatMode('think'); }}
+                  style={{ width: 30, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, cursor: streaming ? 'not-allowed' : 'pointer', color: chatMode === 'think' ? '#4338CA' : '#94A3B8', background: chatMode === 'think' ? '#EEF2FF' : 'transparent', border: chatMode === 'think' ? '1px solid #C7D2FE' : '1px solid transparent' }}><BulbOutlined style={{ fontSize: 13 }} /></div>
+                {chatMode === 'agent' && <span style={{ fontSize: 10.5, color: '#94A3B8', marginLeft: 4 }}>Agent 自动调用工具完成多步任务</span>}
+                {chatMode === 'think' && <span style={{ fontSize: 10.5, color: '#94A3B8', marginLeft: 4 }}>本地思考 + 按需申请云端</span>}
+              </div>
               <Input.TextArea value={input} onChange={e => setInput(e.target.value)} placeholder={chatMode === 'agent' ? '例如：分析 M270 成本结构，找出 top3 风险物料并洞察行情，最后总结 200 字' : chatMode === 'think' ? '例如：评估 M270 的 PCB 成本是否合理，贵的话分析贵在哪（可申请云端查行情）' : '输入问题，或使用左侧工具注入数据分析…'} autoSize={{ minRows: 1, maxRows: 5 }} onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); if (chatMode === 'agent') sendAgentTask(input); else if (chatMode === 'think') sendThinkTask(input); else sendMessage(input); } }} style={{ borderRadius: 10 }} />
             </div>
             {streaming
@@ -2306,7 +2284,7 @@ return (
             处理方式：<b>复制提示词</b>交给 AI 执行议价/分析，或 <b>生成行业洞察</b>（本地→云端→本地三步，自动防重复查询）。
           </div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Button size="small" type="primary" loading={advisorRunning} onClick={runAdvisorNow}>⚡ 立即分析</Button>
+            <Button size="small" type="primary" icon={<ThunderboltOutlined />} loading={advisorRunning} onClick={runAdvisorNow}>立即分析</Button>
             <Button size="small" type={advisorShowDone ? 'default' : 'primary'} onClick={() => setAdvisorShowDone(!advisorShowDone)}>
               {advisorShowDone ? '显示全部' : '仅看待处理'}{(() => {
                 const doneCount = advisorList.filter(x => x.status !== 'open').length;
@@ -2948,7 +2926,7 @@ return (
           )}
         </div>
         <div>
-          <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>🧠 已学到的逻辑偏好（后续回答必须遵守）</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}><BulbOutlined /> 已学到的逻辑偏好（后续回答必须遵守）</div>
           {learnRules.length === 0 ? (
             <div style={{ fontSize: 12, color: '#94A3B8' }}>还没有——对我某条回答点 👎 并说明原因，我就会记住</div>
           ) : (
