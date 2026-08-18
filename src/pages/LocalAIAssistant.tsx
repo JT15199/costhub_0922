@@ -2014,11 +2014,11 @@ return (
         </div>
         {/* 视图切换（2026-08-17 收纳：从顶部导航移到这里，顶部只留对话） */}
         <div style={{ display: 'flex', gap: 6, padding: '0 12px 8px' }}>
-          <div onClick={() => setAdvisorTab('advice')} title="自主建议：成本机会/风险点"
+          <div onClick={() => setAdvisorTab('advice')} title="自主建议：成本机会/风险点" className="tappable"
             style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '5px 0', borderRadius: 8, fontSize: 11.5, cursor: 'pointer', background: advisorTab === 'advice' ? '#F3E8FF' : '#FAFAFC', border: advisorTab === 'advice' ? '1px solid #D8B4FE' : '1px solid var(--color-border)', color: advisorTab === 'advice' ? '#7C3AED' : '#6B7280', fontWeight: advisorTab === 'advice' ? 600 : 400 }}>
             🤖 建议{advisorList.filter((x: any) => x.status === 'open').length > 0 ? <span style={{ background: '#EF4444', color: '#fff', fontSize: 9, borderRadius: 9, padding: '0 5px' }}>{advisorList.filter((x: any) => x.status === 'open').length}</span> : null}
           </div>
-          <div onClick={() => setAdvisorTab('think')} title="自主分析：AI 后台深度思考全过程"
+          <div onClick={() => setAdvisorTab('think')} title="自主分析：AI 后台深度思考全过程" className="tappable"
             style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '5px 0', borderRadius: 8, fontSize: 11.5, cursor: 'pointer', background: advisorTab === 'think' ? '#EEF2FF' : '#FAFAFC', border: advisorTab === 'think' ? '1px solid #A5B4FC' : '1px solid var(--color-border)', color: advisorTab === 'think' ? '#4338CA' : '#6B7280', fontWeight: advisorTab === 'think' ? 600 : 400 }}>🧠 分析</div>
         </div>
         <Button size="small" block icon={<PlusOutlined />} onClick={() => startSession()} style={{ margin: '0 12px 8px', width: 'auto', borderRadius: 9, borderColor: '#E5E9F0', background: '#FAFBFF', color: '#4338CA', fontWeight: 500 }}>＋ 新对话</Button>
@@ -2042,7 +2042,7 @@ return (
             <span style={{ width: 26, height: 26, borderRadius: 8, background: 'linear-gradient(135deg,#0A84FF,#6366F1)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}><RobotOutlined /></span>
             本地 AI 助手
           </div>
-          <div onClick={() => setAdvisorTab('chat')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', background: advisorTab === 'chat' ? '#EEF2FF' : 'transparent', color: advisorTab === 'chat' ? '#4338CA' : '#6B7280', fontWeight: advisorTab === 'chat' ? 600 : 400 }}>💬 对话</div>
+          <div onClick={() => setAdvisorTab('chat')} className="tappable" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 13px', borderRadius: 9, fontSize: 13, cursor: 'pointer', background: advisorTab === 'chat' ? '#EEF2FF' : 'transparent', color: advisorTab === 'chat' ? '#4338CA' : '#6B7280', fontWeight: advisorTab === 'chat' ? 600 : 400 }}>💬 对话</div>
           <span style={{ fontSize: 11, color: '#B0B7C3' }}>（自主建议 / 自主分析在左侧切换）</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ fontSize: 11, color: connStatus === 'ok' ? '#16A34A' : connStatus === 'fail' ? '#DC2626' : '#6B7280', background: connStatus === 'ok' ? '#F0FDF4' : connStatus === 'fail' ? '#FEF2F2' : '#F3F4F8', border: '1px solid ' + (connStatus === 'ok' ? '#BBF7D0' : connStatus === 'fail' ? '#FECACA' : '#E5E9F0'), borderRadius: 20, padding: '3px 11px', display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -2080,7 +2080,7 @@ return (
           </div>
         </div>
         {advisorTab === 'chat' ? (
-        <>
+        <div key="chat" className="view-enter" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {/* AI 活动记录：回溯"AI 今天都做了什么"（点击展开，本地留痕可审查） */}
         <div style={{ padding: '2px 16px 0', borderBottom: logsOpen ? '1px solid var(--color-border)' : undefined }}>
           <div onClick={() => { setLogsOpen(!logsOpen); if (!logsOpen && aiLogs.length === 0) loadAiLogs(); }}
@@ -2273,11 +2273,11 @@ return (
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
             {/* 模式切换（2026-08-17 收纳为紧凑图标列，不再占一整行） */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingBottom: 1 }}>
-              <div title="普通对话（默认）" onClick={() => { if (!streaming) setChatMode('chat'); }}
+              <div title="普通对话（默认）" className="tappable" onClick={() => { if (!streaming) setChatMode('chat'); }}
                 style={{ width: 30, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, borderRadius: 8, cursor: streaming ? 'not-allowed' : 'pointer', background: chatMode === 'chat' ? '#EEF2FF' : 'transparent', border: chatMode === 'chat' ? '1px solid #C7D2FE' : '1px solid transparent', opacity: chatMode === 'chat' ? 1 : 0.5 }}>💬</div>
-              <div title="Agent 任务：自动调用工具完成多步任务（只读）" onClick={() => { if (!streaming) setChatMode('agent'); }}
+              <div title="Agent 任务：自动调用工具完成多步任务（只读）" className="tappable" onClick={() => { if (!streaming) setChatMode('agent'); }}
                 style={{ width: 30, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, borderRadius: 8, cursor: streaming ? 'not-allowed' : 'pointer', background: chatMode === 'agent' ? '#EEF2FF' : 'transparent', border: chatMode === 'agent' ? '1px solid #C7D2FE' : '1px solid transparent', opacity: chatMode === 'agent' ? 1 : 0.5 }}>🤖</div>
-              <div title="自主分析：本地模型自由思考 + 按需申请云端" onClick={() => { if (!streaming) setChatMode('think'); }}
+              <div title="自主分析：本地模型自由思考 + 按需申请云端" className="tappable" onClick={() => { if (!streaming) setChatMode('think'); }}
                 style={{ width: 30, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, borderRadius: 8, cursor: streaming ? 'not-allowed' : 'pointer', background: chatMode === 'think' ? '#EEF2FF' : 'transparent', border: chatMode === 'think' ? '1px solid #C7D2FE' : '1px solid transparent', opacity: chatMode === 'think' ? 1 : 0.5 }}>🧠</div>
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -2291,15 +2291,15 @@ return (
           <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 4 }}>Shift+Enter 换行 · Enter 发送 · 数据仅在本机处理{chatMode === 'agent' ? ' · Agent 只读执行，计划与结果可审查' : chatMode === 'think' ? ' · 本地思考免费不限 · 云端发送需审批' : ''}</div>
           </div>
         </div>
-        </>
+        </div>
         ) : advisorTab === 'think' ? (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 0 24px' }}>
+        <div key="think" className="view-enter" style={{ flex: 1, overflowY: 'auto', padding: '16px 0 24px' }}>
           <div style={{ maxWidth: 860, margin: '0 auto', padding: '0 20px' }}>
             <AutoThinkPanel mode="full" />
           </div>
         </div>
         ) : (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 0 24px' }}>
+        <div key="advice" className="view-enter" style={{ flex: 1, overflowY: 'auto', padding: '16px 0 24px' }}>
           <div style={{ maxWidth: 860, margin: '0 auto', padding: '0 20px' }}>
           <div style={{ fontSize: 11.5, color: 'var(--color-text-secondary)', lineHeight: 1.6, marginBottom: 8 }}>
             空闲时自动分析项目成本、物料价格、目标达成与供应风险，以资深成本经理视角找机会/风险点。

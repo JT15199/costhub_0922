@@ -1,3 +1,7 @@
+### v2.3.19 丝滑交互动效（2026-08-18，用户要求按钮打开/切换动画流畅）
+- index.css 新增 .view-enter（视图切换淡入+上移 220ms cubic-bezier(0.23,1,0.32,1)，will-change 优化）、.tappable（可点击元素 transition 160ms + :active scale 0.96 按压缩放）、.pop-in（小元素弹性缩放 200ms spring）；data-lowfx 仍全局禁 animation（现有规则），弹层动画走 antd motion（未禁用）
+- LocalAIAssistant：三视图（对话/建议/分析）容器加 key+view-enter 丝滑切换；输入模式 💬🤖🧠 图标、侧边栏 建议/分析 按钮、顶部导航项 加 tappable
+- **验证**：tsc -b 0 错；184 vitest 全过
 ### v2.3.19 本地 AI 助手 DSH 式收纳（2026-08-17，用户反馈：AI 东西太多/本地 AI 画面乱/对话框多，参考 DSH 简洁清爽）
 - 顶部导航只留 品牌+💬对话+状态 pill+⚡功能菜单（移除 自主建议/自主分析/知识库/学习档案 四个平铺项）；左侧会话列顶部加「🤖 建议（badge）/🧠 分析」紧凑切换按钮（视图收纳到左侧）；⚡菜单收纳 知识库（AI 记忆）/学习档案（关注偏好）/AI 活动记录/数据分析工具/BOM导入/演示生成/分类规则/连接设置；输入区 Segmented 三态 → 输入框左侧 💬🤖🧠 紧凑图标列（30×26 高亮选中，Tooltip 说明，不占整行）；Segmented import 清理
 - **验证**：tsc -b 0 错；184 vitest 全过
