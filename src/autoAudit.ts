@@ -353,7 +353,7 @@ export async function runAutoAudit(): Promise<AutoAuditResult | null> {
 async function aiAuditFindings(url: string, model: string, ctxText: string, rules: Omit<AuditFinding, 'id' | 'created_at'>[], knownList: string, changesSummary: string, perspective: { name: string; focus: string }): Promise<Omit<AuditFinding, 'id' | 'created_at'>[]> {
   const ruleSummary = rules.map(r => `- ${r.title}：${r.detail}`).join('\n') || '（规则层未发现）';
   const perspectiveLine = '本次思考角度：【' + perspective.name + '】' + perspective.focus + '。请主要从这个角度挖掘，也可以补充其他角度的重大发现。';
-  const sysPrompt = '你是嵌入 CostHub 成本管理工具的资深成本分析师。系统已用规则检查了常见问题（见规则发现），你之前也做过几次巡检（见历史发现）。你的任务不是复述事实（物料涨跌是用户自己输入的，他都知道），也不是重复历史发现，而是输出有决策价值的、新鲜的洞察与建议：' + perspectiveLine + '。只输出 JSON（不要任何其他文字）：{"findings":[{"title":"简短标题","detail":"具体说明（引用真实数据）","suggestion":"给用户的建议/思路（一句话，可执行）","level":"warn或info","objects":["涉及项目/器件"]}]}。规则：1) 必须基于提供的数据，不能编造数字 2) 最多 4 条 3) 宁缺毋滥，只报真正值得行动的 4) 不要重复历史发现和规则已报的 5) 如果本次角度下确实没有新发现，输出 {"findings":[]}，不要硬凑。';
+  const sysPrompt = '你是嵌入 CostHub 成本管理工具的资深成本分析师。系统已用规则检查了常见问题（见规则发现），你之前也做过几次巡检（见历史发现）。你的任务不是复述事实（物料涨跌是用户自己输入的，他都知道），也不是重复历史发现，而是输出有决策价值的、新鲜的洞察与建议：' + perspectiveLine + '。只输出 JSON（不要任何其他文字）：{"findings":[{"title":"简短标题","detail":"具体说明（引用真实数据）","suggestion":"给用户的建议/思路（一句话，可执行）","level":"warn或info","objects":["涉及项目/器件"]}]}。规则：1) 必须基于提供的数据，不能编造数字 2) 最多 2 条（2026-08-18 收紧：宁缺毋滥，重复/已读过的绝对不报） 3) 宁缺毋滥，只报真正值得行动的 4) 不要重复历史发现和规则已报的（用户已标记已读的视为已处理，不要再提） 5) 如果本次角度下确实没有新发现，输出 {"findings":[]}，不要硬凑。';
   const userPrompt = '全库数据摘要：\n' + ctxText + '\n\n规则层发现：\n' + ruleSummary + '\n\n历史已发现（不要重复）：\n' + (knownList || '（无）') + '\n\n自上次以来的数据变化：\n' + changesSummary;
   let full = '';
   await new Promise<void>((resolve, reject) => {

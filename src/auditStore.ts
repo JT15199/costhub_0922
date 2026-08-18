@@ -55,15 +55,31 @@ export async function replaceAuditFindings(findings: Omit<AuditFinding, 'id' | '
     await d.execute("UPDATE audit_findings SET status='dismissed' WHERE status='read' AND created_at < datetime('now','localtime','-7 days')");
   } catch { /* 忽略 */ }
   const old = await d.select<{ id: number; type: string; title: string; detail: string; objects: string; status: string }[]>('SELECT id, type, title, detail, objects, status FROM audit_findings');
-  // 稳定键 = 类型 + 涉及对象（不含 title/detail 的动态数字）：
-  // 已读/忽略的同源发现即使数字微变（如占比 89%→90%）也保持原状态，不重新弹出；
-  // 只有"新类型/新对象"才作为新发现标 unread
-  const stableKey = (f: any) => String(f.type || '') + '|' + String(f.objects || '[]');
+  // 稳定键（2026-08-18 修复"已读还反复弹出"）：
+  //  · 规则发现 → 类型 + 涉及对象（objects 是规则生成，稳定）
+  //  · AI 发现 → 类型 + 归一化标题（objects 是模型自由输出会漂移，如 ["M270"] vs ["M270","电源"] vs []，
+  //    导致已读条目匹配不上被当新发现重新插入 unread；改用去数字/金额/标点的标题骨架，数字微变/objects 漂移都保持原状态）
+  const normalizeStableTitle = (t: string) => String(t || '')
+    .replace(/\d+(?:\.\d+)?/g, '')
+    .replace(/[¥￥%％·×xX()（）:：,，。.、+±\-\[\]"'「」]/g, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+  const stableKey = (f: any) => {
+    const t = String(f.type || '');
+    return t === 'ai_insight'
+      ? t + '|' + normalizeStableTitle(String(f.title || ''))
+      : t + '|' + String(f.objects || '[]');
+  };
   const newKeys = new Set(findings.map(stableKey));
   const statusMap: Record<number, string> = {};
   old.forEach(o => {
-    if (!newKeys.has(stableKey(o))) statusMap[o.id] = 'dismissed'; // 不再发现 → 隐藏
-    else statusMap[o.id] = o.status;                                // 同源发现 → 保持原状态（read/dismissed/unread 都不重置）
+    if (!newKeys.has(stableKey(o))) {
+      // 不再发现 → 隐藏；⚠️ AI 发现例外（2026-08-18 修复"反复弹出"）：AI 层被指纹跳过/换角度时旧发现不在本轮 findings 里，
+      // 若直接 dismiss 会"隐藏→下次重生成"循环；AI 发现保留到用户标记已读（read）/忽略（dismissed）/7 天归档为止
+      statusMap[o.id] = o.type === 'ai_insight' ? o.status : 'dismissed';
+    } else {
+      statusMap[o.id] = o.status; // 同源发现 → 保持原状态（read/dismissed/unread 都不重置）
+    }
   });
   for (const o of old) {
     await d.execute('UPDATE audit_findings SET status = ? WHERE id = ?', [statusMap[o.id] ?? 'dismissed', o.id]);

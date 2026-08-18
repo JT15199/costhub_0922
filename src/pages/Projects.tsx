@@ -3064,7 +3064,7 @@ export default function Projects() {
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 3 }}>
                     <Tag color={ft.level === 'warn' ? 'orange' : 'blue'} style={{ margin: 0, flexShrink: 0, fontSize: 10.5 }}>{ft.source === 'ai' ? 'AI 洞察' : '规则发现'}</Tag>
                     <b style={{ fontSize: 12.5, flex: 1, minWidth: 0 }}>{ft.title}</b>
-                    <a style={{ fontSize: 11.5, flexShrink: 0 }} onClick={async (e) => { e.stopPropagation(); if (ft.status === 'unread') { try { await markAuditRead(ft.id); } catch {} } else { try { await dismissAuditFinding(ft.id); } catch {} } try { setAuditList(await getAuditFindings()); } catch {} }}>{ft.status === 'unread' ? '标记已读' : '忽略'}</a>
+                    <a style={{ fontSize: 11.5, flexShrink: 0 }} onClick={async (e) => { e.stopPropagation(); if (ft.status === 'unread') { try { await markAuditRead(ft.id); } catch {} } else { try { await dismissAuditFinding(ft.id); } catch {} } try { setAuditList(await getAuditFindings()); } catch {} window.dispatchEvent(new CustomEvent('costhub-audit-changed')); window.dispatchEvent(new CustomEvent('costhub-insights-changed')); }}>{ft.status === 'unread' ? '标记已读' : '忽略'}</a>
                   </div>
                   <div style={{ fontSize: 12, color: '#4B5563', lineHeight: 1.6 }}>{ft.detail}</div>
                   {ft.suggestion && <div style={{ marginTop: 4, fontSize: 11.5, color: '#3730A3' }}><b>💡 建议：</b>{ft.suggestion}</div>}

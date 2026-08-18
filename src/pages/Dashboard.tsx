@@ -117,7 +117,10 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     })();
     const onAdv = () => { getAdvisorInsights('open').then(setAdvisorInsights).catch(() => {}); };
     window.addEventListener('costhub-advisor-done', onAdv);
-    return () => window.removeEventListener('costhub-advisor-done', onAdv);
+    // 巡检已读/忽略后刷新列表与计数（2026-08-18：标记已读立即生效，不再残留未读数）
+    const onAuditChanged = () => { getAuditFindings().then(setAuditFindings).catch(() => {}); };
+    window.addEventListener('costhub-audit-changed', onAuditChanged);
+    return () => { window.removeEventListener('costhub-advisor-done', onAdv); window.removeEventListener('costhub-audit-changed', onAuditChanged); };
   }, []);
 
   // 立即巡检（规则 + 本地 AI 深度洞察；后台执行，完成后刷新列表）

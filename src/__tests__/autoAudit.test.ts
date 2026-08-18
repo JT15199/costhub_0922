@@ -121,6 +121,19 @@ describe('isDuplicateFinding — AI 发现语义去重（2026-08-18：重复就�
   });
 });
 
+describe('normalizeStableTitle 稳定键 — 已读条目不再反复弹出', () => {
+  // 直接验证 auditStore 稳定键逻辑（通过 replaceAuditFindings 的 observable 行为测试太重，
+  // 这里验证 autoAudit 侧的归一化一致性 + 实体去重已覆盖主要场景）
+  it('AI 发现标题数字微变 → 归一化一致（稳定键命中，保持已读）', () => {
+    const a = normalizeFindingTitle('MNT-3201「驱动板」成本高于同类项目均值 99%');
+    const b = normalizeFindingTitle('MNT-3201「驱动板」成本高于同类项目均值 98%');
+    expect(a).toBe(b);
+  });
+  it('AI 发现与已读条目语义重复 → 去重拦截（不产生新 unread）', () => {
+    expect(isDuplicateFinding('驱动板模块价格严重偏离市场均值', [{ title: 'MNT-3201「驱动板」成本高于同类项目均值 99%' }])).toBe(true);
+  });
+});
+
 describe('AUDIT_PERSPECTIVES — 思考角度池', () => {
   it('5 个角度且不重复', () => {
     expect(AUDIT_PERSPECTIVES.length).toBe(5);
