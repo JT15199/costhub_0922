@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { extractNums, verifyConclusionNumbers } from '../verifyConclusion';
-import { compressMessages } from '../thinkEngine';
+import { compressMessages, MAX_TOOLS_PER_ROUND } from '../thinkEngine';
 
 describe('verifyConclusionNumbers — 结论数字溯源校验（阶段③）', () => {
   const evidence = 'M270 BOM ¥612.50，驱动板 ¥85.00 × 2，占比 27%';
@@ -21,6 +21,12 @@ describe('verifyConclusionNumbers — 结论数字溯源校验（阶段③）', 
     const vals = nums.map(n => n.num);
     expect(vals).toContain(12.5);
     expect(vals).toContain(8);
+  });
+});
+
+describe('MAX_TOOLS_PER_ROUND — 单路高质量硬约束（2026-08-18）', () => {
+  it('每轮工具调用上限为 2（单线程深挖，不并行多工具）', () => {
+    expect(MAX_TOOLS_PER_ROUND).toBe(2);
   });
 });
 

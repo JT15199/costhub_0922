@@ -159,6 +159,11 @@ export default function AutoThinkPanel({ mode = 'summary', onNavigate }: { mode?
               <div>{cleanProtocolText(live.thoughts)}</div>
             </div>
           )}
+          {live.tools.length > 0 && (
+            <div style={{ fontSize: 10.5, color: '#6B7280', marginBottom: 2 }}>
+              🔧 已调用 <b>{live.tools.length}</b> 次工具 · 单线程深挖中（每轮最多 2 个调用，一次追一个线索）
+            </div>
+          )}
           {live.tools.map((t, i) => (
             <div key={i} style={{ fontSize: 11.5, padding: '3px 0', color: t.ok ? '#374151' : '#DC2626' }}>
               🔧 {t.ok ? '✓' : '✗'} <b>{t.name}</b> <span style={{ color: '#94A3B8' }}>{JSON.stringify(t.args || {})}</span>

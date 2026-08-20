@@ -74,6 +74,12 @@
 - **autoThink 任务段**：规划 2-4 个任务 → 聚焦 1-2 个最关键方向深挖到底。
 - **工具结果放宽**（aiTools.executeTool）：截断 2000 → 4000 字（thinkEngine.compressMessages 已兜底上下文），关键数据尽量完整给模型。
 
+## 三·补4补、单路高质量·执行层硬约束（2026-08-18 进一步）
+
+- **每轮最多 2 个工具调用**（thinkEngine MAX_TOOLS_PER_ROUND=2，activeCalls=calls.slice(0,2)，多余下轮继续）——prompt 之外代码级强制"一次追一个线索"，杜绝一轮并排 5 个工具浅尝。
+- **深挖进度可视化**（AutoThinkPanel 实时区）：显示「🔧 已调用 N 次工具 · 单线程深挖中（每轮最多 2 个调用）」。
+- harnessPhases.test 补 1 用例（上限=2）。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。

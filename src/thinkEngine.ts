@@ -8,6 +8,9 @@
 //   前端流式解析执行并回填 [RESULT]，不依赖模型 function calling 能力，任何模型都能工作。
 
 export const MAX_THINK_ROUNDS = 8;
+// 2026-08-18 单路高质量：每轮最多执行 2 个工具调用——强制模型一次追一个线索，
+// 避免单轮并排 5 个工具浅尝辄止（prompt 之外执行层硬约束）；多余调用下一轮继续
+export const MAX_TOOLS_PER_ROUND = 2;
 
 // 云端调用描述（提示词展示用）
 export function buildCloudToolDef() {
@@ -195,8 +198,10 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
     lastClean = clean;
     const calls = parseProtocolCalls(buffer);
     if (calls.length === 0) { finalText = clean; break; }
+    // ⚠️ 单路高质量：每轮只执行前 2 个调用（其余下轮继续），避免一轮并行多工具浅尝
+    const activeCalls = calls.slice(0, MAX_TOOLS_PER_ROUND);
     const toolResults: { role: string; content: string }[] = [];
-    for (const call of calls) {
+    for (const call of activeCalls) {
       const argsKey = (call.kind === 'tool' ? call.name : 'cloud') + '|' + JSON.stringify(call.args || {});
       const cached = callCache.get(argsKey);
       if (cached) {
