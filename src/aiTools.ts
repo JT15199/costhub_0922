@@ -325,7 +325,8 @@ export async function executeTool(id: string, args: any): Promise<{ ok: boolean;
   if (err) return { ok: false, text: '参数错误：' + err };
   try {
     const text = await tool.execute(args || {});
-    return { ok: true, text: text.length > 2000 ? text.slice(0, 2000) + '…（已截断）' : text };
+    // 2026-08-18 单路深挖：结果放宽到 4000 字（thinkEngine 有 compressMessages 兜底上下文），关键数据尽量完整给模型
+    return { ok: true, text: text.length > 4000 ? text.slice(0, 4000) + '…（已截断）' : text };
   } catch (e: any) {
     return { ok: false, text: '工具执行失败：' + String(e?.message || e).slice(0, 200) };
   }
