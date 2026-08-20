@@ -130,8 +130,31 @@ export async function updateProviderPriorities(providers: any[]) {
 
 
 
+let outboundEnsured = false;
+async function ensureOutboundLogsTable() {
+  if (outboundEnsured) return;
+  const d = await getDb();
+  try {
+    await d.execute(`CREATE TABLE IF NOT EXISTS outbound_request_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp TEXT DEFAULT (datetime('now','localtime')),
+      method TEXT DEFAULT '',
+      url TEXT DEFAULT '',
+      status_code INTEGER DEFAULT 0,
+      response_time_ms INTEGER DEFAULT 0,
+      error_message TEXT DEFAULT '',
+      payload_summary TEXT DEFAULT '',
+      reviewed INTEGER DEFAULT 0
+    )`);
+  } catch { /* 已存在则忽略 */ }
+  try { await d.execute("ALTER TABLE outbound_request_logs ADD COLUMN payload_summary TEXT DEFAULT ''"); } catch { /* 已有 */ }
+  try { await d.execute("ALTER TABLE outbound_request_logs ADD COLUMN reviewed INTEGER DEFAULT 0"); } catch { /* 已有 */ }
+  outboundEnsured = true;
+}
+
 export async function getOutboundRequestLogs(limit = 100) {
-  return (await getDb()).select<any[]>('SELECT * FROM outbound_request_logs ORDER BY timestamp DESC LIMIT ?', [limit]);
+  await ensureOutboundLogsTable();
+  return (await getDb()).select<any[]>('SELECT * FROM outbound_request_logs ORDER BY id DESC LIMIT ?', [limit]);
 }
 
 
@@ -142,11 +165,14 @@ export async function clearOutboundRequestLogs() {
 
 
 
+// ⚠️ 外发审计（2026-08-18 强化）：每次云端请求记录 payload_summary（脱敏后的外发内容摘要）+
+// reviewed（是否经审批）——设置页「AI 外发安全中心」可逐条验证外发边界（仅物料名/品类/问题）
 export async function logOutboundRequest(data: any) {
+  await ensureOutboundLogsTable();
   const d = await getDb();
   await d.execute(
-    'INSERT INTO outbound_request_logs (timestamp, method, url, status_code, response_time_ms, error_message) VALUES (datetime(\'now\',\'localtime\'),?,?,?,?,?)',
-    [data.method, data.url, data.status_code, data.response_time_ms, data.error_message]
+    'INSERT INTO outbound_request_logs (timestamp, method, url, status_code, response_time_ms, error_message, payload_summary, reviewed) VALUES (datetime(\'now\',\'localtime\'),?,?,?,?,?,?,?)',
+    [data.method, data.url, data.status_code, data.response_time_ms, data.error_message, data.payload_summary || '', data.reviewed ? 1 : 0]
   );
 }
 

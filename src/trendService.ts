@@ -214,6 +214,28 @@ function redactUrl(url: string): string {
   return url.replace(/([?&](?:api_?key|key|token)=)[^&]+/gi, '$1***');
 }
 
+// ⚠️ 外发内容安全摘要（2026-08-18）：从请求体提取白名单字段（物料名/品类/问题/搜索词）供审计展示，
+// 其余一律不记录（防 API key/本地数据意外入日志）；URL 域名展示，query 参数脱敏
+function safePayloadSummary(body: string | null): string {
+  if (!body) return '';
+  try {
+    const obj = JSON.parse(body);
+    const pick = (keys: string[]) => {
+      const out: string[] = [];
+      for (const k of keys) {
+        const v = obj[k];
+        if (typeof v === 'string' && v.trim()) out.push(v.trim().slice(0, 60));
+      }
+      return out;
+    };
+    const fields = pick(['material_name', 'material', 'category', 'question', 'query', 'name']);
+    return fields.join(' / ').slice(0, 160);
+  } catch {
+    // 非 JSON（GET 无 body）：不记录内容
+    return '';
+  }
+}
+
 async function invokeWithRequestLog(method: 'GET' | 'POST', url: string, headers: Record<string, string>, body: string | null): Promise<HttpResponse> {
   const started = Date.now();
   let result: HttpResponse;
@@ -232,6 +254,7 @@ async function invokeWithRequestLog(method: 'GET' | 'POST', url: string, headers
       status_code: result.status,
       response_time_ms: Date.now() - started,
       error_message: result.success ? '' : result.body.slice(0, 500),
+      payload_summary: safePayloadSummary(body),
     });
   } catch { }
   return result;

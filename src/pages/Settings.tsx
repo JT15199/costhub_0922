@@ -10,7 +10,7 @@ import {
   LinkOutlined, SafetyCertificateOutlined, CloudServerOutlined, ThunderboltOutlined,
   PlusOutlined, DragOutlined, CheckOutlined, CloseOutlined, KeyOutlined,
   StopOutlined, HistoryOutlined, SettingOutlined, SearchOutlined, RobotOutlined,
-  BulbOutlined, BookOutlined, CloseCircleOutlined, RadarChartOutlined, LockOutlined, UserOutlined, DatabaseOutlined, DownloadOutlined, FileTextOutlined, FolderOpenOutlined,
+  BulbOutlined, BookOutlined, RadarChartOutlined, LockOutlined, UserOutlined, DatabaseOutlined, DownloadOutlined, FileTextOutlined, FolderOpenOutlined,
 } from '@ant-design/icons';
 import { testSearchConnection, testLLMConnection, BUILTIN_SKILLS, loadSkillConfig, saveSkillConfig, getSkill } from '../trendService';
 import { useTheme } from '../theme/ThemeContext';
@@ -2005,13 +2005,13 @@ export default function Settings({ embedded }: { embedded?: boolean }) {
           </>
         )}
       </div>
-      {/* ====== 外部请求日志 ====== */}
+      {/* ====== AI 外发安全中心（2026-08-18：逐条可验证外发边界） ====== */}
       <div className="content-card" style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h3 style={{ margin: 0 }}><RadarChartOutlined /> 外部请求日志</h3>
+          <h3 style={{ margin: 0 }}><RadarChartOutlined /> AI 外发安全中心</h3>
           <Space>
             <Button size="small" icon={<ApiOutlined />} onClick={loadRequestLogs}>刷新</Button>
-            <Popconfirm title="清空所有日志？" onConfirm={async () => {
+            <Popconfirm title="清空所有外发记录？" onConfirm={async () => {
               const { clearOutboundRequestLogs } = await import('../db');
               await clearOutboundRequestLogs();
               message.success('已清空');
@@ -2021,20 +2021,28 @@ export default function Settings({ embedded }: { embedded?: boolean }) {
             </Popconfirm>
           </Space>
         </div>
-        <p style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 12 }}>
-          记录所有已发出的外部查询请求。仅发送物料通用名称，不包含价格/供应商等本地数据。用户可自行验证。
-        </p>
+        {/* 安全摘要条：今日外发次数 + 边界说明 */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 12, alignItems: 'center' }}>
+          <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 10, padding: '8px 14px' }}>
+            <div style={{ fontSize: 11, color: '#047857' }}>今日已外发（可逐条验证）</div>
+            <b style={{ fontSize: 18, color: '#047857' }}>{(() => { const today = new Date().toLocaleDateString('zh-CN'); return requestLogs.filter((r: any) => String(r.timestamp || r.requested_at || '').startsWith(today.slice(0, 10))).length; })()}</b>
+          </div>
+          <div style={{ flex: 1, minWidth: 240, fontSize: 11.5, color: '#166534', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 10, padding: '8px 12px', lineHeight: 1.6 }}>
+            <b>🔒 每次外发仅包含：物料名 / 品类 / 问题</b>（如「锂电池 · 元器件类 · 近1-3月价格趋势」）。
+            金额、型号、供应商、项目代号在模板结构上无位置可传；下方每一条都可核对实际发出的内容摘要。
+          </div>
+        </div>
         {requestLogs.length === 0 ? (
-          <Empty description="暂无外部请求记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          <Empty description="暂无外发记录——所有云端调用（行情洞察/原生搜索）会自动记录在此，本地模型调用不经过云端、不记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         ) : (
           <Table dataSource={requestLogs} rowKey="id" size="small" pagination={{ pageSize: 10 }}
             columns={[
-              { title: '时间', dataIndex: 'requested_at', width: 150, render: (v: string) => v?.slice(0, 16) || '-' },
-              { title: '关键词', dataIndex: 'query_keyword', ellipsis: true, width: 160 },
-              { title: '类型', dataIndex: 'provider_type', width: 70, render: (v: string) => <Tag color={v === 'search' ? 'blue' : 'purple'}>{v === 'search' ? '搜索' : 'LLM'}</Tag> },
-              { title: '供应商', dataIndex: 'provider_name', width: 120 },
-              { title: '关联物料', dataIndex: 'related_component_name', width: 120 },
-              { title: '状态', dataIndex: 'status', width: 80, render: (v: string) => <Tag color={v === 'success' ? 'green' : 'red'}>{v === 'success' ? <><CheckCircleOutlined /> 成功</> : <><CloseCircleOutlined /> 失败</>}</Tag> },
+              { title: '时间', dataIndex: 'timestamp', width: 150, render: (_: any, r: any) => String(r.timestamp || r.requested_at || '').slice(0, 16) || '-' },
+              { title: '外发内容摘要（脱敏）', key: 'payload', ellipsis: true, width: 280, render: (_: any, r: any) => r.payload_summary || <span style={{ color: '#CBD5E1' }}>（无业务字段，仅端点请求）</span> },
+              { title: '目标', key: 'target', width: 200, ellipsis: true, render: (_: any, r: any) => { try { const u = new URL(r.url || ''); return <Tag color="blue" style={{ margin: 0 }}>{u.hostname}</Tag>; } catch { return <span style={{ fontSize: 11.5 }}>{String(r.url || '').slice(0, 40)}</span>; } } },
+              { title: '方法', dataIndex: 'method', width: 60 },
+              { title: '状态', dataIndex: 'status_code', width: 70, render: (v: number) => <Tag color={v === 200 ? 'green' : v === 0 ? 'orange' : 'red'}>{v === 200 ? '成功' : v === 0 ? '失败/超时' : String(v)}</Tag> },
+              { title: '耗时', dataIndex: 'response_time_ms', width: 80, render: (v: number) => v != null ? v + 'ms' : '-' },
             ]} />
         )}
       </div>

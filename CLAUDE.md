@@ -62,6 +62,12 @@
 - **④模型路由**：aiRouter.ts decideCloudRoute——明确"外部行情/最新信息"才走云端（本地可回答的不申请，不占用审批）；每次云端申请记录 routeReason（审计留痕）；云端仍只发脱敏三字段（边界不变）。
 - 新增 harnessPhases.test.ts 5 用例（验证环 3 + 压缩 2）。
 
+## 三·补3、AI 外发安全中心（2026-08-18，用户：如何让我在用的时候知道信息安全可控）
+
+- **outbound_request_logs 强化**（db/settings.ts）：运行时兜底建表 + payload_summary（脱敏外发内容摘要）+ reviewed 列；trendService.safePayloadSummary 从请求体提取白名单字段（material_name/material/category/question/query/name），其余一律不记录（防 API key/本地数据入日志）。
+- **设置 → 审计日志 → 「AI 外发安全中心」**：今日外发计数 + 边界说明（每次外发仅 物料名/品类/问题，金额/型号/供应商/项目代号结构上无位置可传）+ 逐条记录（时间/外发内容摘要/目标域名/方法/状态码/耗时）——每次云端调用可核对实际发出内容。
+- **云端并行安全配合原则**（讨论结论）：并行不改变外发边界——批量查仍用子类通用名（非具体型号），三字段模板不变，批量前一次审批 + 逐条审计，云端结果单向流入本地。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。
