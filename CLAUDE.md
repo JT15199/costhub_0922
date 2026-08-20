@@ -55,6 +55,13 @@
 - **autoThink 集成**：buildThinkOverview 顶部注入【用户目标】（active 前 3 条+最近推进）；sysPrompt 优先围绕目标；每轮结论前 200 字 appendGoalProgress 回写进度（保留最近 5 段）。
 - **GoalsCard**（本地 AI 助手「自主分析」视图顶部）：下达/完成/暂停/恢复/删除 + 进度展示；驾驶舱不显示（inline 紧凑）。
 
+## 三·补2、阶段 ②③④（2026-08-18 harness 化，安全约束内）
+
+- **②上下文与记忆**：thinkEngine.compressMessages（历史超 9000 字符折叠最旧轮次为摘要行，保 system+初始问题+最近一轮完整——9B 模型上下文不爆）；ai_memory 表（db/memory.ts，跨会话长期记忆：setMemory/getMemoryContext），autoThink 概览顶部注入【长期记忆】+ 每轮结论写记忆（防重复分析同一话题）。
+- **③输出验证环**：verifyConclusion.ts verifyConclusionNumbers——结论文本中的金额/百分比必须在数据证据（概览+工具结果）中出现，否则结论尾部附注「[校验] 含 N 个未能溯源的数字：…请人工核对」；反幻觉从提示词要求升级为代码强制。
+- **④模型路由**：aiRouter.ts decideCloudRoute——明确"外部行情/最新信息"才走云端（本地可回答的不申请，不占用审批）；每次云端申请记录 routeReason（审计留痕）；云端仍只发脱敏三字段（边界不变）。
+- 新增 harnessPhases.test.ts 5 用例（验证环 3 + 压缩 2）。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。

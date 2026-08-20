@@ -14,6 +14,12 @@ export interface AutoThinkResult { topic: string; logId: number; rounds: number;
 // 本轮数据概览（模型自主探索的起点；纯本地规则收集，失败不阻断）
 export async function buildThinkOverview(): Promise<string> {
   const lines: string[] = [];
+  // 阶段②长期记忆注入（2026-08-18）：跨会话记住此前结论/用户处理，避免重复分析同一话题
+  try {
+    const { getMemoryContext } = await import('./db/memory');
+    const mem = await getMemoryContext(5);
+    if (mem) lines.push('【长期记忆（此前分析，勿重复同一话题；可延伸或引用）】\n' + mem);
+  } catch { /* 记忆读取失败不阻断 */ }
   // 阶段①目标注入（2026-08-18）：未完成目标优先进入概览，AI 围绕目标分析
   try {
     const { getActiveGoals } = await import('./db/goals');
@@ -151,7 +157,13 @@ export async function runAutoThink(opts?: {
         return executeTool(id, args);
       },
       approveCloud: async (call) => {
-        opts?.onEvent?.({ kind: 'cloud_request', call });
+        // 阶段④路由留痕（2026-08-18）：记录每次云端申请的路由原因，审计可见
+        let routeReason = '模型申请外部信息';
+        try {
+          const { decideCloudRoute } = await import('./aiRouter');
+          routeReason = decideCloudRoute(call).reason;
+        } catch { /* 忽略 */ }
+        opts?.onEvent?.({ kind: 'cloud_request', call, routeReason });
         return requestCloudConfirm({ material: call.material_name, category: call.category || '', question: call.question });
       },
       runCloud: async (call) => {
@@ -188,17 +200,33 @@ export async function runAutoThink(opts?: {
     const cleanConcl = cleanProtocolText(finalText || '');
     const firstLine = cleanConcl.split('\n').find((l: string) => l.trim().length > 4) || '自主分析';
     const topic = firstLine.trim().slice(0, 40);
-    await saveThinkLog({
-      id: logId, status: 'done', topic, overview, thoughts: cleanProtocolText(thoughts.join('\n\n---\n')),
-      tools_json: JSON.stringify(toolsRec), clouds_json: JSON.stringify(cloudsRec),
-      conclusion: cleanConcl, finished_at: new Date().toLocaleString('zh-CN', { hour12: false }),
-    });
     try { await setSetting('ai_think_overview_hash', ovHash); } catch { /* 忽略 */ }
     // 阶段①目标进度回写（2026-08-18）：结论摘要追加到第一个未完成目标，用户可见推进痕迹
     if (cleanConcl && activeGoals.length > 0) {
       try { await appendGoalProgress(activeGoals[0].id, cleanConcl.slice(0, 200)); } catch { /* 忽略 */ }
     }
-    opts?.onEvent?.({ kind: 'done', topic, conclusion: finalText, rounds, clouds: clouds.length });
+    // 阶段②结论入记忆（跨会话复用，防重复分析同一话题）
+    try {
+      const { setMemory } = await import('./db/memory');
+      await setMemory('think:' + topic, '「' + topic + '」' + cleanConcl.slice(0, 180), 'conclusion');
+    } catch { /* 忽略 */ }
+    // 阶段③输出验证环（2026-08-18）：结论里的金额/百分比必须在数据证据（概览+工具结果）中出现，否则附注人工核对
+    let verifiedNote = '';
+    try {
+      const { verifyConclusionNumbers } = await import('./verifyConclusion');
+      const evidence = overview + '\n' + toolsRec.map((t: any) => t.name + ': ' + t.text).join('\n');
+      const { unverified } = verifyConclusionNumbers(cleanConcl, evidence);
+      if (unverified.length > 0) {
+        verifiedNote = '\n\n[校验] 结论含 ' + unverified.length + ' 个未能从本次数据溯源的数字：' + unverified.slice(0, 5).map((u: any) => u.num + (u.ctx ? '(' + u.ctx.slice(-14) + ')' : '')).join('、') + '——请人工核对后再采用';
+      }
+    } catch { /* 校验失败不阻断 */ }
+    const storedConcl = cleanConcl + verifiedNote;
+    await saveThinkLog({
+      id: logId, status: 'done', topic, overview, thoughts: cleanProtocolText(thoughts.join('\n\n---\n')),
+      tools_json: JSON.stringify(toolsRec), clouds_json: JSON.stringify(cloudsRec),
+      conclusion: storedConcl, finished_at: new Date().toLocaleString('zh-CN', { hour12: false }),
+    });
+    opts?.onEvent?.({ kind: 'done', topic, conclusion: finalText + verifiedNote, rounds, clouds: clouds.length });
     return { topic, logId, rounds, clouds: clouds.length };
   } catch (e: any) {
     opts?.onEvent?.({ kind: 'error', error: String(e?.message || e).slice(0, 300) });

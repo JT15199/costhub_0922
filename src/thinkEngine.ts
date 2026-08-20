@@ -146,9 +146,24 @@ export interface ThinkLoopOptions {
   onEvent?: ThinkEventHandlers;
   maxRounds?: number;
 }
+// 上下文预算（harness 阶段②，2026-08-18）：9B 本地模型上下文有限——历史超预算时把最旧的轮次折叠为一行摘要，
+// 只保留 system + 初始问题 + 最近一轮完整（避免长任务 token 膨胀导致质量下降/报错）
+export function compressMessages(messages: any[], budgetChars = 9000): any[] {
+  let total = 0;
+  for (const m of messages) total += (m.content || '').length;
+  if (total <= budgetChars) return messages;
+  const head = messages.slice(0, 2); // system + 初始 user
+  const tail = messages.slice(2);
+  const keepTail = Math.min(tail.length, 2); // 保留最近一轮 assistant+user
+  const fold = tail.slice(0, tail.length - keepTail);
+  const keptTail = tail.slice(tail.length - keepTail);
+  const foldText = '（前 ' + Math.ceil(fold.length / 2) + ' 轮分析过程已压缩省略——你已掌握上下文。直接继续：如需更多数据再输出 [TOOL]/[CLOUD]，否则直接给出最终结论）';
+  return [...head, { role: 'user', content: foldText }, ...keptTail];
+}
+
 export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText: string; rounds: number; clouds: { call: any; ok: boolean; result: string }[] }> {
   const { startOllamaStream } = await import('./ollama');
-  const messages: any[] = [{ role: 'system', content: opts.systemPrompt }, { role: 'user', content: opts.userContent }];
+  let messages: any[] = [{ role: 'system', content: opts.systemPrompt }, { role: 'user', content: opts.userContent }];
   const maxRounds = opts.maxRounds || MAX_THINK_ROUNDS;
   const clouds: { call: any; ok: boolean; result: string }[] = [];
   let finalText = '';
@@ -216,6 +231,8 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
     messages.push({ role: 'assistant', content: buffer });
     const roundHint = round >= maxRounds - 1 ? '（注意：这是最后一轮——如果你已有足够信息，请直接输出最终结论，不要再调用工具）' : '';
     messages.push({ role: 'user', content: toolResults.map(r => r.content).join('\n---\n') + '\n继续你的分析：如需更多数据再输出 [TOOL]/[CLOUD] 调用，否则直接给出最终结论。' + roundHint });
+    // ⚠️ 上下文预算（阶段②）：超过 9000 字符即折叠最旧轮次，保住最近一轮完整
+    messages = compressMessages(messages);
   }
   // ⚠️ 循环耗尽兜底（用户反馈：跑了一会儿停了没有结论）：最后一轮有调用时 finalText 为空 → 用最后一轮清理文本作结论
   if (!finalText) finalText = lastClean || '(思考循环达到上限未输出结论——可减少工具调用轮次或直接提问)';
