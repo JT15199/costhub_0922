@@ -114,6 +114,10 @@
 
 - VePanel.tsx / db/value.ts / valueEng.ts / valueEng.test.ts、Compare 页 VePanel 挂载、aiTools 第14工具 query_project_value_engineering、db.ts export 全部移除（VE 依赖用户主观打分为价值 = 不客观，踩了用户红线；后续以「用户原声 + 本地模型分析最有价值特性」方向重新设计）。
 
+## 三·补7补4、用户原声分析·分析过程可见（2026-08-18 用户：分析时能看到过程、到哪一步）
+
+- runAnalyze 循环里 setCurBlock（正在分析的块 idx/total/items）+ setLiveDims（每块提炼维度名实时累积）；UI 分析区换成**过程面板**：进度条+X/Y块 +「正在分析第 N 块（本块 X 条原声）+样例预览」+「已提炼维度（实时累积 Tag）」+ 保留 log；切页不中断（结果照常落库）。
+
 ## 三·补7补3、用户原声分析·产品维度 + 声量优先（2026-08-18 用户：每次导入某产品源声需选择产品；声量=在乎的人多是第一信号）
 
 - **产品维度**：voice_item/voice_dimension/voice_run 加 product 列（ALTER 兼容），导入/分析/结果/清空/运行状态全部按 product；页面顶部 AutoComplete 选/输产品，标题带产品名；getVoiceProducts 记忆已用产品。

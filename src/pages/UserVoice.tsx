@@ -27,6 +27,8 @@ export default function UserVoice() {
   const [count, setCount] = useState(0);
   const [dims, setDims] = useState<any[]>([]);
   const [running, setRunning] = useState<{ done: number; total: number } | null>(null);
+  const [curBlock, setCurBlock] = useState<{ idx: number; total: number; items: string[] } | null>(null);
+  const [liveDims, setLiveDims] = useState<string[]>([]);
   const [log, setLog] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [product, setProduct] = useState('');
@@ -71,8 +73,10 @@ export default function UserVoice() {
     const blocks = chunkVoiceItems(items, 3000);
     const runId = await startVoiceRun(items.length, blocks.length, product);
     const results: BlockDimension[][] = [];
+    setLiveDims([]);
     for (let i = 0; i < blocks.length; i++) {
       const blk = blocks[i];
+      setCurBlock({ idx: i + 1, total: blocks.length, items: blk.items });
       setLog(prev => [...prev, '分析第 ' + (i + 1) + '/' + blocks.length + ' 块（' + blk.items.length + ' 条）...']);
       const sys = '你是用户口碑分析专家。下面是一批用户对电子产品的真实评价。请提炼"用户最在意、最有价值的特性维度"，每个标注情感倾向。只输出 JSON：{"dimensions":[{"name":"特性名","sentiment":"positive或negative"}]}。规则：1) 最多 15 个维度 2) 只依据给出的评价，不要编造 3) 特性要具体有用（如 续航/压感/外形/连接）4) positive=用户满意喜欢，negative=用户吐槽。';
       const user = '用户评价：\n' + blk.items.join('\n');
@@ -84,6 +88,8 @@ export default function UserVoice() {
           { endpoint: 'native', think: false, json: false, num_predict: 1500 });
       });
       const dims = parseDimensions(full);
+      setLiveDims(prev => [...prev, ...dims.map((d_: any) => d_.name)]);
+      setCurBlock(prev => prev ? { ...prev, items: [] } : prev);
       // ⚠️ 本地模型调用留痕（AI 请求日志）：每次用户原声提炼记录到 ai_request_logs（本地，不涉外发）
       try { await logLocalAICall({ request_type: 'voice_analyze', system_prompt: sys, user_prompt: user, response_summary: full.slice(0, 200), success: true, model_name: model }); } catch { /* 日志失败不阻断 */ }
       setLog(prev => [...prev, '  第 ' + (i + 1) + ' 块提炼出 ' + dims.length + ' 个维度']);
@@ -114,9 +120,25 @@ export default function UserVoice() {
         </div>
         <div style={{ marginTop: 8, fontSize: 11.5, color: '#94A3B8', lineHeight: 1.6 }}>导入上一代产品的用户评价/口碑 Excel，本地模型自动分块（每块约 3000 字）逐块提炼用户最在意的特性维度，全部完成后自动汇总为「最有价值特性」权重榜——作为价值工程/新品特性的客观依据。</div>
         {running && (
-          <div style={{ marginTop: 10 }}>
-            <Progress percent={Math.round((running.done / running.total) * 100)} />
-            <div style={{ fontSize: 12, color: '#475569' }}>正在分析 {running.done}/{running.total} 块...</div>
+          <div style={{ marginTop: 10, background: '#F5FAFF', border: '1px solid #BFDBFE', borderRadius: 10, padding: '10px 12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+              <Progress percent={Math.round((running.done / running.total) * 100)} size="small" style={{ flex: 1 }} />
+              <b style={{ fontSize: 12.5, color: '#0A84FF', whiteSpace: 'nowrap' }}>{running.done}/{running.total} 块</b>
+            </div>
+            {curBlock && (
+              <div style={{ fontSize: 11.5, color: '#475569', lineHeight: 1.6 }}>
+                <div><b>正在分析第 {curBlock.idx} 块（共 {curBlock.total} 块）</b> · 本块 {curBlock.items.length} 条原声</div>
+                {curBlock.items.length > 0 && (
+                  <div style={{ color: '#64748B', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>样例：{curBlock.items.slice(0, 2).map((s: string) => s.slice(0, 22)).join(' ｜ ')}</div>
+                )}
+              </div>
+            )}
+            {liveDims.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                <div style={{ fontSize: 11, color: '#94A3B8' }}>已提炼维度（实时累积）：</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 3 }}>{liveDims.slice(0, 20).map((d, i) => <Tag key={i} color="blue" style={{ margin: 0, fontSize: 10.5 }}>{d}</Tag>)}</div>
+              </div>
+            )}
           </div>
         )}
         {log.length > 0 && (
