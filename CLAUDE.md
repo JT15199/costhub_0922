@@ -114,6 +114,11 @@
 
 - VePanel.tsx / db/value.ts / valueEng.ts / valueEng.test.ts、Compare 页 VePanel 挂载、aiTools 第14工具 query_project_value_engineering、db.ts export 全部移除（VE 依赖用户主观打分为价值 = 不客观，踩了用户红线；后续以「用户原声 + 本地模型分析最有价值特性」方向重新设计）。
 
+## 三·补7补3、用户原声分析·产品维度 + 声量优先（2026-08-18 用户：每次导入某产品源声需选择产品；声量=在乎的人多是第一信号）
+
+- **产品维度**：voice_item/voice_dimension/voice_run 加 product 列（ALTER 兼容），导入/分析/结果/清空/运行状态全部按 product；页面顶部 AutoComplete 选/输产品，标题带产品名；getVoiceProducts 记忆已用产品。
+- **声量优先**：mergeDimensions 以 count（声量=提及用户数）为 weight 主排序；quality=positive/count（好评率）；kind（strong=声量高口碑好 / fix=声量高负面多 / minor=声量低）；结果表显示 🔥声量/💬好评率/👍👎/类型，说明「声量=在乎的人多，主导排序」。
+
 ## 三·补7补2、用户原声分析导入去重（2026-08-18 用户：文件重复上传内容会累加）
 
 - addVoiceItem 内容级去重（同 content 不重复入库，返回 0=已存在）；handleFile 统计 新增/跳过重复，提示「新增 X 条，跳过 Y 条重复」。
