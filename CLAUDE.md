@@ -92,6 +92,13 @@
 - **logOutboundRequest**（outbound_request_logs）：isLocalUrl 过滤（localhost/127.0.0.1/::1/内网）→ 本地调用不记外发中心。
 - 设置页文案更新：AI 请求日志="只记录本地模型访问"；外发安全中心="仅云端外发可逐条验证"。
 
+## 三·补6、价值工程（2026-08-18 用户方向：价值工程/竞品对比/新项目驱动，价值由数据算不人为定义）
+
+- **数据层**（db/value.ts）：cat_feature_templates（品类特性模板：feature_key/label/weight，默认显示器/手写笔/鼠标模板）+ value_scores（ref_type/ref_id/feature_key/score 0-10，UNIQUE 冲突 upsert）——独立于雷达评分。
+- **纯函数**（valueEng.ts）：computeValueEngineering——价值分=Σ(评分×权重)/Σ权重；VE=价值分/(每千元成本)；模块价值比=特性贡献占比/成本占比（无特性贡献时 valueRatio=-1 不误判，只标成本占比最高的「重点成本模块」）；worstModules=<1 的价值工程对象。
+- **VePanel**（对比分析页）：选品类 → 该品类项目/竞品 VE 对比表（价值分/成本/VE/每分成本/价值工程重点标签/评分入口）；评分按品类模板 0-10。
+- **价值工程口径**（用户确认）：价值由市场/数据算，特性权重按品类（可改），对比对象按同品类分组（避免高低档混比）。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。

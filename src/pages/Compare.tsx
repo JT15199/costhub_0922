@@ -7,6 +7,7 @@ import echarts from '../echartsSetup';
 import { getProjects, getProjectBOMs, getCompetitors, getCompetitorBOMs, getFeatures, saveFeature, deleteFeature, getScores, saveScore } from '../db';
 import { chartTooltip, chartAxisStyle, chartGrid, chartTextMuted, chartSplitLine, barGradient } from '../chartTheme';
 import CompetitivenessRadar from '../components/CompetitivenessRadar';
+import VePanel from '../components/VePanel';
 
 export default function Compare() {
   const [projects, setProjects] = useState<any[]>([]);
@@ -147,6 +148,8 @@ export default function Compare() {
           )}
         </Space>
       </div>
+
+      <VePanel />
 
       {aBoms.length > 0 && bBoms.length > 0 && (
         <Tabs defaultActiveKey="radar" items={[
