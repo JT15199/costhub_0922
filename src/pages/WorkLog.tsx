@@ -334,7 +334,7 @@ export default function WorkLog() {
           (t) => { summaryReasoning += t; }, // 思考单独收集，不混入正文
           () => { resolve(); },
           (e) => { step2Error = e; resolve(); },
-          { num_predict: 4000, temperature: 0.3, think: false, endpoint: 'native', json: false },
+          { num_predict: 16384, temperature: 0.3, think: false, endpoint: 'native', json: false },
         );
       });
       setSummarizing(false);

@@ -61,7 +61,7 @@ export async function startOllamaStream(
       ...(opts?.tools && opts.tools.length > 0 ? { tools: opts.tools } : {}),
       options: {
         temperature: opts?.temperature ?? 0.3,
-        num_predict: opts?.num_predict ?? 1200,
+        num_predict: opts?.num_predict ?? 16384,
       },
       keep_alive: '30m',
     };
@@ -73,8 +73,8 @@ export async function startOllamaStream(
     body = {
       model, messages, stream: true,
       temperature: opts?.temperature ?? 0.3,
-      num_predict: opts?.num_predict ?? 1200,
-      max_tokens: opts?.num_predict ?? 1200, // /v1 端点认 max_tokens，双保险
+      num_predict: opts?.num_predict ?? 16384,
+      max_tokens: opts?.num_predict ?? 16384, // /v1 端点认 max_tokens，双保险
       keep_alive: '30m',
     };
     if (opts?.think === false) {

@@ -484,9 +484,9 @@ async function learnRulesFromDB(
           () => { /* 关闭思考 */ },
           () => { finish(); },
           (e) => { learnErr = e; finish(); },
-          { num_predict: 500, temperature: 0.2, think: false, endpoint: 'native' },
+          { num_predict: 4096, temperature: 0.2, think: false, endpoint: 'native' },
         ).then(cleanup => { setTimeout(cleanup, 20000); });
-        setTimeout(() => finish(), 60000);
+        setTimeout(() => finish(), 300000); // 5 分钟护栏，慢模型不被误杀
       });
       logLocalAICall({
         request_type: 'module_learn',
@@ -838,10 +838,10 @@ ${itemList}` },
             (t) => { reasoningText += t; }, // 不丢弃思考内容，作为 content 为空时的兜底
             () => { finish(); }, // done
             (e) => { streamErr = e; finish(); }, // error
-            { num_predict: 1500, temperature: 0.2, think: false, endpoint: 'native' }, // 原生端点，think:false 确定生效
+            { num_predict: 16384, temperature: 0.2, think: false, endpoint: 'native' }, // 原生端点，think:false 确定生效
           ).then(cleanup => { setTimeout(cleanup, 30000); }); // 完成后30秒清理监听器
-          // 超时保护：3分钟仍无任何响应则明确失败（不能假装完成/走兜底）
-          setTimeout(() => { if (!streamDone) { streamErr = streamErr || 'Ollama 无响应（超过 180 秒未返回任何内容），请确认服务正常'; finish(); } }, 180000);
+          // 超时保护：10 分钟仍无任何响应才明确失败（不截断、不误杀慢模型）
+          setTimeout(() => { if (!streamDone) { streamErr = streamErr || 'Ollama 无响应（超过 10 分钟未返回任何内容），请确认服务正常'; finish(); } }, 600000);
         });
         // 审计日志：智能导入分类（本地模型）
         logLocalAICall({
@@ -1330,7 +1330,7 @@ export default function LocalAIAssistant() {
               { role: 'system', content: extractionPrompt },
               { role: 'user', content: convText },
             ],
-            stream: false, temperature: 0.2, num_predict: 300,
+            stream: false, temperature: 0.2, num_predict: 4096,
             // 关键：记忆提炼也关闭思考，避免CPU上等待过久
             think: false,
           }),

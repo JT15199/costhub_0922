@@ -190,8 +190,8 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
         (t) => { buffer += t; opts.onEvent?.onThought?.(t); },
         () => resolve(),
         (e) => reject(new Error(e)),
-        // ⚠️ json:false 必须（默认 format:'json' 会强制只输出 JSON，思考/正文被吞 → 无内容）；num_predict 4096（默认 1200 会截断长思考 → 无结论）
-        { endpoint: 'native', think: true, json: false, num_predict: 4096 },
+        // ⚠️ json:false 必须（默认 format:'json' 会强制只输出 JSON，思考/正文被吞 → 无内容）；num_predict 16384 不截断长思考（用户 2026-08-18：所有本地 AI 不要截断）
+        { endpoint: 'native', think: true, json: false, num_predict: 16384 },
       ).catch(() => { /* 错误走 onError */ });
     });
     const clean = cleanProtocolText(buffer);

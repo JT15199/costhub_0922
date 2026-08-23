@@ -162,7 +162,7 @@ JSON 格式（必须严格符合）：
           () => {},
           () => resolve(),
           e => reject(new Error(e)),
-          { endpoint: 'native', json: true, think: false, num_predict: 4000, temperature: 0.4 },
+          { endpoint: 'native', json: true, think: false, num_predict: 16384, temperature: 0.4 },
         );
       });
       // 解析（失败自动重试一次）
@@ -176,7 +176,7 @@ JSON 格式（必须严格符合）：
             () => {},
             () => resolve(),
             e => reject(new Error(e)),
-            { endpoint: 'native', json: true, think: false, num_predict: 4000, temperature: 0.4 },
+            { endpoint: 'native', json: true, think: false, num_predict: 16384, temperature: 0.4 },
           );
         });
         data = parseDemoJson(streamText);

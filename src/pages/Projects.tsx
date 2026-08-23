@@ -826,7 +826,7 @@ export default function Projects() {
            { role: 'user', content: `项目 ${selectedProject?.code || ''} 体检结果：\n${list}` }],
           t => { full += t; setHealthAiSummary(full); },
           () => {}, () => resolve(), e => reject(new Error(e)),
-          { endpoint: 'native', json: false, think: false, num_predict: 200, temperature: 0.3 },
+          { endpoint: 'native', json: false, think: false, num_predict: 4096, temperature: 0.3 },
         );
       });
       logLocalAICall({
@@ -1888,7 +1888,7 @@ export default function Projects() {
                                              { role: 'user', content: userPrompt }],
                                             t => { full += t; aiText = full; modal.update({ content: renderContent() }); },
                                             () => {}, () => resolve(), e => reject(new Error(e)),
-                                            { endpoint: 'native', json: false, think: false, num_predict: 300, temperature: 0.3 },
+                                            { endpoint: 'native', json: false, think: false, num_predict: 4096, temperature: 0.3 },
                                           );
                                         });
                                         logLocalAICall({

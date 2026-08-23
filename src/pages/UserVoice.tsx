@@ -91,7 +91,7 @@ export default function UserVoice() {
     const blocks = chunkVoiceItems(items, 3000);
     const runId = await startVoiceRun(items.length, blocks.length, product);
     const results: BlockDimension[][] = [];
-    let okBlocks = 0, timeoutBlocks = 0, emptyBlocks = 0;
+    let failBlocks = 0, emptyBlocks = 0;
     setLiveDims([]);
     for (let i = 0; i < blocks.length; i++) {
       const blk = blocks[i];
@@ -101,20 +101,20 @@ export default function UserVoice() {
       const user = '用户评价：\n' + blk.items.join('\n');
       let full = '';
       setLiveChars(0);
-      // ⚠️ 模型调用带超时：本地模型无响应/慢时不卡死——120s 超时跳过该块继续，且实时显示输出字数让用户确认在跑
+      // 不截断、不超时（用户 2026-08-18：所有本地 AI 都不要截断，让他思考，只要确认在线连接中、会有输出即可）：
+      // 预检已确认在线+模型就绪，放心让模型想多久都行，等它自然结束（onDone）或报错（onError）——不再用任何超时掐断
       const ok = await new Promise<boolean>((resolve) => {
         let done = false;
-        const timer = setTimeout(() => { if (!done) { done = true; resolve(false); } }, 120000);
         startOllamaStream(base, model, [{ role: 'system', content: sys }, { role: 'user', content: user }],
           (t) => { full += t; setLiveChars(full.length); }, () => { },
-          () => { if (!done) { done = true; clearTimeout(timer); resolve(true); } },
-          (_err: any) => { if (!done) { done = true; clearTimeout(timer); resolve(false); } },
-          // 结构化提炼用自由文本（json:false）+ 健壮解析兜底；think:false 免长思考；num_predict 提到 4096 防输出被截断
-          { endpoint: 'native', think: false, json: false, num_predict: 4096 });
+          () => { if (!done) { done = true; resolve(true); } },
+          (_err: any) => { if (!done) { done = true; resolve(false); } },
+          // 结构化提炼用自由文本（json:false）+ 健壮解析兜底；think:false 免长思考；num_predict 大不截断
+          { endpoint: 'native', think: false, json: false, num_predict: 16384 });
       });
       if (!ok) {
-        timeoutBlocks++;
-        setLog(prev => [...prev, '  ⚠️ 第 ' + (i + 1) + ' 块模型未响应/超时（120s），已跳过继续（可稍后重试，或换更快的模型）']);
+        failBlocks++;
+        setLog(prev => [...prev, '  ⚠️ 第 ' + (i + 1) + ' 块模型连接报错/中断，已跳过继续']);
         setCurBlock(prev => prev ? { ...prev, items: [] } : prev);
         continue;
       }
@@ -127,7 +127,6 @@ export default function UserVoice() {
         try { await logLocalAICall({ request_type: 'voice_analyze', system_prompt: sys, user_prompt: user, response_summary: snippet, success: false, error_message: '输出未解析出维度', model_name: model }); } catch { }
         continue;
       }
-      okBlocks++;
       setLiveDims(prev => [...prev, ...dims.map((d_: any) => d_.name)]);
       setCurBlock(prev => prev ? { ...prev, items: [] } : prev);
       // ⚠️ 本地模型调用留痕（AI 请求日志）：每次用户原声提炼记录到 ai_request_logs（本地，不涉外发）
@@ -144,14 +143,14 @@ export default function UserVoice() {
     if (merged.length === 0) {
       await finishVoiceRun(runId, 'error', '未提炼出维度');
       setDims([]); setRunning(null); setBusy(false);
-      if (timeoutBlocks === blocks.length) message.error('分析未完成：本地模型未响应（已跳过全部 ' + blocks.length + ' 块）。请确认模型已下载且能正常出字，再重试');
+      if (failBlocks === blocks.length) message.error('分析未完成：本地模型连接报错（已跳过全部 ' + blocks.length + ' 块）。请确认 Ollama 运行正常后重试');
       else message.warning('未提炼出特性维度（模型有输出但格式未被识别）。可在日志查看输出样例，或重试');
       return;
     }
     await finishVoiceRun(runId, 'done');
     setDims(await getVoiceDimensions(product));
     setRunning(null); setBusy(false);
-    const skipNote = (timeoutBlocks + emptyBlocks) > 0 ? '（跳过 ' + timeoutBlocks + ' 块超时、' + emptyBlocks + ' 块未识别）' : '';
+    const skipNote = (failBlocks + emptyBlocks) > 0 ? '（跳过 ' + failBlocks + ' 块报错、' + emptyBlocks + ' 块未识别）' : '';
     message.success('「' + product + '」分析完成：提炼出 ' + merged.length + ' 个特性维度（按用户关注度排序）' + skipNote);
   };
 

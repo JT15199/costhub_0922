@@ -360,7 +360,7 @@ async function aiAuditFindings(url: string, model: string, ctxText: string, rule
     startOllamaStream(url, model,
       [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }],
       t => { full += t; }, () => {}, () => resolve(), e => reject(new Error(e)),
-      { endpoint: 'native', json: true, think: false, num_predict: 900, temperature: 0.3 },
+      { endpoint: 'native', json: true, think: false, num_predict: 4096, temperature: 0.3 },
     );
   });
   logLocalAICall({

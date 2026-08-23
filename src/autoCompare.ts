@@ -156,13 +156,13 @@ export async function runAiIdentifyOnce(rows: any[], aliases: any[]): Promise<an
       try { if (typeof cleanupFn === 'function') cleanupFn(); } catch { /* 取消监听失败忽略 */ }
       fn();
     };
-    // ⚠️ 超时 120s（2026-08-18 用户反馈：本地模型慢，60s 经常超时提示太频繁）——超时模块下一轮轮询自动续试
-    const timer = setTimeout(() => finish(() => reject(new Error('识别超时（120s）——模型响应较慢，该模块将在下一轮自动续试'))), 120000);
+    // ⚠️ 不截断：num_predict 已提到 16384；超时仅作极宽松护栏（10 分钟），慢模型不会被误杀（用户 2026-08-18：所有本地 AI 不要截断，只要在线有输出就等）
+    const timer = setTimeout(() => finish(() => reject(new Error('识别超时（10 分钟）——模型响应异常缓慢，该模块将在下一轮自动续试'))), 600000);
     startOllamaStream(url, model,
       [{ role: 'system', content: sysPrompt }, { role: 'user', content: userPrompt }],
       t => { full += t; }, () => {},
       () => finish(resolve), e => finish(() => reject(new Error(e))),
-      { endpoint: 'native', json: false, think: false, num_predict: 1500, temperature: 0.2 },
+      { endpoint: 'native', json: false, think: false, num_predict: 16384, temperature: 0.2 },
     ).then(fn => { cleanupFn = fn; }).catch(() => { /* 错误会走 onError */ });
   });
   const groups = parseAiGroups(full, ungrouped)
