@@ -99,6 +99,13 @@
 - **VePanel**（对比分析页）：选品类 → 该品类项目/竞品 VE 对比表（价值分/成本/VE/每分成本/价值工程重点标签/评分入口）；评分按品类模板 0-10。
 - **价值工程口径**（用户确认）：价值由市场/数据算，特性权重按品类（可改），对比对象按同品类分组（避免高低档混比）。
 
+## 三·补6补、价值工程全链路（2026-08-18 "直接全做了"）
+
+- **市场售价锚定**：VEObject 补 marketPrice，VEResult 补 marketRatio（售价/成本溢价倍率）；VePanel/AI 工具展示。
+- **AI 工具** query_project_value_engineering（第 14 个工具）：项目代号 → 该项目 vs 同品类竞品的 VE 对比文本（价值分/成本/VE/市场溢价/重点模块）+ 取舍结论参考——AI 可据此给成本+特性综合建议。
+- **新项目驱动分析**：Projects handleSaveProject 新项目 → dispatch costhub-project-saved → App 监听 → scheduleAppThink(true) 强制一轮（成本不常变，新项目才是分析动力）；autoThink 概览含所有项目 AI 自动聚焦新项目。
+- 工具图标 FundOutlined。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。

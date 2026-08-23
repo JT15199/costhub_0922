@@ -55,18 +55,20 @@ export default function VePanel() {
         const boms = await getProjectBOMs(p.id);
         const moduleCosts: Record<string, number> = {}; let bomCost = 0;
         boms.forEach((b: any) => { const m = b.module_name || '未分模块'; const v = (b.part_cost || b.cost || 0) * (b.quantity || 1); moduleCosts[m] = (moduleCosts[m] || 0) + v; bomCost += v; });
+        const marketPrice = p.market_price || p.mkt_price || 0;
         const scores: Record<string, number> = {};
         (await getValueScores('project', p.id)).forEach((s: any) => { scores[s.feature_key] = s.score; });
-        objects.push({ refType: 'project', refId: p.id, name: p.code + ' ' + (p.name || ''), category: cat, bomCost, moduleCosts, moduleFeatures: modFeat(Object.keys(moduleCosts)), scores });
+        objects.push({ refType: 'project', refId: p.id, name: p.code + ' ' + (p.name || ''), category: cat, bomCost, marketPrice, moduleCosts, moduleFeatures: modFeat(Object.keys(moduleCosts)), scores });
       }
       for (const c of (comps || []).filter((x: any) => (x.category || '未分类') === cat)) {
         const boms = await getCompetitorBOMs(c.id);
         const moduleCosts: Record<string, number> = {};
         boms.forEach((b: any) => { const m = b.module_name || '未分模块'; moduleCosts[m] = (moduleCosts[m] || 0) + (b.estimated_cost || b.cost || 0); });
         const bomCost = Object.values(moduleCosts).reduce((s, v) => s + v, 0) || (c.bom_cost || 0);
+        const marketPrice = c.market_price || 0;
         const scores: Record<string, number> = {};
         (await getValueScores('competitor', c.id)).forEach((s: any) => { scores[s.feature_key] = s.score; });
-        objects.push({ refType: 'competitor', refId: c.id, name: c.brand + ' ' + c.model, category: cat, bomCost, moduleCosts, moduleFeatures: modFeat(Object.keys(moduleCosts)), scores });
+        objects.push({ refType: 'competitor', refId: c.id, name: c.brand + ' ' + c.model, category: cat, bomCost, marketPrice, moduleCosts, moduleFeatures: modFeat(Object.keys(moduleCosts)), scores });
       }
       setResults(computeValueEngineering(objects, templates).sort((a, b) => b.ve - a.ve));
     } catch (e: any) { console.error('价值工程加载失败:', e); message.error('价值工程加载失败'); }
@@ -97,6 +99,7 @@ export default function VePanel() {
             { title: 'BOM成本', dataIndex: 'bomCost', width: 90, align: 'right' as const, render: (v: number) => '¥' + (v || 0).toFixed(0) },
             { title: 'VE', dataIndex: 've', width: 80, align: 'right' as const, render: (v: number) => <b style={{ color: '#1E3A6E' }}>{v.toFixed(2)}</b> },
             { title: '每分成本', dataIndex: 'costPerValue', width: 90, align: 'right' as const, render: (v: number) => '¥' + (v || 0).toFixed(0) },
+            { title: '市场溢价', key: 'mr', width: 90, align: 'right' as const, render: (_: any, r: any) => r.marketRatio > 0 ? <span>{r.marketRatio.toFixed(2)}×</span> : <span style={{ color: '#CBD5E1' }}>—</span> },
             { title: '价值工程重点', key: 'w', width: 200, render: (_: any, r: any) => (r.worstModules || []).length ? r.worstModules.map((m: any) => <Tag key={m.module} color="red" style={{ marginBottom: 2 }}>{m.module}（成本{(m.costRatio * 100).toFixed(0)}%{m.valueRatio > 0 ? ' 价值比' + m.valueRatio.toFixed(2) : ''}）</Tag>) : <span style={{ color: '#CBD5E1' }}>—</span> },
             { title: '评分', key: 'sc', width: 80, render: (_: any, r: any) => <Button size="small" icon={<EditOutlined />} onClick={() => openScore(r)}>评分</Button> },
           ]} />

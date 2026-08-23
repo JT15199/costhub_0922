@@ -225,7 +225,10 @@ export default function App() {
     // 数据变化（导入/改价/BOM 变更）后节流触发
     const onDataChanged = () => scheduleAppThink();
     window.addEventListener('costhub-compare-request', onDataChanged);
-    return () => { clearInterval(iv); window.removeEventListener('costhub-compare-request', onDataChanged); };
+    // ⚠️ 新项目驱动（2026-08-18 用户方向）：成本不常变，新项目才是分析动力——保存新项目立即强制一轮自主分析
+    const onProjectSaved = () => scheduleAppThink(true);
+    window.addEventListener('costhub-project-saved', onProjectSaved);
+    return () => { clearInterval(iv); window.removeEventListener('costhub-compare-request', onDataChanged); window.removeEventListener('costhub-project-saved', onProjectSaved); };
   }, [scheduleAppThink]);
 
   // 启动时初始化默认密码（仅首次）

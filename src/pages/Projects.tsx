@@ -920,7 +920,9 @@ export default function Projects() {
       const clean = vals.category === '显示器'
         ? { ...vals, specs: '' }
         : { ...vals, screen_size: '', resolution: '', refresh_rate: '', panel_type: '' };
-      await saveProject({ ...editing, ...clean });
+      const saved = await saveProject({ ...editing, ...clean });
+      // ⚠️ 新项目驱动 AI 分析（2026-08-18 用户方向：成本数据不常变，新项目才是分析动力）——保存后通知 App 调度
+      if (!editing?.id) window.dispatchEvent(new CustomEvent('costhub-project-saved', { detail: { projectId: saved, code: vals.code || '' } }));
       // 新品类自动入库（保证品类筛选下拉能选到）
       if (vals.category && vals.category !== '未分类') {
         try {

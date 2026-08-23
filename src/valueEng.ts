@@ -19,6 +19,8 @@ export interface VEResult {
   name: string;
   valueScore: number;      // 加权价值分 0-10
   bomCost: number;
+  marketPrice?: number;    // 市场售价（价值锚）
+  marketRatio: number;     // 市场溢价倍率 = marketPrice / bomCost（越高市场认可的价值溢价越大）
   ve: number;              // 价值指数 = valueScore / (bomCost/1000)，越高越好
   costPerValue: number;    // 每价值分成本 = bomCost / valueScore，越低越好
   modules: {
@@ -44,6 +46,8 @@ export function computeValueEngineering(objects: VEObject[], templates: VETempla
     const bomCost = obj.bomCost || 1;
     const ve = valueScore > 0 ? valueScore / (bomCost / 1000) : 0;
     const costPerValue = valueScore > 0 ? bomCost / valueScore : 0;
+    // 市场售价锚定（2026-08-18）：市场认可的价值 = 售价相对成本的溢价倍率（越高越有竞争力）
+    const marketRatio = obj.marketPrice ? obj.marketPrice / bomCost : 0;
     // 模块价值比：模块特性贡献占比 / 模块成本占比
     let totalVal = 0;
     const modVal: Record<string, number> = {};
@@ -70,6 +74,6 @@ export function computeValueEngineering(objects: VEObject[], templates: VETempla
     const worstModules = totalVal > 0
       ? modules.filter(m => m.costRatio >= 0.05 && m.valueRatio > 0 && m.valueRatio < 1).sort((a, b) => a.valueRatio - b.valueRatio).slice(0, 3)
       : modules.filter(m => m.costRatio >= 0.05).sort((a, b) => b.costRatio - a.costRatio).slice(0, 1);
-    return { refType: obj.refType, refId: obj.refId, name: obj.name, valueScore, bomCost, ve, costPerValue, modules, worstModules };
+    return { refType: obj.refType, refId: obj.refId, name: obj.name, valueScore, bomCost, marketPrice: obj.marketPrice, marketRatio, ve, costPerValue, modules, worstModules };
   });
 }
