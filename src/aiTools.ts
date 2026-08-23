@@ -33,7 +33,6 @@ export const TOOL_ICONS: Record<string, React.ComponentType> = {
   query_todos: CheckSquareOutlined,
   insight_material_trend: ThunderboltOutlined,
   compare_subcategory_cost: BarChartOutlined,
-  query_project_value_engineering: FundOutlined,
 };
 export function toolIcon(id: string): React.ComponentType {
   return TOOL_ICONS[id] || FolderOutlined;
@@ -294,50 +293,6 @@ const tools: AiTool[] = [
       const { agentSearchLoop } = await import('./trendService');
       const r = await agentSearchLoop(a.material_name, a.category || '', 'price-trend');
       return '「' + a.material_name + '」行情：趋势 ' + (r.trend_direction || '信号不明确') + '，置信度 ' + (r.confidence_level || '中') + (r.magnitude_min != null ? '，幅度 ' + r.magnitude_min + '%~' + (r.magnitude_max ?? '') + '%' : '') + '\n摘要：' + (r.summary || '') + (r.suggested_action ? '\n建议：' + r.suggested_action : '');
-    },
-  },
-  {
-    id: 'query_project_value_engineering',
-    name: '价值工程分析',
-    desc: '对一个项目做价值工程分析：与同品类竞品对比 成本/价值分/VE/市场溢价，并标出高成本低价值的「重点模块」（价值工程取舍对象）。参数 project_code 必填（项目代号）。',
-    params: [{ key: 'project_code', type: 'string', required: true, desc: '项目代号，如 M270' }],
-    execute: async (a) => {
-      const { getProjects, getProjectBOMs, getCompetitors, getCompetitorBOMs, getCatFeatureTemplates, getValueScores, getModuleFeatureLinks, getFeatures } = await import('./db');
-      const { computeValueEngineering } = await import('./valueEng');
-      const projects = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
-      const target = projects.find((x: any) => x.code === a.project_code);
-      if (!target) return '未找到项目代号：' + a.project_code;
-      const cat = target.category || '未分类';
-      const templates = await getCatFeatureTemplates(cat);
-      if (templates.length === 0) return '品类「' + cat + '」尚未配置价值特性模板，无法做价值工程';
-      const [comps, links, featuresAll] = await Promise.all([getCompetitors(), getModuleFeatureLinks(), getFeatures('custom')]);
-      const featNameToKey: Record<string, string> = {};
-      templates.forEach((t: any) => { featNameToKey[t.feature_label] = t.feature_key; });
-      const linkFeat: Record<string, string[]> = {};
-      Object.entries(links || {}).forEach(([mod, fids]: any) => {
-        (fids || []).forEach((fid: number) => { const nm = featuresAll.find((f: any) => f.id === fid)?.name; if (nm && featNameToKey[nm]) (linkFeat[mod] = linkFeat[mod] || []).push(featNameToKey[nm]); });
-      });
-      const collect = async (refType: 'project' | 'competitor', refId: number, boms: any[], extraBom?: number, marketPrice?: number) => {
-        const moduleCosts: Record<string, number> = {}; let bomCost = 0;
-        boms.forEach((b: any) => { const m = b.module_name || '未分模块'; const v = (b.part_cost ?? b.cost ?? b.estimated_cost ?? 0) * (b.quantity ?? 1); moduleCosts[m] = (moduleCosts[m] || 0) + v; bomCost += v; });
-        if (bomCost === 0) bomCost = extraBom || 0;
-        const scores: Record<string, number> = {};
-        (await getValueScores(refType, refId)).forEach((s: any) => { scores[s.feature_key] = s.score; });
-        return { refType, refId, name: refType === 'project' ? target.code + ' ' + (target.name || '') : '', category: cat, bomCost, marketPrice: marketPrice || 0, moduleCosts, moduleFeatures: linkFeat, scores };
-      };
-      const tb = await getProjectBOMs(target.id);
-      const objects: any[] = [await collect('project', target.id, tb, 0, target.market_price || 0)];
-      for (const c of (comps || []).filter((x: any) => (x.category || '未分类') === cat)) {
-        const cb = await getCompetitorBOMs(c.id);
-        const obj = await collect('competitor', c.id, cb, c.bom_cost, c.market_price);
-        obj.name = c.brand + ' ' + c.model;
-        objects.push(obj);
-      }
-      if (objects.length <= 1) return '品类「' + cat + '」无同品类竞品可用于价值工程对比';
-      const res = computeValueEngineering(objects, templates).sort((x, y) => y.ve - x.ve);
-      const head = '项目 ' + target.code + ' 价值工程分析（品类 ' + cat + '，与 ' + (res.length - 1) + ' 个同品类竞品对比）：\n';
-      const rows = res.map((r: any) => (r.refType === 'project' ? '★' : '·') + ' ' + r.name + '｜价值分 ' + r.valueScore.toFixed(1) + '｜成本 ' + fmtMoney(r.bomCost) + '｜VE ' + r.ve.toFixed(2) + (r.marketRatio > 0 ? '｜市场溢价 ' + r.marketRatio.toFixed(2) + '×' : '') + ((r.worstModules || []).length ? '｜重点模块：' + r.worstModules.map((m: any) => m.module + '(' + (m.costRatio * 100).toFixed(0) + '%成本)').join('、') : ''));
-      return head + rows.join('\n') + '\n结论参考：VE 低且市场溢价低 = 性价比不足；重点关注标红（高成本低价值）模块做价值工程取舍。';
     },
   },
 ];

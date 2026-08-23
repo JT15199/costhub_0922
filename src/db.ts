@@ -15,4 +15,3 @@ export * from './db/dashboard';
 export * from './db/think';
 export * from './db/goals';
 export * from './db/memory';
-export * from './db/value';

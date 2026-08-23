@@ -110,6 +110,10 @@
 - **新项目驱动分析**：Projects handleSaveProject 新项目 → dispatch costhub-project-saved → App 监听 → scheduleAppThink(true) 强制一轮（成本不常变，新项目才是分析动力）；autoThink 概览含所有项目 AI 自动聚焦新项目。
 - 工具图标 FundOutlined。
 
+## 三·补6·删、价值工程已整体移除（2026-08-18 用户：现在VE基本没用，想清楚后作为单功能重做——用用户原声给本地模型分析最有价值特性）
+
+- VePanel.tsx / db/value.ts / valueEng.ts / valueEng.test.ts、Compare 页 VePanel 挂载、aiTools 第14工具 query_project_value_engineering、db.ts export 全部移除（VE 依赖用户主观打分为价值 = 不客观，踩了用户红线；后续以「用户原声 + 本地模型分析最有价值特性」方向重新设计）。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。
