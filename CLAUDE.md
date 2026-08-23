@@ -86,6 +86,12 @@
 - **DataTable 溢出修复**：Table 外包 overflowX:'auto' 容器——列总宽超容器时表格内横向滚动，不再撑破页面（通用组件，所有表格受益）。
 - **项目列表 SKU 变体列**：chips 容器 maxHeight 42 + overflowY auto（行高不过度膨胀）。
 
+## 三·补5补、AI 日志与外发中心分工（2026-08-18 用户确认：AI请求日志只本地，外发安全中心只云端）
+
+- **saveAIRequestLog**（ai_request_logs）：provider_name 非空 且 非'Ollama 本地' 且 request_type≠'usage' → 跳过（云端调用不再写，外发中心已记录）；本地（Ollama 本地/空）与 token 用量（'usage'）保留。
+- **logOutboundRequest**（outbound_request_logs）：isLocalUrl 过滤（localhost/127.0.0.1/::1/内网）→ 本地调用不记外发中心。
+- 设置页文案更新：AI 请求日志="只记录本地模型访问"；外发安全中心="仅云端外发可逐条验证"。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。

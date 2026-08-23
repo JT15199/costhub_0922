@@ -167,8 +167,15 @@ export async function clearOutboundRequestLogs() {
 
 // ⚠️ 外发审计（2026-08-18 强化）：每次云端请求记录 payload_summary（脱敏后的外发内容摘要）+
 // reviewed（是否经审批）——设置页「AI 外发安全中心」可逐条验证外发边界（仅物料名/品类/问题）
+// 2026-08-18 分工：外发安全中心只记云端外发——本地地址（本地 Ollama/回环/内网）不算外发，跳过
+function isLocalUrl(url: string): boolean {
+  const u = String(url || '').toLowerCase();
+  return /^https?:\/\/(localhost|127\.0\.0\.1|::1|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(u);
+}
+
 export async function logOutboundRequest(data: any) {
   await ensureOutboundLogsTable();
+  if (isLocalUrl(data.url)) return; // 本地调用不记外发安全中心（去看 AI 请求日志）
   const d = await getDb();
   await d.execute(
     'INSERT INTO outbound_request_logs (timestamp, method, url, status_code, response_time_ms, error_message, payload_summary, reviewed) VALUES (datetime(\'now\',\'localtime\'),?,?,?,?,?,?,?)',

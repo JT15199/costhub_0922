@@ -2053,10 +2053,10 @@ export default function Settings({ embedded }: { embedded?: boolean }) {
           <div>
             <h3 style={{ margin: 0 }}><SearchOutlined /> AI请求日志</h3>
             <p style={{ margin: '4px 0 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
-              查看所有AI请求的详细记录，确保数据安全
+              只记录本地模型（Ollama）的访问（本地数据不涉外发）；云端外发见上方「AI 外发安全中心」
             </p>
             <div style={{ marginTop: 8, padding: '8px 12px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 8, fontSize: 12, color: '#166534', lineHeight: 1.7 }}>
-              <EmojiIcon e="🔒" /> <b>数据安全边界：</b>云端模型只有 HTTP 转发通道，<b>无法访问本地数据库</b>——发送内容仅限物料名称/分类等业务字段（前端主动拼进请求，全程记录如上）。本地模型（Ollama）可读取项目数据辅助分析，每一次本地访问也记录在此（标记「本地」），可供审查。
+              <EmojiIcon e="🔒" /> <b>数据安全边界：</b>本地模型（Ollama）可读取项目数据辅助分析，此处记录每一次本地访问（供审查）；云端只有 HTTP 转发通道、无法访问本地数据库，云端外发内容见上方「AI 外发安全中心」（逐条可验证，仅物料名/品类/问题）。
             </div>
           </div>
           <Space>
