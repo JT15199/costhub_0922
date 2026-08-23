@@ -40,17 +40,17 @@ export default function UserVoice() {
         const wb = XLSX.read(e.target?.result, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
-        let added = 0;
+        let added = 0, skipped = 0;
         for (const r of rows) {
           // 自动识别文本列；找不到则把非空单元格拼接
           let content = '';
           for (const k of COL_KEYS) { if (String(r[k] || '').trim()) { content = String(r[k]).trim(); break; } }
           if (!content) content = Object.values(r).filter((v: any) => v && String(v).trim()).map(String).join(' ');
-          if (content) { void addVoiceItem(content, file.name); added++; }
+          if (content) { const id = await addVoiceItem(content, file.name); if (id > 0) added++; else skipped++; }
         }
         const total = await getVoiceItemCount();
         setCount(total);
-        message.success('已导入 ' + added + ' 条用户原声（共 ' + total + ' 条）');
+        message.success('导入完成：新增 ' + added + ' 条' + (skipped > 0 ? '，跳过 ' + skipped + ' 条重复' : '') + '（共 ' + total + ' 条）');
       } catch (err: any) { message.error('Excel 解析失败：' + (err?.message || err)); }
     };
     reader.readAsBinaryString(file);

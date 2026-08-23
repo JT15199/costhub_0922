@@ -43,7 +43,14 @@ async function ensureVoiceTables() {
 export async function clearVoiceItems() { await ensureVoiceTables(); const d = await getDb(); await d.execute('DELETE FROM voice_item'); await d.execute('DELETE FROM voice_dimension'); try { await d.execute('DELETE FROM voice_run'); } catch { } }
 export async function getVoiceItemCount() { await ensureVoiceTables(); const r = await (await getDb()).select<{ c: number }[]>('SELECT COUNT(*) as c FROM voice_item'); return r[0]?.c || 0; }
 export async function getAllVoiceItems() { await ensureVoiceTables(); return (await getDb()).select<any[]>('SELECT * FROM voice_item ORDER BY id'); }
-export async function addVoiceItem(content: string, source: string) { await ensureVoiceTables(); const d = await getDb(); const r = await d.execute('INSERT INTO voice_item (content, source) VALUES (?,?)', [content, source]); return Number(r.lastInsertId) || 0; }
+// 2026-08-18 去重：同内容原声不重复入库（防止重复上传 Excel 导致内容累加）；返回 0 = 已存在（跳过）
+export async function addVoiceItem(content: string, source: string): Promise<number> {
+  await ensureVoiceTables(); const d = await getDb();
+  const ex = await d.select<{ c: number }[]>('SELECT COUNT(*) as c FROM voice_item WHERE content = ?', [content]);
+  if ((ex[0]?.c || 0) > 0) return 0;
+  const r = await d.execute('INSERT INTO voice_item (content, source) VALUES (?,?)', [content, source]);
+  return Number(r.lastInsertId) || 0;
+}
 export async function replaceVoiceDimensions(list: { name: string; weight: number; count: number; positive: number; negative: number; evidence: string }[]) {
   await ensureVoiceTables(); const d = await getDb();
   await d.execute('DELETE FROM voice_dimension');
