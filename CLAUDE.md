@@ -42,6 +42,10 @@
 5. **AI 润色/速览调用**：走 http_post /api/chat **非流式**（非 startOllamaStream 事件流）；失败必须静默（规则文案已可用，不打扰）。
 6. **验证铁律**：`npx tsc -b` 重定向到文件拿真实退出码（`Write-Output ('TSC_EXIT='+$LASTEXITCODE)`）；vitest 用默认 reporter（Start-Process cmd + vitest-run.log）。
 
+## 五·补、全局问询已移除（2026-08-18 用户：AI问询重复了）
+
+- GlobalAI.tsx 整文件删除、侧边栏「AI 问询」入口移除、costhub-ctx 写入清理；本地 AI 助手（对话/Agent/自主分析）已覆盖全局问询能力，避免重复入口。旧日志的 global_ask 类型映射保留（历史日志可读）。
+
 ## 五、用户偏好（产品行为红线）
 
 1. **安静后台**：后台引擎失败/无产出一律静默降级，不弹提示；提示只在真实产出或手动操作时。

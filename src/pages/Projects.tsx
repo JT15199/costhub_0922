@@ -846,8 +846,6 @@ export default function Projects() {
 
   const selectProject = (pid: number) => {
     setSelectedPid(pid); loadBOM(pid); loadReviews(pid); loadCostSnapshots(pid); loadMeasures(pid); loadTargets(pid); loadProjectSuppliers(pid); loadSkus(pid);
-    // 全局 AI 问询上下文（当前选中项目）
-    localStorage.setItem('costhub-ctx', JSON.stringify({ page: 'projects', projectId: pid, code: projects.find((p: any) => p.id === pid)?.code || '' }));
     // 切换项目时自动退出参照对比模式（要对比再重新选择参照项目）
     setRefProjPid(null); setRefProjBoms([]); setModRefMap({});
   };

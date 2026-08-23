@@ -20,7 +20,6 @@ const WorkLog = lazy(() => import('./pages/WorkLog'));
 const LoginScreen = lazy(() => import('./pages/LoginScreen'));
 import { ThemeProvider } from './theme/ThemeContext';
 import { ThemeSwitcher } from './theme/ThemeSwitcher';
-import GlobalAI from './components/GlobalAI';
 import CloudConfirmBar from './components/CloudConfirmBar';
 import AIGuide from './components/AIGuide';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -77,7 +76,6 @@ export default function App() {
   // 系统设置弹窗
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 全局 AI 问询
-  const [globalAiOpen, setGlobalAiOpen] = useState(false);
   // 首次 AI 能力引导
   const [aiGuideOpen, setAiGuideOpen] = useState(false);
   // 使用说明弹窗
@@ -438,15 +436,6 @@ export default function App() {
           {insightCount > 0 && <Badge count={insightCount} size="small" style={{ marginLeft: 'auto' }} />}
         </div>
 
-        {/* 全局 AI 问询（本地模型，读取当前上下文；回答可记入手账） */}
-        <div onClick={() => setGlobalAiOpen(true)}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 12.5, color: 'var(--color-text-secondary)', borderTop: '1px solid var(--color-border)', userSelect: 'none' }}
-          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
-          <RobotOutlined style={{ color: '#0A84FF' }} />
-          <span>AI 问询</span>
-          <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--color-text-tertiary)' }}>本地模型</span>
-        </div>
 
         {/* 底部：用户信息 + 设置（收纳主题/缩放/版本/使用说明） */}
         <div className="sidebar-footer" style={{
@@ -542,8 +531,6 @@ export default function App() {
         <Settings embedded />
       </Modal>
 
-      {/* 全局 AI 问询（上下文感知，本地模型） */}
-      <GlobalAI open={globalAiOpen} onClose={() => setGlobalAiOpen(false)} />
 
       {/* 首次 AI 能力引导 */}
       <AIGuide open={aiGuideOpen} onClose={() => setAiGuideOpen(false)} onOpenSettings={() => setSettingsOpen(true)} />
