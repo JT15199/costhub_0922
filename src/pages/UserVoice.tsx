@@ -29,6 +29,7 @@ export default function UserVoice() {
   const [running, setRunning] = useState<{ done: number; total: number } | null>(null);
   const [curBlock, setCurBlock] = useState<{ idx: number; total: number; items: string[] } | null>(null);
   const [liveDims, setLiveDims] = useState<string[]>([]);
+  const [liveChars, setLiveChars] = useState(0);
   const [log, setLog] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [product, setProduct] = useState('');
@@ -81,18 +82,29 @@ export default function UserVoice() {
       const sys = '你是用户口碑分析专家。下面是一批用户对电子产品的真实评价。请提炼"用户最在意、最有价值的特性维度"，每个标注情感倾向。只输出 JSON：{"dimensions":[{"name":"特性名","sentiment":"positive或negative"}]}。规则：1) 最多 15 个维度 2) 只依据给出的评价，不要编造 3) 特性要具体有用（如 续航/压感/外形/连接）4) positive=用户满意喜欢，negative=用户吐槽。';
       const user = '用户评价：\n' + blk.items.join('\n');
       let full = '';
-      await new Promise<void>((resolve, reject) => {
+      setLiveChars(0);
+      // ⚠️ 模型调用带超时：本地模型无响应/慢时不卡死——90s 超时跳过该块继续，且实时显示输出字数让用户确认在跑
+      const ok = await new Promise<boolean>((resolve) => {
+        let done = false;
+        const timer = setTimeout(() => { if (!done) { done = true; resolve(false); } }, 90000);
         startOllamaStream(base, model, [{ role: 'system', content: sys }, { role: 'user', content: user }],
-          (t) => { full += t; }, () => { }, () => resolve(), (err) => reject(new Error(err)),
+          (t) => { full += t; setLiveChars(full.length); }, () => { },
+          () => { if (!done) { done = true; clearTimeout(timer); resolve(true); } },
+          (_err: any) => { if (!done) { done = true; clearTimeout(timer); resolve(false); } },
           // json:false 必须（默认 format json 吞自由文本）；提炼不需要长思考
           { endpoint: 'native', think: false, json: false, num_predict: 1500 });
       });
+      if (!ok) {
+        setLog(prev => [...prev, '  ⚠️ 第 ' + (i + 1) + ' 块模型未响应/超时（90s），已跳过继续']);
+        setCurBlock(prev => prev ? { ...prev, items: [] } : prev);
+        continue;
+      }
       const dims = parseDimensions(full);
       setLiveDims(prev => [...prev, ...dims.map((d_: any) => d_.name)]);
       setCurBlock(prev => prev ? { ...prev, items: [] } : prev);
       // ⚠️ 本地模型调用留痕（AI 请求日志）：每次用户原声提炼记录到 ai_request_logs（本地，不涉外发）
       try { await logLocalAICall({ request_type: 'voice_analyze', system_prompt: sys, user_prompt: user, response_summary: full.slice(0, 200), success: true, model_name: model }); } catch { /* 日志失败不阻断 */ }
-      setLog(prev => [...prev, '  第 ' + (i + 1) + ' 块提炼出 ' + dims.length + ' 个维度']);
+      setLog(prev => [...prev, '  第 ' + (i + 1) + ' 块提炼出 ' + dims.length + ' 个维度（模型输出 ' + full.length + ' 字）']);
       results.push(dims);
       setRunning({ done: i + 1, total: blocks.length });
       await updateVoiceRunProgress(runId, i + 1);
@@ -127,7 +139,7 @@ export default function UserVoice() {
             </div>
             {curBlock && (
               <div style={{ fontSize: 11.5, color: '#475569', lineHeight: 1.6 }}>
-                <div><b>正在分析第 {curBlock.idx} 块（共 {curBlock.total} 块）</b> · 本块 {curBlock.items.length} 条原声</div>
+                <div><b>正在分析第 {curBlock.idx} 块（共 {curBlock.total} 块）</b> · 本块 {curBlock.items.length} 条原声{liveChars > 0 && <span style={{ color: '#0A84FF' }}> · 模型输出中（已 {liveChars} 字）</span>}</div>
                 {curBlock.items.length > 0 && (
                   <div style={{ color: '#64748B', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>样例：{curBlock.items.slice(0, 2).map((s: string) => s.slice(0, 22)).join(' ｜ ')}</div>
                 )}

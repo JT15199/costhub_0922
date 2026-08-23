@@ -114,6 +114,10 @@
 
 - VePanel.tsx / db/value.ts / valueEng.ts / valueEng.test.ts、Compare 页 VePanel 挂载、aiTools 第14工具 query_project_value_engineering、db.ts export 全部移除（VE 依赖用户主观打分为价值 = 不客观，踩了用户红线；后续以「用户原声 + 本地模型分析最有价值特性」方向重新设计）。
 
+## 三·补7补5、用户原声分析·不卡死 + 实时输出（2026-08-18 用户：一直卡住没变化，不知跑起来没）
+
+- 根因：startOllamaStream 无超时，本地模型无响应时 await 永远挂起。修复：每块模型调用包 90s 超时（Promise.race 风格），超时/失败 log「⚠️ 第 N 块模型未响应/超时，跳过继续」不阻塞；onToken 实时 setLiveChars 显示「模型输出中（已 X 字）」；日志补「模型输出 N 字」——页面实时反映确实在跑，不卡死。
+
 ## 三·补7补4、用户原声分析·分析过程可见（2026-08-18 用户：分析时能看到过程、到哪一步）
 
 - runAnalyze 循环里 setCurBlock（正在分析的块 idx/total/items）+ setLiveDims（每块提炼维度名实时累积）；UI 分析区换成**过程面板**：进度条+X/Y块 +「正在分析第 N 块（本块 X 条原声）+样例预览」+「已提炼维度（实时累积 Tag）」+ 保留 log；切页不中断（结果照常落库）。
