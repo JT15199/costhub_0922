@@ -1210,7 +1210,7 @@ export default function Projects() {
         const sks = allSkus.filter((s: any) => s.project_id === r.id);
         if (sks.length === 0) return <span style={{ color: 'var(--color-text-tertiary)' }}>—</span>;
         return (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 42, overflowY: 'auto' }}>
             {sks.map((s: any) => {
               const c = skuCostMap[s.id];
               const d = c ? c.delta : 0;

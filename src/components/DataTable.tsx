@@ -256,11 +256,14 @@ export default function DataTable(props: DataTableProps) {
           </Popover>
         </div>
       )}
-      <Table
-        {...safeRest}
-        columns={enhancedColumns}
-        components={tableComponents}
-      />
+      {/* ⚠️ 2026-08-18 溢出修复：列总宽超容器时在表格容器内横向滚动，不撑破页面 */}
+      <div style={{ overflowX: 'auto' }}>
+        <Table
+          {...safeRest}
+          columns={enhancedColumns}
+          components={tableComponents}
+        />
+      </div>
     </div>
   );
 }

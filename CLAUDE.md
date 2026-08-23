@@ -80,6 +80,12 @@
 - **深挖进度可视化**（AutoThinkPanel 实时区）：显示「🔧 已调用 N 次工具 · 单线程深挖中（每轮最多 2 个调用）」。
 - harnessPhases.test 补 1 用例（上限=2）。
 
+## 三·补5、远程桌面兼容 + 表格溢出（2026-08-18 用户反馈：公司 jumper 远程使用总出 bug / 项目列表内容溢出）
+
+- **远程桌面（RDP/jumper）WebView2 渲染**（src-tauri/src/main.rs）：检测 SESSIONNAME 非 Console（远程会话）→ 设置 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--disable-gpu——远程会话硬件加速渲染常致白屏/闪烁/弹窗异常（06-23 已修 data-motion transition 问题，本修复针对 GPU）；本地控制台保持 GPU 加速。
+- **DataTable 溢出修复**：Table 外包 overflowX:'auto' 容器——列总宽超容器时表格内横向滚动，不再撑破页面（通用组件，所有表格受益）。
+- **项目列表 SKU 变体列**：chips 容器 maxHeight 42 + overflowY auto（行高不过度膨胀）。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。
