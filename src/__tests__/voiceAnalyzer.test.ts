@@ -66,4 +66,12 @@ describe('parseDimensions — 健壮解析模型输出', () => {
     expect(d.find(x => x.name === '续航')?.sentiment).toBe('positive');
     expect(d.find(x => x.name === '外观')?.sentiment).toBe('negative');
   });
+  it('截断的 JSON（num_predict 不够）也能抠出完整对象', () => {
+    const d = parseDimensions('{"dimensions":[{"name":"色彩还原","sentiment":"positive"},{"name":"分辨率","sentiment":"negative"},{"name":"刷新');
+    expect(d.length).toBe(2);
+    expect(d[0].name).toBe('色彩还原');
+    expect(d[0].sentiment).toBe('positive');
+    expect(d[1].name).toBe('分辨率');
+    expect(d[1].sentiment).toBe('negative');
+  });
 });

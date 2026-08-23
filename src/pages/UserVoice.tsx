@@ -97,7 +97,7 @@ export default function UserVoice() {
       const blk = blocks[i];
       setCurBlock({ idx: i + 1, total: blocks.length, items: blk.items });
       setLog(prev => [...prev, '分析第 ' + (i + 1) + '/' + blocks.length + ' 块（' + blk.items.length + ' 条）...']);
-      const sys = '你是用户口碑分析专家。下面是一批用户对电子产品的真实评价。请提炼"用户最在意、最有价值的特性维度"，每个标注情感倾向。只输出 JSON：{"dimensions":[{"name":"特性名","sentiment":"positive或negative"}]}。规则：1) 最多 15 个维度 2) 只依据给出的评价，不要编造 3) 特性要具体有用（如 续航/压感/外形/连接）4) positive=用户满意喜欢，negative=用户吐槽。';
+      const sys = '你是用户口碑分析专家。下面是一批用户对电子产品的真实评价。请提炼"用户最在意、最有价值的特性维度"。只输出 JSON，不要任何分析/解释/前后缀：{"dimensions":[{"name":"特性名","sentiment":"positive或negative"}]}。规则：1) 最多 12 个维度 2) 每个名称不超过 8 字 3) 特性要具体有用（如 续航/压感/外形/连接）4) positive=满意喜欢，negative=吐槽 5) 只依据给出的评价，不要编造。';
       const user = '用户评价：\n' + blk.items.join('\n');
       let full = '';
       setLiveChars(0);
@@ -109,8 +109,8 @@ export default function UserVoice() {
           (t) => { full += t; setLiveChars(full.length); }, () => { },
           () => { if (!done) { done = true; clearTimeout(timer); resolve(true); } },
           (_err: any) => { if (!done) { done = true; clearTimeout(timer); resolve(false); } },
-          // 结构化提炼用自由文本（json:false）+ 健壮解析兜底；think:false 免长思考
-          { endpoint: 'native', think: false, json: false, num_predict: 2000 });
+          // 结构化提炼用自由文本（json:false）+ 健壮解析兜底；think:false 免长思考；num_predict 提到 4096 防输出被截断
+          { endpoint: 'native', think: false, json: false, num_predict: 4096 });
       });
       if (!ok) {
         timeoutBlocks++;

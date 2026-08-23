@@ -123,6 +123,21 @@ export function parseDimensions(text: string): BlockDimension[] {
     }
     if (out.length > 0) break;
   }
+  // 兜底：JSON 被截断（num_predict 不够/模型啰嗦）时逐个提取完整对象 {"name":...,"sentiment":...}
+  // —— 即便整个 JSON 被切断，也能抠出已生成完的维度（2026-08-18 修"7 千字输出识别 0 维"）
+  if (out.length === 0) {
+    const objRe = /\{[^{}]*\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = objRe.exec(t)) !== null) {
+      const p = tryJSON(m[0]);
+      if (p && typeof p === 'object') {
+        const name = p.name ?? p.dimension ?? p.feature ?? p.aspect ?? p.label;
+        const sent = p.sentiment ?? p.polarity ?? '';
+        if (name) push(name, sent);
+      }
+      if (out.length >= 30) break;
+    }
+  }
   // 行级兜底：整行「名称：情感」/「名称（情感）」
   if (out.length === 0) {
     for (const line of t.split(/\r?\n/)) {
