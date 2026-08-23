@@ -9,6 +9,7 @@ const STATUS_TEXT: Record<string, { dot: string; color: string; text: string }> 
   ok: { dot: '#22C55E', color: '#16A34A', text: '本地 AI 已连接' },
   offline: { dot: '#9CA3AF', color: '#6B7280', text: '本地 AI 未连接（Ollama 离线）' },
   'no-model': { dot: '#F59E0B', color: '#D97706', text: '本地 AI 未配置模型' },
+  'model-missing': { dot: '#F59E0B', color: '#D97706', text: '本地 AI 模型未下载' },
   error: { dot: '#EF4444', color: '#DC2626', text: '本地 AI 探测失败' },
 };
 

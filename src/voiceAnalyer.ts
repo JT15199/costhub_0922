@@ -1,5 +1,5 @@
 // 用户原声分块分析（v2.3.19，2026-08-18）：自动分块 → 本地模型提炼维度 → 汇总合并权重
-// 纯函数：chunkVoiceItems（分块，不切断单条）/ mergeDimensions（跨块合并去重+加权）
+// 纯函数：chunkVoiceItems（分块，不切断单条）/ mergeDimensions（跨块合并去重+加权）/ parseDimensions（健壮解析模型输出）
 export interface VoiceBlock { index: number; items: string[]; }
 export interface BlockDimension { name: string; sentiment: 'positive' | 'negative'; }
 
@@ -60,4 +60,78 @@ export function mergeDimensions(blockResults: BlockDimension[][]): { name: strin
     };
   });
   return out.sort((a, b) => b.weight - a.weight);
+}
+
+// ===== 健壮解析模型输出（2026-08-18 修"分析完成但 0 个维度"）=====
+// 本地模型输出不稳，不能只认 {"dimensions":[...]} 一种形状。兼容：
+//   1) {dimensions:[...]} / {features:[...]} / {items:[...]} 等任意数组字段
+//   2) 顶层数组 [{name,sentiment},...]
+//   3) 前后夹散文 / 中文引号 / 尾逗号（括号切片自动忽略代码围栏）
+//   4) 行级兜底：- 名称：正面  /  名称（positive）
+function normSentiment(s: any): 'positive' | 'negative' {
+  const v = String(s || '').trim().toLowerCase();
+  if (/neg|negative|差评|吐槽|不满|缺陷|缺点|负面/.test(v)) return 'negative';
+  if (/pos|positive|好评|喜欢|满意|优点|正面/.test(v)) return 'positive';
+  return 'positive'; // 无法判定默认正面（仅兜底路径）
+}
+
+export function parseDimensions(text: string): BlockDimension[] {
+  const t = String(text || '').trim();
+  if (!t) return [];
+  const out: BlockDimension[] = [];
+  const seen = new Set<string>();
+  const push = (name: any, sentiment: any) => {
+    const nm = String(name || '').trim().replace(/^[-*•\d.\s]+/, '').trim();
+    if (!nm || nm.length > 40 || seen.has(nm)) return;
+    seen.add(nm);
+    out.push({ name: nm, sentiment: normSentiment(sentiment) });
+  };
+  // 候选 JSON 片段：整体 + 首尾括号切片（自动忽略前后散文/代码围栏）
+  const candidates: any[] = [];
+  const tryJSON = (s: string): any => { try { return JSON.parse(s); } catch { return null; } };
+  const segs = [t];
+  for (const pair of [['{', '}'], ['[', ']']] as const) {
+    const s = t.indexOf(pair[0]); const e = t.lastIndexOf(pair[1]);
+    if (s >= 0 && e > s) segs.push(t.slice(s, e + 1));
+  }
+  for (const seg of segs) {
+    const variants = [seg, seg.replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/,\s*}/g, '}').replace(/,\s*\]/g, ']')];
+    for (const v of variants) { const p = tryJSON(v); if (p != null) { candidates.push(p); break; } }
+  }
+  // 从候选提取维度（有结果即停）
+  for (const c of candidates) {
+    let arr: any[] | null = null;
+    if (Array.isArray(c)) arr = c;
+    else if (c && typeof c === 'object') {
+      const prefer = ['dimensions', 'features', 'aspects', 'items', 'dimension', 'results', 'list', 'data'];
+      for (const k of prefer) if (Array.isArray(c[k])) { arr = c[k]; break; }
+      if (!arr) for (const k of Object.keys(c)) if (Array.isArray(c[k])) { arr = c[k]; break; }
+    }
+    if (!arr) continue;
+    for (const it of arr) {
+      if (it && typeof it === 'object') {
+        const name = it.name ?? it.dimension ?? it.feature ?? it.aspect ?? it.label ?? it.title ?? it.特性 ?? it.维度 ?? it.方面;
+        const sent = it.sentiment ?? it.polarity ?? it.sentiment_type ?? it.情感 ?? it.倾向 ?? '';
+        const pos = it.positive ?? it.is_positive ?? it.positive_count;
+        const neg = it.negative ?? it.is_negative ?? it.negative_count;
+        let s: any = sent;
+        if (!String(s || '').trim()) { if (pos === true || pos === 1) s = 'positive'; else if (neg === true || neg === 1) s = 'negative'; }
+        push(name, s);
+      } else if (typeof it === 'string' && it.trim()) {
+        push(it, '');
+      }
+    }
+    if (out.length > 0) break;
+  }
+  // 行级兜底：整行「名称：情感」/「名称（情感）」
+  if (out.length === 0) {
+    for (const line of t.split(/\r?\n/)) {
+      const l = line.trim();
+      if (!l) continue;
+      const m = l.match(/^[-*•\d.\s]*([^:：()（）]{1,20})\s*[:：]\s*([^,，;；]{1,12})$/)
+        || l.match(/^[-*•\d.\s]*([^:：()（）]{1,20})\s*[（(]\s*([^)）]{1,12})[)）]$/);
+      if (m) push(m[1], m[2]);
+    }
+  }
+  return out.slice(0, 30);
 }

@@ -123,6 +123,19 @@
 - 根因：上次分析被中断（应用关闭/页面重载）遗留 voice_run status='running' 记录，页面加载 load() 里 getRunningVoiceRun(product) 读到 → running 非空 → 按钮 disabled={running!=null} 永久置灰。
 - 修复：load() 检测到 running 记录时 finishVoiceRun(rr.id,'error','上次分析被中断，已自动结束') 收尾并 setRunning(null) + log 提示「检测到上次分析被中断（未完成），已自动结束，可重新开始」——不永久禁用按钮，可重新分析。
 
+## 三·补7补7、用户原声分析·整体完善（2026-08-18 用户：分析完成但 0 个维度 + 功能是否片面，切 pro 模型整体看代码）
+
+- **根因（0 个维度）**：①本地模型未启动/未下载 → 每块 90s 超时跳过，但结束仍提示「分析完成」误导；②模型有输出但 parseDimensions 只认单一 `{dimensions:[...]}` 形状（顶层数组/\{features:[...]\}/中文「正面」等都返回空）。
+- **修复（7 项）**：
+  1. **预检**：runAnalyze 前 detectOllama()（aiStatus.ts 增强为区分 model-missing「模型未下载」/offline「Ollama 未运行」）——失败快速给原因，不空跑 N 块超时。
+  2. **健壮解析**：parseDimensions 移到 voiceAnalyer.ts（纯函数+5 测试），兼容 顶层数组/features/items 等任意数组字段/前后夹散文/代码围栏/中文引号/尾逗号/行级「名称：正面」兜底；normSentiment 归一中文「正面/负面」。
+  3. **诚实收尾**：区分 超时全跳过（报错）/有输出但未识别（warning+输出样例）/部分跳过（成功提示附「跳过 X 块」）；空结果 finishVoiceRun status='error'。
+  4. **依据原声**：每个维度 findEvidence 在原始原声中匹配该特性词（最多 3 条真实原声）存 evidence，结果表 expandable 展开查看——结果可溯源、不主观。
+  5. **导入预览**：load()/handleFile 取前 5 条原声显示「已导入原声示例」——用户可核对 Excel 列识别是否正确。
+  6. **kind 落库**：voice_dimension 加 kind 列，replaceVoiceDimensions 存 kind，表格用 r.kind 渲染（修掉表格重算公式与 mergeDimensions 不一致的隐患）。
+  7. 每块超时 90s→120s（冷启动加载模型更从容），num_predict 1500→2000。
+- **教训沉淀**：本地模型输出格式不稳，解析不能只认单一 JSON 形状（要数组/字段/行级三层兜底）；模型未就绪要预检快速报错，不要空跑超时；「分析完成」不得在无结果时出现。
+
 ## 三·补7补4、用户原声分析·分析过程可见（2026-08-18 用户：分析时能看到过程、到哪一步）
 
 - runAnalyze 循环里 setCurBlock（正在分析的块 idx/total/items）+ setLiveDims（每块提炼维度名实时累积）；UI 分析区换成**过程面板**：进度条+X/Y块 +「正在分析第 N 块（本块 X 条原声）+样例预览」+「已提炼维度（实时累积 Tag）」+ 保留 log；切页不中断（结果照常落库）。

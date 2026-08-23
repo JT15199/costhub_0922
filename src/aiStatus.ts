@@ -8,7 +8,7 @@ export interface OllamaStatus {
   connected: boolean;
   baseUrl: string;
   model: string;
-  reason: 'ok' | 'no-model' | 'offline' | 'error';
+  reason: 'ok' | 'no-model' | 'model-missing' | 'offline' | 'error';
 }
 
 /** 探测 Ollama：配置 localhost 时先试 127.0.0.1（IP 字面量），失败再试配置地址 */
@@ -24,8 +24,17 @@ export async function detectOllama(): Promise<OllamaStatus> {
     ])];
     for (const u of candidates) {
       try {
-        const r = await invoke<{ status: number; success: boolean }>('http_get', { request: { url: u + '/api/tags', headers: {}, body: null } });
-        if (r?.success) return { connected: true, baseUrl: u, model, reason: 'ok' };
+        const r = await invoke<{ status: number; body: string; success: boolean }>('http_get', { request: { url: u + '/api/tags', headers: {}, body: null } });
+        if (!r?.success) continue;
+        // 检查模型是否已下载（Ollama 在线但模型未 pull 是常见坑，提前区分出来）
+        let hasModel = true;
+        try {
+          const list: string[] = (JSON.parse(r.body || '{}').models || []).map((m: any) => String(m.name || ''));
+          const short = model.split(':')[0];
+          hasModel = list.some(n => n === model || n === short || n.startsWith(short + ':'));
+        } catch { hasModel = true; } // body 解析失败不阻断（兼容旧版/异常返回）
+        if (!hasModel) return { connected: false, baseUrl: u, model, reason: 'model-missing' };
+        return { connected: true, baseUrl: u, model, reason: 'ok' };
       } catch { /* 试下一个候选 */ }
     }
     return { connected: false, baseUrl: base, model, reason: 'offline' };

@@ -23,6 +23,7 @@ async function ensureVoiceTables() {
       positive INTEGER DEFAULT 0,
       negative INTEGER DEFAULT 0,
       evidence TEXT DEFAULT '',
+      kind TEXT DEFAULT '',
       product TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now','localtime'))
     )`);
@@ -42,6 +43,7 @@ async function ensureVoiceTables() {
   // 老库补列（幂等）
   try { await d.execute("ALTER TABLE voice_item ADD COLUMN product TEXT DEFAULT ''"); } catch { }
   try { await d.execute("ALTER TABLE voice_dimension ADD COLUMN product TEXT DEFAULT ''"); } catch { }
+  try { await d.execute("ALTER TABLE voice_dimension ADD COLUMN kind TEXT DEFAULT ''"); } catch { }
   try { await d.execute("ALTER TABLE voice_run ADD COLUMN product TEXT DEFAULT ''"); } catch { }
   ensured = true;
 }
@@ -57,10 +59,10 @@ export async function addVoiceItem(content: string, source: string, product = ''
   const r = await d.execute('INSERT INTO voice_item (content, source, product) VALUES (?,?,?)', [content, source, product]);
   return Number(r.lastInsertId) || 0;
 }
-export async function replaceVoiceDimensions(list: { name: string; weight: number; count: number; positive: number; negative: number; evidence: string }[], product = '') {
+export async function replaceVoiceDimensions(list: { name: string; weight: number; count: number; positive: number; negative: number; evidence: string; kind?: string }[], product = '') {
   await ensureVoiceTables(); const d = await getDb();
   await d.execute('DELETE FROM voice_dimension WHERE product = ?', [product]);
-  for (const it of list) await d.execute('INSERT INTO voice_dimension (name, weight, count, positive, negative, evidence, product) VALUES (?,?,?,?,?,?,?)', [it.name, it.weight, it.count, it.positive, it.negative, it.evidence, product]);
+  for (const it of list) await d.execute('INSERT INTO voice_dimension (name, weight, count, positive, negative, evidence, kind, product) VALUES (?,?,?,?,?,?,?,?)', [it.name, it.weight, it.count, it.positive, it.negative, it.evidence, it.kind || '', product]);
 }
 export async function getVoiceDimensions(product = '') { await ensureVoiceTables(); const d = await getDb(); return product ? (await d.select<any[]>('SELECT * FROM voice_dimension WHERE product = ? ORDER BY weight DESC', [product])) : (await d.select<any[]>('SELECT * FROM voice_dimension ORDER BY weight DESC')); }
 export async function getVoiceProducts() { await ensureVoiceTables(); return (await getDb()).select<any[]>('SELECT DISTINCT product FROM voice_item WHERE product != \'\' ORDER BY product'); }
