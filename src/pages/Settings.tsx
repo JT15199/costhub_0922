@@ -2083,7 +2083,7 @@ export default function Settings({ embedded }: { embedded?: boolean }) {
                 const typeMap: Record<string, string> = {
                   'general': '通用', 'trend_insight': '趋势洞察', 'decompose': 'AI拆解',
                   'local_ai_chat': '本地AI对话', 'quote_compare': '报价比对', 'project_health': '项目体检',
-                  'snapshot_explain': '快照解释', 'global_ask': '全局问询', 'auto_audit': '自主巡检',
+                  'snapshot_explain': '快照解释', 'global_ask': '全局问询', 'voice_analyze': '用户原声分析', 'auto_audit': '自主巡检',
                   'bridge_intent': '云端桥·意图', 'bridge_summary': '云端桥·总结', 'bridge_blocked': '审计拦截', 'local_chat_cloud_tool': '云端工具调用', 'auto_advisor': '自主建议润色',
                 };
                 return (

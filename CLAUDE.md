@@ -114,6 +114,10 @@
 
 - VePanel.tsx / db/value.ts / valueEng.ts / valueEng.test.ts、Compare 页 VePanel 挂载、aiTools 第14工具 query_project_value_engineering、db.ts export 全部移除（VE 依赖用户主观打分为价值 = 不客观，踩了用户红线；后续以「用户原声 + 本地模型分析最有价值特性」方向重新设计）。
 
+## 三·补7补、用户原声分析已留痕（2026-08-18 用户：分析也要有本地AI日志）
+
+- UserVoice 每次本地模型提炼调用后 logLocalAICall({request_type:'voice_analyze'}) 留痕 ai_request_logs（本地，不涉外发）；LocalAIAssistant AI_TYPE_NAMES + Settings typeMap 加 voice_analyze→'用户原声分析' 映射。
+
 ## 三·补7、用户原声分析（2026-08-18 用户：上一代产品原声 Excel 丢进去自主分析，自动分块汇总找最有价值特性）
 
 - **数据层**（db/voice.ts）：voice_item（原声条目）/ voice_dimension（特性维度权重榜）/ voice_run（分析批次进度）——运行时兜底建表。

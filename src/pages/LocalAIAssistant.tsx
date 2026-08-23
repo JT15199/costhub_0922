@@ -32,7 +32,7 @@ const FEEDBACK_REASONS_UI: Record<string, string> = {
 
 // AI 调用类型 → 中文名（活动记录展示用）
 const AI_TYPE_NAMES: Record<string, string> = {
-  quote_compare: '报价识别', project_health: '项目体检', snapshot_explain: '快照解释', global_ask: '全局问询',
+  quote_compare: '报价识别', project_health: '项目体检', snapshot_explain: '快照解释', global_ask: '全局问询', voice_analyze: '用户原声分析',
   auto_audit: '自主巡检', auto_advisor: '建议润色', local_chat: '本地对话',
   bridge_intent: '洞察意图', bridge_summary: '洞察总结', daily_brief: '今日速览', demo_gen: '演示生成',
 };

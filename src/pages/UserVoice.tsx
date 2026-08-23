@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Button, Card, Table, Tag, Progress, message, Empty } from 'antd';
 import { UploadOutlined, PlayCircleOutlined, DeleteOutlined, MessageOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
-import { startOllamaStream } from '../ollama';
+import { startOllamaStream, logLocalAICall } from '../ollama';
 import { getSetting } from '../db';
 import { addVoiceItem, clearVoiceItems, getAllVoiceItems, getVoiceItemCount, getVoiceDimensions, startVoiceRun, updateVoiceRunProgress, finishVoiceRun, getRunningVoiceRun, replaceVoiceDimensions } from '../db';
 import { chunkVoiceItems, mergeDimensions, type BlockDimension } from '../voiceAnalyer';
@@ -81,6 +81,8 @@ export default function UserVoice() {
           { endpoint: 'native', think: false, json: false, num_predict: 1500 });
       });
       const dims = parseDimensions(full);
+      // ⚠️ 本地模型调用留痕（AI 请求日志）：每次用户原声提炼记录到 ai_request_logs（本地，不涉外发）
+      try { await logLocalAICall({ request_type: 'voice_analyze', system_prompt: sys, user_prompt: user, response_summary: full.slice(0, 200), success: true, model_name: model }); } catch { /* 日志失败不阻断 */ }
       setLog(prev => [...prev, '  第 ' + (i + 1) + ' 块提炼出 ' + dims.length + ' 个维度']);
       results.push(dims);
       setRunning({ done: i + 1, total: blocks.length });
