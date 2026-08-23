@@ -35,7 +35,7 @@ export default function UserVoice() {
   const [product, setProduct] = useState('');
   const [products, setProducts] = useState<string[]>([]);
 
-  const load = async () => { setCount(await getVoiceItemCount(product)); setDims(await getVoiceDimensions(product)); setProducts((await getVoiceProducts()).map((p: any) => p.product)); const rr = await getRunningVoiceRun(product); if (rr) setRunning({ done: rr.done_chunks, total: rr.total_chunks }); };
+  const load = async () => { setCount(await getVoiceItemCount(product)); setDims(await getVoiceDimensions(product)); setProducts((await getVoiceProducts()).map((p: any) => p.product)); const rr = await getRunningVoiceRun(product); if (rr) { try { await finishVoiceRun(rr.id, 'error', '上次分析被中断，已自动结束'); } catch { } setRunning(null); setLog(prev => [...prev, '⚠️ 检测到上次「' + (product || '未选产品') + '」的分析被中断（未完成），已自动结束，可重新开始']); } };
   useEffect(() => { load(); }, [product]);
 
   const handleFile = (file: File) => {
