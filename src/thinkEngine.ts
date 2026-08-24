@@ -139,6 +139,7 @@ export interface ThinkEventHandlers {
   onThought?: (text: string) => void;
   onAnswer?: (text: string) => void;
   onRoundStart?: (round: number) => void;
+  onPrompt?: (role: string, content: string) => void; // DSH 式轨迹：每次发给模型的 prompt（初始 + 每轮回填结果后的继续）
   onToolResult?: (name: string, args: any, ok: boolean, text: string) => void;
   onCloudResult?: (call: any, ok: boolean, result: string) => void;
 }
@@ -172,6 +173,7 @@ export function compressMessages(messages: any[], budgetChars = 9000): any[] {
 export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText: string; rounds: number; clouds: { call: any; ok: boolean; result: string }[] }> {
   const { startOllamaStream } = await import('./ollama');
   let messages: any[] = [{ role: 'system', content: opts.systemPrompt }, { role: 'user', content: opts.userContent }];
+  opts.onEvent?.onPrompt?.('user', opts.userContent); // 轨迹：初始问题
   const maxRounds = opts.maxRounds || MAX_THINK_ROUNDS;
   const clouds: { call: any; ok: boolean; result: string }[] = [];
   let finalText = '';
@@ -240,7 +242,9 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
     }
     messages.push({ role: 'assistant', content: buffer });
     const roundHint = round >= maxRounds - 1 ? '（注意：这是最后一轮——如果你已有足够信息，请直接输出最终结论，不要再调用工具）' : '';
-    messages.push({ role: 'user', content: toolResults.map(r => r.content).join('\n---\n') + '\n继续你的分析：如需更多数据再输出 [TOOL]/[CLOUD] 调用，否则直接给出最终结论。' + roundHint });
+    const followUp = toolResults.map(r => r.content).join('\n---\n') + '\n继续你的分析：如需更多数据再输出 [TOOL]/[CLOUD] 调用，否则直接给出最终结论。' + roundHint;
+    opts.onEvent?.onPrompt?.('user', followUp); // 轨迹：工具结果回填后继续发给模型
+    messages.push({ role: 'user', content: followUp });
     // ⚠️ 上下文预算（阶段②）：超过 9000 字符即折叠最旧轮次，保住最近一轮完整
     messages = compressMessages(messages);
   }

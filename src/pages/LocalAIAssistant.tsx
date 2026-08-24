@@ -38,6 +38,7 @@ const AI_TYPE_NAMES: Record<string, string> = {
 };
 import { isProjectInsight } from '../aiBridge';
 import { EmojiIcon } from '../iconMap';
+import TraceTimeline, { type TraceStep } from '../components/TraceTimeline';
 import DemoGenerator from '../components/DemoGenerator';
 import AutoThinkPanel from '../components/AutoThinkPanel';
 import GoalsCard from '../components/GoalsCard';
@@ -1060,6 +1061,7 @@ export default function LocalAIAssistant() {
     round: number;
   } | null>(null);
   const [agentTrace, setAgentTrace] = useState<any[]>([]); // 工具执行轨迹（[{name,argsText,status,result}]）
+  const [trace, setTrace] = useState<TraceStep[]>([]); // DSH 式完整轨迹：prompt→工具→结果→继续→结论（卡片时间线）
   const [agentTraceOpen, setAgentTraceOpen] = useState(true);
   // ===== AI 学习（v2.3.19：👍/👎 反馈 + 学习档案） =====
   const [feedbackMap, setFeedbackMap] = useState<Record<number, 'up' | 'down'>>({});   // 按消息 index 记录已反馈
@@ -1598,6 +1600,7 @@ export default function LocalAIAssistant() {
       // 替代原「计划(非流式JSON)→顺序执行→总结」三段式：不再要求模型先输出完整计划，模型自己决定何时调什么工具，
       // 轨迹卡实时呈现每次工具调用（复用 runThinkLoop 文本协议，与自主分析同一引擎）
       setPhase('thinking');
+      setTrace([]);
       const { listTools, executeTool } = await import('../aiTools');
       const { buildThinkSystemPrompt, runThinkLoop, buildCloudReviewPrompt } = await import('../thinkEngine');
       const { agentSearchLoop } = await import('../trendService');
@@ -1618,11 +1621,15 @@ export default function LocalAIAssistant() {
         approveCloud: async (call) => requestCloudApproval(buildCloudReviewPrompt(call)),
         runCloud: async (call) => agentSearchLoop(call.material_name, call.category || '', 'price-trend'),
         onEvent: {
+          onPrompt: (_role, content) => setTrace(prev => [...prev, { type: 'prompt', title: '发送给模型', content, meta: '', color: '#0A84FF', icon: undefined }]),
           onToolResult: (name, args, ok, text) => {
             const tool = localTools.find(t => t.id === name);
-            setAgentTrace(prev => [...prev, { tool: name, name: tool?.name || name, argsText: JSON.stringify(args || {}) === '{}' ? '无参数' : JSON.stringify(args || {}), status: ok ? 'ok' : 'fail', result: text }]);
+            const argsText = JSON.stringify(args || {}) === '{}' ? '无参数' : JSON.stringify(args || {});
+            setAgentTrace(prev => [...prev, { tool: name, name: tool?.name || name, argsText, status: ok ? 'ok' : 'fail', result: text }]);
+            setTrace(prev => [...prev, { type: 'tool', title: '调用工具 ' + (tool?.name || name), content: (ok ? '' : '⚠️ 工具失败：') + text, meta: argsText, color: '#6366F1', icon: undefined }]);
             window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: 'Agent：' + (tool?.name || name) + (ok ? ' ✓' : ' ✗') } }));
           },
+          onCloudResult: (call, _ok, result) => setTrace(prev => [...prev, { type: 'cloud', title: '云端申请 ' + (call?.material_name || ''), content: result, meta: call?.question || '', color: '#8B5CF6', icon: undefined }]),
           onAnswer: (t) => {
             setPhase('streaming');
             full += t;
@@ -1633,6 +1640,7 @@ export default function LocalAIAssistant() {
         maxRounds: 8,
       });
       const resultText = finalText || full;
+      if (finalText) setTrace(prev => [...prev, { type: 'conclusion', title: '结论', content: finalText, meta: '', color: '#7C3AED', icon: undefined }]);
       await logLocalAICall({ request_type: 'agent_answer', system_prompt: sysPrompt.slice(0, 3000), user_prompt: userContent.slice(0, 3000), response_summary: (resultText || '').slice(0, 2000), success: true, model_name: model });
       if (resultText) await saveMsg(currentSid, 'assistant', resultText, reasoning);
       if (!full) setMessages(prev => { const arr = [...prev]; arr[arr.length - 1] = { role: 'assistant', content: resultText || '（未输出结论）', reasoning }; return arr; });
@@ -2245,24 +2253,8 @@ return (
                 <span>{agentTraceOpen ? '▾' : '▸'}</span>
               </div>
               {agentTraceOpen && (
-                <div style={{ padding: '0 10px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {agentTrace.map((tr, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, fontSize: 11.5 }}>
-                      <span style={{ color: tr.status === 'ok' ? '#16A34A' : tr.status === 'fail' ? '#DC2626' : '#6366F1', flexShrink: 0 }}>
-                        {tr.status === 'ok' ? '✅' : tr.status === 'fail' ? '❌' : '⏳'}
-                      </span>
-                      <span style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ color: '#6366F1', marginRight: 4, fontSize: 12 }}>{(() => { const Icon = toolIcon(tr.tool); return <Icon />; })()}</span>
-                        <b>{tr.name}</b>
-                        {tr.argsText !== '无参数' && <span style={{ color: '#94A3B8' }}>（{tr.argsText}）</span>}
-                        {tr.status !== 'running' && (
-                          <div style={{ color: 'var(--color-text-secondary)', fontSize: 11, lineHeight: 1.5, whiteSpace: 'pre-wrap', marginTop: 1 }}>
-                            {tr.result.slice(0, 220)}{tr.result.length > 220 ? '…' : ''}
-                          </div>
-                        )}
-                      </span>
-                    </div>
-                  ))}
+                <div style={{ padding: '4px 10px 8px' }}>
+                  <TraceTimeline steps={trace} />
                 </div>
               )}
             </div>

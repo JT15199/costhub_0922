@@ -117,6 +117,8 @@
   }
 
   .content{ flex:1; padding:16px 22px 12px; display:flex; flex-direction:column; gap:12px; overflow:hidden; }
+  svg{ fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+  svg text{ stroke:none; }
   .card{
     background:var(--card); border:1px solid var(--line); border-radius:7px;
     display:flex; flex-direction:column; min-width:0;
@@ -131,7 +133,7 @@
   .link:hover{ text-decoration:underline; }
 
   /* ---- KPI strip ---- */
-  .kpi-strip{ display:flex; height:88px; }
+  .kpi-strip{ display:flex; flex-direction:row; height:88px; }
   .kpi{
     flex:1; padding:14px 18px 12px; display:flex; flex-direction:column; justify-content:space-between;
     border-right:1px solid var(--line); min-width:0;
@@ -139,7 +141,7 @@
   .kpi:last-child{ border-right:none; }
   .kpi-label{ font-size:11px; color:var(--ink3); letter-spacing:.05em; display:flex; justify-content:space-between; }
   .kpi-value-row{ display:flex; align-items:flex-end; justify-content:space-between; gap:8px; }
-  .kpi-value{ font-size:25px; font-weight:600; letter-spacing:-.01em; line-height:1; }
+  .kpi-value{ font-size:24px; font-weight:600; letter-spacing:-.01em; line-height:1; }
   .kpi-value .unit{ font-size:12px; font-weight:400; color:var(--ink3); margin-left:2px; letter-spacing:0; }
   .delta{ font-size:11px; display:inline-flex; align-items:center; gap:3px; }
   .delta svg{ width:10px; height:10px; }
@@ -207,6 +209,10 @@
   .mini-bar-row{ display:flex; align-items:center; gap:8px; margin-top:4px; }
   .trend-word{ font-size:11px; font-weight:600; }
   .trend-word.up{ color:var(--bad); } .trend-word.down{ color:var(--good); } .trend-word.flat{ color:var(--ink3); }
+
+  .insight-card .li{ padding:6px 16px; }
+  .insight-card .li-desc{ line-height:1.4; }
+  .insight-card .list{ padding:2px 0 6px; }
 
   /* ---- bottom grid ---- */
   .grid-bottom{ display:grid; grid-template-columns:minmax(0,1fr) 384px; gap:12px; height:308px; }
@@ -337,7 +343,7 @@
           <div class="kpi-label"><span>平均整机 BOM 成本</span></div>
           <div class="kpi-value-row">
             <div class="kpi-value mono">¥742.60</div>
-            <svg class="spark" width="84" height="26" viewBox="0 0 84 26">
+            <svg class="spark" width="72" height="26" viewBox="0 0 84 26">
               <polyline points="0,16 12,14 24,17 36,12 48,13 60,9 72,11 84,7" fill="none" stroke="#211F19" stroke-width="1.4"/>
               <polyline points="84,7 84,26 0,26 0,16" fill="#211F19" opacity=".05"/>
             </svg>
@@ -348,7 +354,7 @@
           <div class="kpi-label"><span>在研项目</span><span class="delta flat">6 个</span></div>
           <div class="kpi-value-row">
             <div class="kpi-value mono">4<span class="unit">/6 进行中</span></div>
-            <svg class="spark" width="84" height="26" viewBox="0 0 84 26">
+            <svg class="spark" width="72" height="26" viewBox="0 0 84 26">
               <g fill="#211F19" opacity=".82">
                 <rect x="2" y="14" width="8" height="12" rx="1"/>
                 <rect x="14" y="10" width="8" height="16" rx="1"/>
@@ -366,7 +372,7 @@
           <div class="kpi-label"><span>器件库规模</span></div>
           <div class="kpi-value-row">
             <div class="kpi-value mono">348<span class="unit">项</span></div>
-            <svg class="spark" width="84" height="26" viewBox="0 0 84 26">
+            <svg class="spark" width="72" height="26" viewBox="0 0 84 26">
               <polyline points="0,20 12,19 24,18 36,16 48,15 60,12 72,11 84,9" fill="none" stroke="#211F19" stroke-width="1.4"/>
               <polyline points="84,9 84,26 0,26 0,20" fill="#211F19" opacity=".05"/>
             </svg>
@@ -377,7 +383,7 @@
           <div class="kpi-label"><span>近 7 日报价异动</span></div>
           <div class="kpi-value-row">
             <div class="kpi-value mono">23<span class="unit">条</span></div>
-            <svg class="spark" width="84" height="26" viewBox="0 0 84 26">
+            <svg class="spark" width="72" height="26" viewBox="0 0 84 26">
               <g fill="#211F19" opacity=".82">
                 <rect x="2" y="18" width="7" height="8" rx="1"/>
                 <rect x="13" y="12" width="7" height="14" rx="1"/>
@@ -395,7 +401,7 @@
           <div class="kpi-label"><span>目标达成率</span><span>按已设目标项目</span></div>
           <div class="kpi-value-row">
             <div class="kpi-value mono">78<span class="unit">% · 4/5</span></div>
-            <svg class="spark" width="84" height="26" viewBox="0 0 84 26">
+            <svg class="spark" width="72" height="26" viewBox="0 0 84 26">
               <polyline points="0,10 14,11 28,9 42,12 56,10 70,12 84,11" fill="none" stroke="#1E7A4D" stroke-width="1.4"/>
             </svg>
           </div>

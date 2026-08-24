@@ -28,6 +28,8 @@
     -webkit-font-smoothing:antialiased;
   }
   .mono{ font-family:"Cascadia Mono","Consolas","Courier New",monospace; font-feature-settings:"tnum"; }
+  svg{ fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+  svg text{ stroke:none; }
   .app{ display:flex; width:1600px; height:1000px; }
 
   /* ===== sidebar（与驾驶舱一致）===== */
@@ -113,6 +115,14 @@
   .flag{ display:inline-block; vertical-align:-2px; margin-right:5px; width:12px; height:12px; color:var(--warn); }
   .proj-chip{ font-size:10.5px; color:var(--info); border:1px dashed #B9CBD9; border-radius:3px; padding:0 4px; margin-right:3px; }
   .more-n{ font-size:10.5px; color:var(--ink3); }
+
+  .tbl-foot{
+    margin-top:auto; border-top:1px solid var(--line); background:var(--hover);
+    padding:8px 14px; display:flex; align-items:center; font-size:11.5px; color:var(--ink3);
+    border-radius:0 0 7px 7px;
+  }
+  .tbl-foot .link{ color:var(--info); cursor:pointer; }
+  .tbl-foot .link:hover{ text-decoration:underline; }
 
   /* drawer */
   .drawer-head{ padding:14px 16px 0; }
@@ -360,8 +370,62 @@
                 <td><span class="proj-chip mono">MNT-3201</span></td>
                 <td class="r mono" style="color:var(--ink3);padding-right:14px;">07-18</td>
               </tr>
+              <tr>
+                <td><span class="check"></span></td>
+                <td><div class="part-name">电源线 C13 · 1.8m</div><div class="part-model mono">PC-C13 · 3C 认证</div></td>
+                <td><span class="tag">线材</span></td>
+                <td class="r mono" style="font-weight:600">¥4.20</td>
+                <td class="r"><span class="chg mut">0.0%</span></td>
+                <td class="r mono">5</td>
+                <td>乐清宏业</td>
+                <td><svg width="72" height="20" viewBox="0 0 72 20"><polyline points="2,10 14,10 26,10 38,10 50,10 62,10 70,10" fill="none" stroke="#8F8D81" stroke-width="1.3"/></svg></td>
+                <td><span class="proj-chip mono">MNT-3201</span><span class="more-n">+4</span></td>
+                <td class="r mono" style="color:var(--ink3);padding-right:14px;">07-15</td>
+              </tr>
+              <tr>
+                <td><span class="check"></span></td>
+                <td><div class="part-name">遥控器 RC-21</div><div class="part-model mono">RC-21 · IR 学习型</div></td>
+                <td><span class="tag">硬件</span></td>
+                <td class="r mono" style="font-weight:600;color:var(--bad)">¥9.80</td>
+                <td class="r"><span class="chg bad"><svg><use href="#i-up"/></svg>+1.2%</span></td>
+                <td class="r mono">3</td>
+                <td>惠州百川</td>
+                <td><svg width="72" height="20" viewBox="0 0 72 20"><polyline points="2,12 14,12 26,11 38,11 50,10 62,9 70,8" fill="none" stroke="#BC3E2B" stroke-width="1.3"/></svg></td>
+                <td><span class="proj-chip mono">MNT-3201</span></td>
+                <td class="r mono" style="color:var(--ink3);padding-right:14px;">07-10</td>
+              </tr>
+              <tr>
+                <td><span class="check"></span></td>
+                <td><div class="part-name">说明书 / 保修卡（多语）</div><div class="part-model mono">MAN-04 · 8 语种</div></td>
+                <td><span class="tag">包材</span></td>
+                <td class="r mono" style="font-weight:600">¥1.65</td>
+                <td class="r"><span class="chg mut">0.0%</span></td>
+                <td class="r mono">2</td>
+                <td>深圳快印</td>
+                <td><svg width="72" height="20" viewBox="0 0 72 20"><polyline points="2,10 14,10 26,10 38,10 50,10 62,10 70,10" fill="none" stroke="#8F8D81" stroke-width="1.3"/></svg></td>
+                <td><span class="proj-chip mono">MNR-2405</span><span class="more-n">+3</span></td>
+                <td class="r mono" style="color:var(--ink3);padding-right:14px;">07-02</td>
+              </tr>
+              <tr>
+                <td><span class="check"></span></td>
+                <td><div class="part-name">螺丝包（VESA 4×M4）</div><div class="part-model mono">SC-V4 · 防落设计</div></td>
+                <td><span class="tag">结构件</span></td>
+                <td class="r mono" style="font-weight:600">¥0.85</td>
+                <td class="r"><span class="chg mut">0.0%</span></td>
+                <td class="r mono">6</td>
+                <td>东莞恒塑</td>
+                <td><svg width="72" height="20" viewBox="0 0 72 20"><polyline points="2,10 14,10 26,10 38,10 50,10 62,10 70,10" fill="none" stroke="#8F8D81" stroke-width="1.3"/></svg></td>
+                <td><span class="more-n">全部项目</span></td>
+                <td class="r mono" style="color:var(--ink3);padding-right:14px;">06-28</td>
+              </tr>
             </tbody>
           </table>
+          <div class="tbl-foot">
+            <span>共 348 项 · 已选 <b class="mono">1</b> 项</span>
+            <span class="link" style="margin-left:18px;">批量更新供应商</span>
+            <span class="link" style="margin-left:12px;">导出选中</span>
+            <span class="mono" style="margin-left:auto;">第 1 / 27 页 · 按更新时间排序</span>
+          </div>
         </div>
 
         <!-- detail drawer -->
@@ -450,6 +514,11 @@
               <div><div class="meta-k">税率口径</div><div class="meta-v">含税 13%</div></div>
               <div><div class="meta-k">采购单位</div><div class="meta-v">片</div></div>
             </div>
+          </div>
+
+          <div class="d-section" style="padding-bottom:8px;">
+            <div class="d-sec-title">备注</div>
+            <div style="font-size:12px;color:var(--ink2);line-height:1.5;">与 MNG-2708 共用认证料号；下一代询价目标 ¥475，华星已口头确认仍有让利空间。</div>
           </div>
 
           <div class="d-foot">

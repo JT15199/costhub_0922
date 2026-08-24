@@ -45,3 +45,5 @@ tsc-check.txt
 _boot.json
 demo-echarts.min.js
 user_voice_sample.xlsx
+# Edge 浏览器调试缓存（design-mockup）
+design-mockup/.edge-prof/
