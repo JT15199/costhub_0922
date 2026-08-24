@@ -1777,6 +1777,36 @@ body {
   border-color: #007AFF;
 }
 [data-theme="minimal"] .ant-pagination-item-active a { color: #fff; }
+
+/* ========== 卖点价值分析交互（2026-08-18，用户要求 UI 高级巧妙不寡淡） ========== */
+/* 卖点建议候选卡：hover 上浮 + 阴影 + 边框高亮，按下微缩放，采纳后变绿 */
+.sp-suggest-card {
+  transition: transform 180ms cubic-bezier(0.23,1,0.32,1), box-shadow 180ms ease, border-color 180ms ease, background 180ms ease;
+  cursor: pointer;
+  border: 1px solid var(--color-border, #E5E7EB);
+  border-radius: 12px;
+  background: var(--color-surface, #fff);
+}
+.sp-suggest-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 18px rgba(10,132,255,0.14), 0 2px 6px rgba(0,0,0,0.06);
+  border-color: #0A84FF;
+}
+.sp-suggest-card:active { transform: translateY(-1px) scale(0.98); }
+.sp-suggest-card.adopted {
+  border-color: #10B981;
+  background: #F0FDF4;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
+}
+/* 价值表 声量成本比 迷你条：宽度过渡填充 */
+.sp-ratio-bar { height: 8px; border-radius: 6px; background: #F1F5F9; overflow: hidden; }
+.sp-ratio-bar > div { height: 100%; border-radius: 6px; background: linear-gradient(90deg,#0A84FF,#5E5CE6); transition: width 400ms cubic-bezier(0.23,1,0.32,1); }
+/* 卖点列表行：操作按钮 hover 淡入（默认淡出，不喧宾夺主） */
+.sp-row-ops { opacity: 0; transition: opacity 160ms ease; }
+tr:hover .sp-row-ops { opacity: 1; }
+[data-lowfx] .sp-suggest-card, [data-lowfx] .sp-ratio-bar > div { transition: none; animation: none; }
 [data-theme="minimal"] .ant-empty-description { color: #86868B; }
 [data-theme="minimal"] .ant-tabs-tab { border-radius: 8px 8px 0 0; }
 [data-theme="minimal"] .ant-statistic-content { font-variant-numeric: tabular-nums; }

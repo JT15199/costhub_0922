@@ -169,7 +169,8 @@
 - **数据层** db/selling.ts：selling_points（挂项目 + positive/negative 声量列）/ selling_point_modules（卖点↔模块）。纯函数 sellingPointAnalyzer.ts：allocateModuleCosts 成本分摊 / computeSellingPointRows 价值计算（卖点直接带声量）/ classifyKind 客观分类 / buildAiAggregatePrompt+parseAiAggregate AI 归纳原声到卖点（模型只做归类+正负，计数由代码精确累加，不靠模型报数）/ buildSellingPointAnalysisPrompt AI 分析。
 - **成本分摊**：同一模块被多卖点引用 → 均分分摊（不重复计算）；价值表标注"模块·分摊"。
 - **分类（客观）**：声量高+好评高=star 强卖点 / 声量高+好评低=fix 待改进 / 声量低+成本高=overinvest 过度投入 / 其余=minor 次要（前 ~30% 分位）。
-- **UX**（SellingPointPanel 并入用户原声分析页）：选项目→添加卖点(名+描述+关联模块)→「归纳分析」把原声归类到卖点→价值表(声量/好评率/正负/成本/声量成本比/类型/共享模块)→「AI 分析卖点价值」取舍判断。顶部「开始分析」自由提炼维度降级为"发现漏掉卖点"的辅助，提示词也要求归纳合并。
+- **UX**（SellingPointPanel 并入用户原声分析页）：选项目(品类+档位)→「AI 生成卖点建议」按品类档位预生成卖点(点卡片即采纳)→手动编辑卖点(名+描述+关联模块)→「归纳分析」把原声归类到卖点→价值表(声量/好评率/正负/成本/声量成本比可视化条/类型/共享模块+总览统计)→「AI 分析卖点价值」取舍判断。顶部「开始分析」自由提炼维度降级为"发现漏掉卖点"的辅助，提示词也要求归纳合并。
+- **交互打磨**（用户 2026-08-18：UI 高级巧妙不寡淡）：建议卡 hover 上浮+阴影+一键采纳(采纳后变绿对勾)、价值表声量成本比用渐变色条、归纳分析实时进度、卖点行操作按钮 hover 淡入、按钮统一 .tappable(:active 缩放)；CSS 见 index.css 末尾 .sp-suggest-card/.sp-ratio-bar/.sp-row-ops，data-lowfx 时禁用动画。
 - **AI 留痕**：request_type 复用 voice_analyze（本地不涉外发）；num_predict 16384 不截断。
 
 ## 六、工作流约定

@@ -1,13 +1,13 @@
 // 卖点价值分析面板（v2.3.19，2026-08-18）：卖点 = 原声(声量/反响) × BOM(成本)
-// 流程（卖点优先）：先编辑卖点 → 导入原声 → AI 归纳原声到卖点（代码精确计数）→ 价值表 → AI 分析取舍
-// 成本按模块均分分摊（同模块多卖点不重复计算）；结论均由模型产出，不硬编码
+// 流程：AI 按品类+档位预生成卖点建议 → 用户采纳/编辑 → 导入原声 → AI 归纳到卖点 → 价值表 → AI 分析
+// 交互：建议卡 hover 上浮一键采纳、价值表可视化条、归纳进度实时反馈（UI 高级巧妙不寡淡）
 import { useEffect, useMemo, useState } from 'react';
 import { Card, Select, Button, Table, Tag, Input, message, Empty, Popconfirm, Space, Modal, Tooltip } from 'antd';
-import { PlusOutlined, ThunderboltOutlined, RobotOutlined, DeleteOutlined, EditOutlined, LinkOutlined } from '@ant-design/icons';
+import { PlusOutlined, ThunderboltOutlined, RobotOutlined, DeleteOutlined, EditOutlined, LinkOutlined, BulbOutlined, CheckOutlined } from '@ant-design/icons';
 import { getProjects, getProjectBOMs, getAllVoiceItems, getSellingPoints, addSellingPoint, updateSellingPoint, deleteSellingPoint, setSellingPointModules, getSellingPointMaps, setSellingPointVoice, getSetting } from '../db';
 import { startOllamaStream, logLocalAICall } from '../ollama';
 import { chunkVoiceItems } from '../voiceAnalyer';
-import { computeSellingPointRows, buildAiAggregatePrompt, parseAiAggregate, buildSellingPointAnalysisPrompt, type SellingPointRow } from '../sellingPointAnalyzer';
+import { computeSellingPointRows, buildAiAggregatePrompt, parseAiAggregate, buildAiSuggestPrompt, parseAiSuggest, buildSellingPointAnalysisPrompt, type SellingPointRow } from '../sellingPointAnalyzer';
 
 const KIND_TAG: Record<string, { color: string; text: string }> = {
   star: { color: 'red', text: '⭐强卖点' },
@@ -27,11 +27,15 @@ export default function SellingPointPanel({ product }: { product: string }) {
   const [aiAnalysis, setAiAnalysis] = useState('');
   const [busy, setBusy] = useState(false);
   const [voiceCount, setVoiceCount] = useState(0);
+  const [suggestions, setSuggestions] = useState<{ name: string; description: string }[]>([]);
+  const [adopted, setAdopted] = useState<Set<string>>(new Set());
+  const [aggStatus, setAggStatus] = useState('');
+  const [suggesting, setSuggesting] = useState(false);
 
   useEffect(() => { (async () => { try { setProjects(await getProjects('', '', '')); } catch { } })(); }, []);
   useEffect(() => { (async () => { try { setVoiceCount((await getAllVoiceItems(product)).length); } catch { setVoiceCount(0); } })(); }, [product]);
   useEffect(() => {
-    if (!projectId) { setSellingPoints([]); setSpModules({}); setModuleOptions([]); setModuleCosts({}); return; }
+    if (!projectId) { setSellingPoints([]); setSpModules({}); setModuleOptions([]); setModuleCosts({}); setSuggestions([]); setAdopted(new Set()); return; }
     (async () => {
       try {
         setSellingPoints(await getSellingPoints(projectId));
@@ -45,10 +49,16 @@ export default function SellingPointPanel({ product }: { product: string }) {
     })();
   }, [projectId]);
 
+  const currentProject = projects.find((p: any) => p.id === projectId);
+
   const rows: SellingPointRow[] = useMemo(() => computeSellingPointRows({
     sps: sellingPoints.map((s: any) => ({ id: s.id, name: s.name, positive: s.positive, negative: s.negative })),
     modules: spModules, moduleCosts,
   }), [sellingPoints, spModules, moduleCosts]);
+
+  const starCount = rows.filter(r => r.kind === 'star').length;
+  const fixCount = rows.filter(r => r.kind === 'fix').length;
+  const overCount = rows.filter(r => r.kind === 'overinvest').length;
 
   const refreshMaps = async (pid: number) => {
     setSellingPoints(await getSellingPoints(pid));
@@ -74,6 +84,38 @@ export default function SellingPointPanel({ product }: { product: string }) {
     if (projectId) await refreshMaps(projectId);
   };
 
+  const runSuggest = async () => {
+    if (!currentProject) { message.warning('先选项目（品类+档位是 AI 生成卖点的依据）'); return; }
+    const base = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
+    const model = await getSetting('local_ai_model', '');
+    if (!model) { message.error('未配置本地模型（设置 → 连接设置）'); return; }
+    setSuggesting(true);
+    try {
+      const { system, user } = buildAiSuggestPrompt(currentProject.category || '', currentProject.tier || '');
+      let full = '';
+      await new Promise<void>((resolve, reject) => {
+        startOllamaStream(base, model, [{ role: 'system', content: system }, { role: 'user', content: user }],
+          t => { full += t; }, () => {}, () => resolve(), e => reject(new Error(e)),
+          { endpoint: 'native', think: false, json: false, num_predict: 16384 });
+      });
+      const sugg = parseAiSuggest(full);
+      setSuggestions(sugg);
+      setAdopted(new Set());
+      await logLocalAICall({ request_type: 'voice_analyze', system_prompt: system, user_prompt: user, response_summary: full.slice(0, 200), success: true, model_name: model });
+      if (sugg.length === 0) message.warning('AI 未生成建议，请手动添加卖点');
+      else message.success('AI 已按「' + (currentProject.tier || '') + ' ' + (currentProject.category || '') + '」生成 ' + sugg.length + ' 个卖点建议，点卡片即可采纳');
+    } catch (e: any) { message.error('生成建议失败：' + (e?.message || e)); }
+    finally { setSuggesting(false); }
+  };
+
+  const adoptSuggestion = async (name: string, description: string) => {
+    if (!projectId) return;
+    await addSellingPoint(projectId, product, name, description);
+    setAdopted(prev => new Set(prev).add(name));
+    await refreshMaps(projectId);
+    message.success('已采纳卖点「' + name + '」，可在下表编辑关联模块');
+  };
+
   const runAggregate = async () => {
     if (!projectId || sellingPoints.length === 0) { message.warning('先选项目并添加卖点'); return; }
     const base = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
@@ -86,8 +128,9 @@ export default function SellingPointPanel({ product }: { product: string }) {
       const blocks = chunkVoiceItems(items, 3000);
       const spNames = sellingPoints.map((s: any) => s.name);
       const agg: Record<string, { positive: number; negative: number }> = {};
-      for (const blk of blocks) {
-        const { system, user } = buildAiAggregatePrompt(spNames, blk.items);
+      for (let i = 0; i < blocks.length; i++) {
+        setAggStatus('正在归纳第 ' + (i + 1) + '/' + blocks.length + ' 块原声…');
+        const { system, user } = buildAiAggregatePrompt(spNames, blocks[i].items);
         let full = '';
         await new Promise<void>((resolve, reject) => {
           startOllamaStream(base, model, [{ role: 'system', content: system }, { role: 'user', content: user }],
@@ -104,6 +147,7 @@ export default function SellingPointPanel({ product }: { product: string }) {
         }
         await logLocalAICall({ request_type: 'voice_analyze', system_prompt: system, user_prompt: user, response_summary: full.slice(0, 200), success: true, model_name: model });
       }
+      setAggStatus('');
       let updated = 0;
       for (const [name, v] of Object.entries(agg)) {
         let sp = sellingPoints.find((s: any) => s.name === name);
@@ -115,7 +159,7 @@ export default function SellingPointPanel({ product }: { product: string }) {
       setSellingPoints(await getSellingPoints(projectId));
       message.success('已归纳 ' + items.length + ' 条原声到 ' + updated + ' 个卖点（声量=提及人数）');
     } catch (e: any) { message.error('归纳失败：' + (e?.message || e)); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setAggStatus(''); }
   };
 
   const runAiAnalysis = async () => {
@@ -139,39 +183,78 @@ export default function SellingPointPanel({ product }: { product: string }) {
     finally { setBusy(false); }
   };
 
+  const maxRatio = Math.max(...rows.map(r => r.costRatio), 1);
+
   return (
     <Card size="small" style={{ marginTop: 12 }}>
       <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 8 }}><LinkOutlined /> 卖点价值分析（原声声量 × BOM成本）</div>
       <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 10, lineHeight: 1.6 }}>
-        先编辑好「卖点」（如 2K高刷屏 / 广色域 / Type-C直连），再点「归纳分析」——AI 把原声归类到卖点并精确计数，算出每个卖点的 声量（在乎的人多）、好评率（市场反响）、成本（投入），串成一张表交给 AI 判断取舍。
+        先让 AI 按品类+档位生成卖点建议 → 采纳/编辑 → 关联 BOM 模块 → 「归纳分析」把原声归类到卖点 → 一张表看穿「哪个卖点值不值、市场反响、投入产出」。
       </div>
 
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
-        <Select style={{ width: 220 }} placeholder="选择项目（成本来源）" value={projectId} allowClear
-          options={projects.map((p: any) => ({ value: p.id, label: (p.code || '') + ' ' + (p.name || '') }))}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+        <Select style={{ width: 220 }} placeholder="选择项目（品类+档位）" value={projectId} allowClear
+          options={projects.map((p: any) => ({ value: p.id, label: (p.code || '') + ' ' + (p.name || '') + (p.tier ? ' · ' + p.tier : '') }))}
           onChange={(v: number | undefined) => setProjectId(v)} showSearch optionFilterProp="label" />
-        <Button icon={<ThunderboltOutlined />} loading={busy} onClick={runAggregate} disabled={!projectId || sellingPoints.length === 0 || voiceCount === 0}>归纳分析（{voiceCount} 条原声）</Button>
-        <Button icon={<RobotOutlined />} loading={busy} onClick={runAiAnalysis} disabled={rows.length === 0}>AI 分析卖点价值</Button>
+        <Button className="tappable" icon={<BulbOutlined />} loading={suggesting} onClick={runSuggest} disabled={!projectId}>AI 生成卖点建议</Button>
+        <Button className="tappable" icon={<ThunderboltOutlined />} loading={busy} onClick={runAggregate} disabled={!projectId || sellingPoints.length === 0 || voiceCount === 0}>归纳分析（{voiceCount} 条原声）</Button>
+        <Button className="tappable" icon={<RobotOutlined />} loading={busy} onClick={runAiAnalysis} disabled={rows.length === 0}>AI 分析卖点价值</Button>
       </div>
+      {aggStatus && <div style={{ fontSize: 11.5, color: '#0A84FF', marginBottom: 8 }}>⏳ {aggStatus}</div>}
+
+      {suggestions.length > 0 && (
+        <div style={{ marginBottom: 10, background: '#F8FAFF', border: '1px solid #DBEAFE', borderRadius: 12, padding: '10px 12px' }}>
+          <div style={{ fontSize: 11, color: '#64748B', marginBottom: 8 }}>💡 AI 建议的卖点（点击卡片即采纳，可编辑）：</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {suggestions.map((s, i) => {
+              const isAdopted = adopted.has(s.name);
+              return (
+                <div key={i} className={'sp-suggest-card pop-in' + (isAdopted ? ' adopted' : '')}
+                  style={{ padding: '8px 12px', minWidth: 160, maxWidth: 230 }}
+                  onClick={() => { if (!isAdopted) adoptSuggestion(s.name, s.description); }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <b style={{ fontSize: 12.5 }}>{s.name}</b>
+                    {isAdopted ? <CheckOutlined style={{ color: '#10B981' }} /> : <span style={{ fontSize: 11, color: '#0A84FF' }}>＋采纳</span>}
+                  </div>
+                  {s.description && <div style={{ fontSize: 11, color: '#64748B', lineHeight: 1.5, marginTop: 2 }}>{s.description}</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {!projectId ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先选项目，再添加卖点" style={{ margin: '12px 0' }} />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先选项目，再生成卖点建议或手动添加" style={{ margin: '12px 0' }} />
       ) : (
         <>
-          <div style={{ marginBottom: 6 }}>
-            <Button size="small" icon={<PlusOutlined />} onClick={() => setEditing({ name: '', description: '', modules: [] })}>添加卖点</Button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <Button className="tappable" size="small" icon={<PlusOutlined />} onClick={() => setEditing({ name: '', description: '', modules: [] })}>手动添加卖点</Button>
+            {rows.length > 0 && (
+              <span style={{ fontSize: 11, color: '#94A3B8' }}>
+                {starCount > 0 && <Tag color="red" style={{ marginRight: 4 }}>⭐ {starCount} 强卖点</Tag>}
+                {fixCount > 0 && <Tag color="orange" style={{ marginRight: 4 }}>⚠️ {fixCount} 待改进</Tag>}
+                {overCount > 0 && <Tag color="purple">💸 {overCount} 过度投入</Tag>}
+              </span>
+            )}
           </div>
           {sellingPoints.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有卖点，点「添加卖点」先建几个（如：2K高刷屏、广色域、Type-C直连）" style={{ margin: '8px 0' }} />
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有卖点，点「AI 生成卖点建议」或「手动添加」先建几个" style={{ margin: '8px 0' }} />
           ) : (
             <Table size="small" dataSource={rows} rowKey="id" pagination={false} style={{ marginBottom: 10 }}
               columns={[
                 { title: '卖点', dataIndex: 'name', render: (v: string) => <b>{v}</b> },
-                { title: '🔥声量', dataIndex: 'count', width: 70, align: 'center', render: (v: number) => <b style={{ color: '#0A84FF' }}>{v}</b> },
+                { title: '🔥声量', dataIndex: 'count', width: 70, align: 'center', render: (v: number) => <b style={{ color: '#0A84FF', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>{v}</b> },
                 { title: '💬好评率', key: 'q', width: 84, align: 'center', render: (_: any, r: SellingPointRow) => { const q = Math.round(r.quality * 100); return <Tag color={q >= 60 ? 'green' : q >= 30 ? 'orange' : 'red'}>{q}%</Tag>; } },
                 { title: '👍/👎', key: 'pn', width: 70, align: 'center', render: (_: any, r: SellingPointRow) => <span style={{ fontSize: 11 }}><span style={{ color: '#10B981' }}>{r.positive}</span>/<span style={{ color: '#DC2626' }}>{r.negative}</span></span> },
                 { title: '💰成本', dataIndex: 'cost', width: 80, align: 'right', render: (v: number) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>¥{v.toFixed(0)}</span> },
-                { title: '声量成本比', dataIndex: 'costRatio', width: 84, align: 'center', render: (v: number, r: SellingPointRow) => <Tooltip title="每千元成本带来的声量（越大越划算）"><span>{r.cost > 0 ? v : '—'}</span></Tooltip> },
+                { title: '声量成本比', key: 'ratio', width: 108, align: 'center', render: (_: any, r: SellingPointRow) => {
+                  const pct = r.cost > 0 ? Math.min(100, Math.round((r.costRatio / maxRatio) * 100)) : 0;
+                  return <Tooltip title="每千元成本带来的声量（越大越划算）"><div style={{ width: 76, margin: '0 auto' }}>
+                    <div className="sp-ratio-bar"><div style={{ width: pct + '%' }} /></div>
+                    <div style={{ fontSize: 10.5, color: '#64748B', marginTop: 2 }}>{r.cost > 0 ? r.costRatio : '—'}</div>
+                  </div></Tooltip>;
+                } },
                 { title: '类型', key: 'kind', width: 96, align: 'center', render: (_: any, r: SellingPointRow) => <Tag color={KIND_TAG[r.kind].color}>{KIND_TAG[r.kind].text}</Tag> },
                 { title: '关联模块', key: 'maps', render: (_: any, r: SellingPointRow) => (
                   <div style={{ fontSize: 11, color: '#64748B', lineHeight: 1.5 }}>
@@ -180,7 +263,7 @@ export default function SellingPointPanel({ product }: { product: string }) {
                 ) },
                 { title: '', key: 'ops', width: 100, render: (_: any, r: SellingPointRow) => {
                   const sp = sellingPoints.find((s: any) => s.id === r.id);
-                  return <Space size={4}>
+                  return <Space size={4} className="sp-row-ops">
                     <Button size="small" type="text" icon={<EditOutlined />} onClick={() => setEditing({ id: r.id, name: r.name, description: sp?.description || '', modules: r.modules })} />
                     <Popconfirm title="删除这个卖点？" onConfirm={() => removeSellingPoint(r.id)}><Button size="small" type="text" danger icon={<DeleteOutlined />} /></Popconfirm>
                   </Space>;
@@ -191,7 +274,7 @@ export default function SellingPointPanel({ product }: { product: string }) {
       )}
 
       {aiAnalysis && (
-        <div style={{ marginTop: 8, background: '#FAFBFC', border: '1px solid #EEF1F4', borderRadius: 8, padding: '10px 12px', whiteSpace: 'pre-wrap', fontSize: 12, color: '#334155', lineHeight: 1.7 }}>
+        <div className="pop-in" style={{ marginTop: 8, background: '#FAFBFC', border: '1px solid #EEF1F4', borderRadius: 8, padding: '10px 12px', whiteSpace: 'pre-wrap', fontSize: 12, color: '#334155', lineHeight: 1.7 }}>
           <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>🤖 AI 卖点价值判断（基于上表数据）：</div>
           {aiAnalysis}
         </div>

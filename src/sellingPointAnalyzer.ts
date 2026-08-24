@@ -132,6 +132,50 @@ export function buildAiAggregatePrompt(spNames: string[], items: string[]): { sy
   return { system, user };
 }
 
+// ===== AI 预生成卖点建议：根据品类+档位先给大致特性，用户再编辑采纳（用户 2026-08-18） =====
+export function buildAiSuggestPrompt(category: string, tier: string): { system: string; user: string } {
+  const system = '你是产品定义专家。根据产品品类和档位，给出这个产品最有价值的卖点清单（卖点 = 用户会为之买单的差异化特性）。只输出 JSON：{"selling_points":[{"name":"卖点名（不超过8字）","description":"一句话说明为什么值钱"}]}，不要任何其他文字。卖点要具体、有差异化，符合该档位的用户预期，不要泛泛而谈。';
+  const user = '产品品类：' + (category || '未指定') + '；档位：' + (tier || '未指定') + '。请给出 6-8 个卖点。';
+  return { system, user };
+}
+
+export function parseAiSuggest(text: string): { name: string; description: string }[] {
+  const t = String(text || '').trim();
+  if (!t) return [];
+  const candidates: any[] = [];
+  const tryJSON = (s: string): any => { try { return JSON.parse(s); } catch { return null; } };
+  const segs = [t];
+  for (const pair of [['{', '}'], ['[', ']']] as const) {
+    const s = t.indexOf(pair[0]); const e = t.lastIndexOf(pair[1]);
+    if (s >= 0 && e > s) segs.push(t.slice(s, e + 1));
+  }
+  for (const seg of segs) {
+    for (const v of [seg, seg.replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/,\s*}/g, '}').replace(/,\s*\]/g, ']')]) {
+      const p = tryJSON(v); if (p != null) { candidates.push(p); break; }
+    }
+  }
+  for (const c of candidates) {
+    let arr: any[] | null = null;
+    if (Array.isArray(c)) arr = c;
+    else if (c && typeof c === 'object') {
+      if (Array.isArray(c.selling_points)) arr = c.selling_points;
+      else if (Array.isArray(c.suggestions)) arr = c.suggestions;
+      else if (Array.isArray(c.features)) arr = c.features;
+      else for (const k of Object.keys(c)) if (Array.isArray(c[k])) { arr = c[k]; break; }
+    }
+    if (!arr) continue;
+    const out: { name: string; description: string }[] = [];
+    for (const it of arr) {
+      if (!it) continue;
+      if (typeof it === 'string') { out.push({ name: it.trim(), description: '' }); continue; }
+      const name = String(it.name ?? it.feature ?? it.title ?? '').trim();
+      if (name) out.push({ name, description: String(it.description ?? it.desc ?? '').trim() });
+    }
+    if (out.length) return out;
+  }
+  return [];
+}
+
 export function parseAiAggregate(text: string): { selling_points: string[]; sentiment: 'positive' | 'negative' }[] {
   const t = String(text || '').trim();
   if (!t) return [];
