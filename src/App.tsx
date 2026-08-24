@@ -17,6 +17,7 @@ const SupplierManagement = lazy(() => import('./pages/SupplierManagement'));
 const Settings = lazy(() => import('./pages/Settings'));
 const LocalAIAssistant = lazy(() => import('./pages/LocalAIAssistant'));
 const UserVoice = lazy(() => import('./pages/UserVoice'));
+const QuoteReview = lazy(() => import('./pages/QuoteReview'));
 const WorkLog = lazy(() => import('./pages/WorkLog'));
 const LoginScreen = lazy(() => import('./pages/LoginScreen'));
 import { ThemeProvider } from './theme/ThemeContext';
@@ -27,7 +28,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import {
   BarChartOutlined, ToolOutlined, AppstoreOutlined, ProjectOutlined,
   ShopOutlined, LineChartOutlined, FileTextOutlined, PartitionOutlined, CalendarOutlined,
-  TeamOutlined, SettingOutlined, RobotOutlined, BookOutlined, BulbOutlined, LockOutlined, MessageOutlined
+  TeamOutlined, SettingOutlined, RobotOutlined, BookOutlined, BulbOutlined, LockOutlined, MessageOutlined, AuditOutlined
 } from '@ant-design/icons';
 
 // 导航分区（v2.3.19 界面轻量化第一步：12 项平铺 → 驾驶舱 + 三区收敛，页面零改动）
@@ -59,6 +60,7 @@ const NAV_GROUPS: { title: string; items: typeof NAV }[] = [
       { key: 'decomposition',      label: '物料趋势洞察', icon: <PartitionOutlined />, iconBg: '#EEF2FF', iconColor: '#6366F1' },
       { key: 'localAI',            label: '本地AI助手', icon: <RobotOutlined />,     iconBg: '#EEF2FF', iconColor: '#6366F1' },
       { key: 'userVoice',          label: '用户原声分析', icon: <MessageOutlined />, iconBg: '#FAF5FF', iconColor: '#8B5CF6' },
+      { key: 'quoteReview',        label: 'AI 审价助手', icon: <AuditOutlined />,     iconBg: '#FFF7ED', iconColor: '#F97316' },
     ],
   },
 ];
@@ -334,6 +336,7 @@ export default function App() {
       case 'supplierManagement': return <SupplierManagement />;
       case 'localAI': return <LocalAIAssistant />;
       case 'userVoice': return <UserVoice />;
+      case 'quoteReview': return <QuoteReview />;
       case 'workLog': return <WorkLog />;
       default: return <Dashboard onNavigate={navigate} />;
     }

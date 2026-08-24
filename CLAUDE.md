@@ -173,6 +173,22 @@
 - **交互打磨**（用户 2026-08-18：UI 高级巧妙不寡淡）：建议卡 hover 上浮+阴影+一键采纳(采纳后变绿对勾)、价值表声量成本比用渐变色条、归纳分析实时进度、卖点行操作按钮 hover 淡入、按钮统一 .tappable(:active 缩放)；CSS 见 index.css 末尾 .sp-suggest-card/.sp-ratio-bar/.sp-row-ops，data-lowfx 时禁用动画。
 - **AI 留痕**：request_type 复用 voice_analyze（本地不涉外发）；num_predict 16384 不截断。
 
+## 三·补9、CostHub = harness：功能做成可调用工具，本地大模型当大脑（2026-08-18 用户：不要每个功能单独页面，要能直接在 AI 对话里调用，本地大模型作为大脑，有任务回馈机制像 agent）
+
+- **方向**：新能力一律注册为 aiTools.ts 里的「工具」（id/中文名/给模型的描述/参数/execute 返回文本），本地模型（大脑）在 对话/Agent/自主分析 里用文本协议自主调用并推理——不再为每个功能单独做页面。
+- **新工具（第 14-17 个）**：quote_review AI 审价（贴报价逐项判合理/偏高/虚高+合理价+议价要点，嵌套本地模型调用）/ query_project_module_value 模块级价值分析（成本/声量/好评/好又便宜·好但贵·做得差·花得不值，需先做卖点分析+归纳）/ query_project_health 项目深度体检数据（BOM 成本结构/目标/快照，供大脑写"为什么贵/怎么降"）/ query_competitor_bom 竞品 BOM+售价对标数据。
+- **校验**：aiTools.test.ts 强制 每工具唯一 id/中文名/描述>10字/参数 key 唯一/TOOL_ICONS 全覆盖——加工具必须同步补图标。
+- **已有 harness 骨架**：aiTools 注册表（13 查询/分析工具）+ thinkEngine 文本协议（[TOOL] 标记）+ runThinkLoop 多轮循环 + Agent 轨迹回馈（AutoThinkPanel/LocalAIAssistant 实时显示 思考/工具/云端/结论）+ MAX_TOOLS_PER_ROUND=2 单路深挖。
+- **QuoteReview 页面保留**为快捷入口（非主要方式）；大方向是工具优先。
+- **工具地图（参考 DSH 工具分类，2026-08-18 用户：要思考全面不能用到时没有）**：
+  - 数据查询（已有）：query_projects / query_project_bom / query_project_cost / query_part_suppliers / query_supplier_trend / query_target_status / query_cost_snapshots / query_price_insights / query_advisor_insights / query_worklog / query_todos / compare_subcategory_cost / query_voice_dims（原声维度）/ query_project_module_value（模块价值）/ query_project_health（体检数据）/ query_competitor_bom（竞品对标）。
+  - 分析：insight_material_trend（云端行情，审批）/ quote_review（AI 审价，嵌套模型）。
+  - 文件/导入：read_excel（读 Excel，弹文件选择框→表格文本）。
+  - 计算/工具：calc（可靠算术核验）/ now（本地时间）。
+  - 做事（AI 能把发现变成行动）：create_todo（工作手账建待办）/ add_goal（下达目标给自主分析）。
+  - 安全：除 create_todo/add_goal 外均只读；写操作只进用户自己的库；脱敏铁律不变量。
+- **加工具三步**：①aiTools.ts 数组加 {id/name/desc/params/execute} ②TOOL_ICONS 补图标（测试强制）③纯函数放独立 .ts 并加测试。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。
