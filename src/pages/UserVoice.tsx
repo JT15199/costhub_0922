@@ -8,6 +8,7 @@ import { getSetting } from '../db';
 import { addVoiceItem, clearVoiceItems, getAllVoiceItems, getVoiceDimensions, getVoiceProducts, startVoiceRun, updateVoiceRunProgress, finishVoiceRun, getRunningVoiceRun, replaceVoiceDimensions } from '../db';
 import { chunkVoiceItems, mergeDimensions, parseDimensions, type BlockDimension } from '../voiceAnalyer';
 import { detectOllama } from '../aiStatus';
+import SellingPointPanel from '../components/SellingPointPanel';
 
 const COL_KEYS = ['评价', '评论', '反馈', '内容', '点评', '口碑', 'text', 'content', 'comment', 'review', 'feedback'];
 
@@ -230,6 +231,7 @@ export default function UserVoice() {
             ]} />
         </Card>
       )}
+      <SellingPointPanel product={product} />
     </div>
   );
 }

@@ -163,6 +163,14 @@
 - **UserVoice 页面**（AI 趋势组）：导入 Excel（XLSX 自动识别 评价/评论/反馈/内容/text 等列，找不到则非空单元格拼接）→「开始分析」逐块唤醒本地模型提炼 {dimensions:[{name,sentiment}]}（startOllamaStream json:false num_predict 1500，健壮 JSON 解析）→ 全部完成 mergeDimensions 存 voice_dimension → 权重榜（维度/权重/提及/正负/分布条）呈现；进度逐块显示。
 - **价值工程标尺**：此榜 = 用户原声提炼的「最有价值特性维度+权重」，作为价值工程/新品特性的客观依据（替代主观打分）。
 
+## 三·补8、卖点价值分析（2026-08-18 用户：原声结果对应"提前可编辑的卖点"，卖点对应成本，串起来让 AI 分析哪个卖点多少声量/成本/市场反响）
+
+- **核心**：卖点 = 原声(声量/反响) × BOM(成本) 的桥梁。数据层 db/selling.ts（selling_points 挂项目 / selling_point_modules 卖点↔模块 / selling_point_dims 卖点↔原声维度）；纯函数 sellingPointAnalyzer.ts（allocateModuleCosts 成本分摊 / computeSellingPointRows 价值计算 / classifyKind 客观分类 / buildAiDimMatchPrompt+parseAiDimMatch AI 语义匹配 / buildSellingPointAnalysisPrompt AI 分析）。
+- **成本分摊**：同一模块被多卖点引用 → 均分分摊（不重复计算，用户 2026-08-18：一个模块可能对应不同特性）；价值表标注"模块与 N 个卖点共享·已分摊"。
+- **分类（客观，不主观打分）**：声量高+好评高=star 强卖点 / 声量高+好评低=fix 待改进 / 声量低+成本高=overinvest 过度投入 / 其余=minor 次要（声量/成本取前 ~30% 分位）。
+- **UX**（SellingPointPanel 并入用户原声分析页）：选项目(成本)→添加卖点(名+描述)→关联 BOM 模块(多选)→「AI 自动对应维度」语义匹配原声维度(可人工改)→价值表(声量/好评率/正负/成本/声量成本比/类型/共享模块)→「AI 分析卖点价值」基于串起来的数据给取舍判断。
+- **AI 留痕**：request_type 复用 voice_analyze（本地不涉外发）；num_predict 16384 不截断。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。
