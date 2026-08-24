@@ -10,7 +10,7 @@ import {
   LinkOutlined, SafetyCertificateOutlined, CloudServerOutlined, ThunderboltOutlined,
   PlusOutlined, DragOutlined, CheckOutlined, CloseOutlined, KeyOutlined,
   StopOutlined, HistoryOutlined, SettingOutlined, SearchOutlined, RobotOutlined,
-  BulbOutlined, BookOutlined, RadarChartOutlined, LockOutlined, UserOutlined, DatabaseOutlined, DownloadOutlined, FileTextOutlined, FolderOpenOutlined,
+  BulbOutlined, BookOutlined, RadarChartOutlined, LockOutlined, UserOutlined, DatabaseOutlined, DownloadOutlined, FileTextOutlined, FolderOpenOutlined, QuestionCircleOutlined,
 } from '@ant-design/icons';
 import { testSearchConnection, testLLMConnection, BUILTIN_SKILLS, loadSkillConfig, saveSkillConfig, getSkill } from '../trendService';
 import { useTheme } from '../theme/ThemeContext';
@@ -2169,6 +2169,14 @@ export default function Settings({ embedded }: { embedded?: boolean }) {
       {/* ====== 关于分区 ====== */}
       {activeSection === 'about' && (
       <>
+      {/* ====== AI 使用指南 ====== */}
+      <div className="content-card">
+        <h3><QuestionCircleOutlined /> AI 使用指南</h3>
+        <div style={{ fontSize: 12, color: '#6B7280', marginTop: 8, lineHeight: 1.7 }}>
+          打开「AI 使用指南」：可复制的示例提问、23 个可调用工具清单、常用功能入口说明——在「本地 AI 助手」对话里直接说需求，AI 会自动调用工具完成。
+        </div>
+        <Button type="primary" icon={<QuestionCircleOutlined />} style={{ marginTop: 10 }} onClick={() => window.dispatchEvent(new Event('costhub-open-ai-guide'))}>打开 AI 使用指南</Button>
+      </div>
       {/* ====== 配置说明 ====== */}
       <div className="content-card">
         <h3><BookOutlined /> 配置说明</h3>

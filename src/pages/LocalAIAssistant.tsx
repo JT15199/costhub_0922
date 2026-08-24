@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, createElement } from 'react';
 import { Button, Input, InputNumber, Select, Tooltip, Modal, Divider, Empty, Spin, Upload, Table, Tag, Steps, Alert, Form, Popconfirm, Space, Switch, Radio, Dropdown, Drawer, notification } from 'antd';
-import { CopyOutlined, RadarChartOutlined, LockOutlined, MessageOutlined, AppstoreOutlined } from '@ant-design/icons';
+import { CopyOutlined, RadarChartOutlined, LockOutlined, MessageOutlined, AppstoreOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import {
   SendOutlined, RobotOutlined, PlusOutlined, HistoryOutlined,
   ThunderboltOutlined, TeamOutlined, ClearOutlined,
@@ -1047,6 +1047,7 @@ export default function LocalAIAssistant() {
   const [streaming, setStreaming] = useState(false);
   // ===== Agent 模式（P1：工具注册表 + 计划-执行-总结） =====
   const [chatMode, setChatMode] = useState<'chat' | 'agent' | 'think'>('chat'); // 输入框模式：普通对话 / Agent 任务 / 自主分析
+  const [activeFn, setActiveFn] = useState(''); // 功能选择（可选）：审价/降本/对标/原声/行情/体检/目标/待办
   // 自主分析（think）运行态：思考流/工具卡/云端申请/最终回答（DSH 式过程渲染）
   const [thinkRun, setThinkRun] = useState<{
     user: string;
@@ -1964,6 +1965,21 @@ export default function LocalAIAssistant() {
     } catch { /* 查询失败直接走全链路 */ }
     await doBridgedInsight(ins, false);
   };
+  // 功能选择（agent 界面：选功能 → 注入任务聚焦 + 改占位符）
+  const FUNCTIONS: { key: string; label: string; hint: string; placeholder: string }[] = [
+    { key: '', label: '自由对话', hint: '', placeholder: '问任何成本/项目问题，AI 会自主调用工具…' },
+    { key: 'quote_review', label: '💰 AI 审价', hint: '请优先使用 quote_review 工具逐项审价（合理/偏高/虚高+合理价+议价要点），报价可让用户粘贴或用 read_excel 读 Excel。', placeholder: '贴供应商报价（或让 AI 读 Excel），我来逐项审价…' },
+    { key: 'cost_reduction', label: '💸 BOM 降本', hint: '请调用 query_project_health/query_project_cost/query_project_bom 取数后，推理给出具体降本方向与理由（替代料/规格/数量/工艺）。', placeholder: '例如：分析 M270 哪里贵、怎么降本…' },
+    { key: 'benchmark', label: '📊 竞品对标', hint: '请调用 query_competitor_bom + query_project_bom 对比竞品与己方 BOM 成本差异，逐规格分析成本影响。', placeholder: '例如：对比竞品 A 和 M270 的 BOM 成本差异…' },
+    { key: 'voice', label: '🔍 原声分析', hint: '请调用 query_voice_dims 或 query_project_module_value 分析用户原声、卖点/模块价值（声量/好评/成本）。', placeholder: '例如：查这款产品原声里用户最在意什么…' },
+    { key: 'trend', label: '📈 行情洞察', hint: '请调用 insight_material_trend 查行情（云端调用会请求确认）。', placeholder: '例如：查液晶面板近期市场行情…' },
+    { key: 'health', label: '🏥 项目体检', hint: '请调用 query_project_health + query_project_cost 做深度体检，输出"为什么贵/哪里贵/怎么降"的结论。', placeholder: '例如：深度体检 M270，哪里贵怎么降…' },
+    { key: 'goal', label: '🎯 下达目标', hint: '请调用 add_goal 把用户的目标下达给后台自主分析。', placeholder: '例如：下达目标：把 M270 整机成本降到 ¥900…' },
+    { key: 'todo', label: '✅ 创建待办', hint: '请调用 create_todo 把要跟进的事记成工作手账待办。', placeholder: '例如：把"去谈驱动板价格"记成待办…' },
+  ];
+  const FN_MAP: Record<string, { key: string; label: string; hint: string; placeholder: string }> = Object.fromEntries(FUNCTIONS.map(f => [f.key, f]));
+  const fnHint = activeFn && FN_MAP[activeFn] ? '【本次聚焦：' + FN_MAP[activeFn].label + '】' + FN_MAP[activeFn].hint + ' ' : '';
+
   const ADVISOR_TYPE_META: Record<string, { icon: string; color: string; label: string }> = {
     stale_project_cost: { icon: '🕐', color: '#3B82F6', label: '成本久未变动' },
     stale_part_price: { icon: '💰', color: '#F59E0B', label: '久未调价·议价机会' },
@@ -2026,6 +2042,10 @@ return (
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: connStatus === 'ok' ? '#22C55E' : connStatus === 'fail' ? '#EF4444' : '#D1D5DB' }} />
               {connStatus === 'ok' ? (model || '已连接') : connStatus === 'fail' ? '连接失败' : '未连接'}
             </span>
+            <Select size="small" style={{ width: 150 }} value={model || undefined} options={models.map(m => ({ value: m, label: m }))}
+              onChange={async (v: string) => { setModel(v); try { await setSetting('local_ai_model', v); } catch { } }}
+              showSearch optionFilterProp="label" placeholder="选择模型" />
+            <Button size="small" type="text" icon={<QuestionCircleOutlined />} title="AI 使用指南：工具清单 + 示例提问" onClick={() => window.dispatchEvent(new Event('costhub-open-ai-guide'))}>使用指南</Button>
             <Dropdown
               menu={{
                 items: [
@@ -2259,12 +2279,14 @@ return (
                   style={{ width: 30, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, cursor: streaming ? 'not-allowed' : 'pointer', color: chatMode === 'think' ? '#4338CA' : '#94A3B8', background: chatMode === 'think' ? '#EEF2FF' : 'transparent', border: chatMode === 'think' ? '1px solid #C7D2FE' : '1px solid transparent' }}><BulbOutlined style={{ fontSize: 13 }} /></div>
                 {chatMode === 'agent' && <span style={{ fontSize: 10.5, color: '#94A3B8', marginLeft: 4 }}>Agent 自动调用工具完成多步任务</span>}
                 {chatMode === 'think' && <span style={{ fontSize: 10.5, color: '#94A3B8', marginLeft: 4 }}>本地思考 + 按需申请云端</span>}
+                <span style={{ width: 1, height: 14, background: '#E5E9F0', margin: '0 4px' }} />
+                <Select size="small" style={{ width: 176 }} value={activeFn || undefined} options={FUNCTIONS.map(f => ({ value: f.key, label: f.label }))} onChange={(v: string) => setActiveFn(v)} placeholder="选择功能（可选）" allowClear />
               </div>
-              <Input.TextArea value={input} onChange={e => setInput(e.target.value)} placeholder={chatMode === 'agent' ? '例如：分析 M270 成本结构，找出 top3 风险物料并洞察行情，最后总结 200 字' : chatMode === 'think' ? '例如：评估 M270 的 PCB 成本是否合理，贵的话分析贵在哪（可申请云端查行情）' : '输入问题，或使用左侧工具注入数据分析…'} autoSize={{ minRows: 1, maxRows: 5 }} onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); if (chatMode === 'agent') sendAgentTask(input); else if (chatMode === 'think') sendThinkTask(input); else sendMessage(input); } }} style={{ borderRadius: 10 }} />
+              <Input.TextArea value={input} onChange={e => setInput(e.target.value)} placeholder={activeFn && FN_MAP[activeFn] ? FN_MAP[activeFn].placeholder : (chatMode === 'agent' ? '例如：分析 M270 成本结构，找出 top3 风险物料并洞察行情，最后总结 200 字' : chatMode === 'think' ? '例如：评估 M270 的 PCB 成本是否合理，贵的话分析贵在哪（可申请云端查行情）' : '输入问题，或使用左侧工具注入数据分析…')} autoSize={{ minRows: 1, maxRows: 5 }} onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); const msg = fnHint + input; if (chatMode === 'agent') sendAgentTask(msg); else if (chatMode === 'think') sendThinkTask(msg); else sendMessage(msg); } }} style={{ borderRadius: 10 }} />
             </div>
             {streaming
               ? <Button danger icon={<ClearOutlined />} onClick={() => { stoppedRef.current = true; cleanupRef.current?.(); setStreaming(false); }} style={{ alignSelf: 'flex-end' }}>停止</Button>
-              : <Button type="primary" icon={<SendOutlined />} onClick={() => { if (chatMode === 'agent') sendAgentTask(input); else if (chatMode === 'think') sendThinkTask(input); else sendMessage(input); }} disabled={!input.trim()} style={{ alignSelf: 'flex-end' }}>{chatMode === 'chat' ? '发送' : '执行'}</Button>
+              : <Button type="primary" icon={<SendOutlined />} onClick={() => { const msg = fnHint + input; if (chatMode === 'agent') sendAgentTask(msg); else if (chatMode === 'think') sendThinkTask(msg); else sendMessage(msg); }} disabled={!input.trim()} style={{ alignSelf: 'flex-end' }}>{chatMode === 'chat' ? '发送' : '执行'}</Button>
             }
           </div>
           <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginTop: 4 }}>Shift+Enter 换行 · Enter 发送 · 数据仅在本机处理{chatMode === 'agent' ? ' · Agent 只读执行，计划与结果可审查' : chatMode === 'think' ? ' · 本地思考免费不限 · 云端发送需审批' : ''}</div>

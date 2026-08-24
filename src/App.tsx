@@ -23,7 +23,7 @@ const LoginScreen = lazy(() => import('./pages/LoginScreen'));
 import { ThemeProvider } from './theme/ThemeContext';
 import { ThemeSwitcher } from './theme/ThemeSwitcher';
 import CloudConfirmBar from './components/CloudConfirmBar';
-import AIGuide from './components/AIGuide';
+import AIUsageGuide from './components/AIUsageGuide';
 import ErrorBoundary from './components/ErrorBoundary';
 import {
   BarChartOutlined, ToolOutlined, AppstoreOutlined, ProjectOutlined,
@@ -260,6 +260,13 @@ export default function App() {
       }
     })();
   };
+
+  // AI 使用指南：任何页面可 dispatch costhub-open-ai-guide 打开（本地AI助手页/设置页按钮）
+  useEffect(() => {
+    const h = () => setAiGuideOpen(true);
+    window.addEventListener('costhub-open-ai-guide', h);
+    return () => window.removeEventListener('costhub-open-ai-guide', h);
+  }, []);
 
   const handleEnterRestricted = () => {
     (async () => {
@@ -539,7 +546,7 @@ export default function App() {
 
 
       {/* 首次 AI 能力引导 */}
-      <AIGuide open={aiGuideOpen} onClose={() => setAiGuideOpen(false)} onOpenSettings={() => setSettingsOpen(true)} />
+      <AIUsageGuide open={aiGuideOpen} onClose={() => setAiGuideOpen(false)} onOpenSettings={() => setSettingsOpen(true)} />
 
       {/* 使用说明弹窗（HTML 页面） */}
       <Modal
