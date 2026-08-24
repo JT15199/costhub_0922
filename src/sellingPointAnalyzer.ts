@@ -6,7 +6,6 @@ export interface SellingPointRow {
   name: string;
   modules: string[];          // 关联模块
   sharedModules: string[];    // 与其他卖点共享的模块（成本被均分）
-  dimNames: string[];         // 关联原声维度名
   cost: number;               // 分摊后成本（元）
   count: number;              // 声量（提及人数合计）
   positive: number;
@@ -43,40 +42,29 @@ export function classifyKind(count: number, quality: number, cost: number, highC
 }
 
 export function computeSellingPointRows(input: {
-  sps: { id: number; name: string }[];
+  sps: { id: number; name: string; positive: number; negative: number }[];
   modules: Record<number, string[]>;
-  dims: Record<number, number[]>;
   moduleCosts: Record<string, number>;
-  dimById: Record<number, { name: string; count: number; positive: number; negative: number }>;
 }): SellingPointRow[] {
   const spModules: { spId: number; module: string }[] = [];
   for (const sp of input.sps) for (const m of input.modules[sp.id] || []) spModules.push({ spId: sp.id, module: m });
   const { bySp, shared } = allocateModuleCosts(spModules, input.moduleCosts);
   // 高阈值（前 ~30% 分位，客观数据算，不主观定义）
-  const countArr = input.sps.map(sp => {
-    const ds = input.dims[sp.id] || [];
-    return ds.reduce((s, di) => s + (input.dimById[di]?.count || 0), 0);
-  }).sort((a, b) => a - b);
+  const countArr = input.sps.map(sp => (sp.positive || 0) + (sp.negative || 0)).sort((a, b) => a - b);
   const costArr = input.sps.map(sp => bySp[sp.id] || 0).sort((a, b) => a - b);
   const highCount = countArr[Math.floor(countArr.length * 0.7)] || 1;
   const highCost = costArr[Math.floor(costArr.length * 0.7)] || 1;
   return input.sps.map(sp => {
     const mods = input.modules[sp.id] || [];
-    const ds = input.dims[sp.id] || [];
-    const dimNames = ds.map(di => input.dimById[di]?.name || '').filter(Boolean);
-    let count = 0, positive = 0, negative = 0;
-    for (const di of ds) {
-      const d = input.dimById[di];
-      if (!d) continue;
-      count += d.count; positive += d.positive; negative += d.negative;
-    }
-    const denom = positive + negative;
-    const quality = denom > 0 ? positive / denom : 0;
+    const positive = sp.positive || 0;
+    const negative = sp.negative || 0;
+    const count = positive + negative;
+    const quality = count > 0 ? positive / count : 0;
     const cost = bySp[sp.id] || 0;
     const costRatio = cost > 0 ? Math.round((count / (cost / 1000)) * 10) / 10 : 0;
     const sharedModules = mods.filter(m => shared[m]);
     return {
-      id: sp.id, name: sp.name, modules: mods, sharedModules, dimNames,
+      id: sp.id, name: sp.name, modules: mods, sharedModules,
       cost: Math.round(cost * 100) / 100, count, positive, negative, quality, costRatio,
       kind: classifyKind(count, quality, cost, highCount, highCost),
     };
@@ -134,4 +122,56 @@ export function buildSellingPointAnalysisPrompt(rows: SellingPointRow[]): { syst
     return (i + 1) + '. ' + r.name + '：声量 ' + r.count + '、好评率 ' + qp + '%（正 ' + r.positive + '/负 ' + r.negative + '）、成本 ¥' + r.cost.toFixed(2) + '、声量成本比 ' + r.costRatio + sharedNote;
   }).join('\n') + '\n\n请输出分析结论。';
   return { system, user };
+}
+
+// ===== AI 归纳：把原声归类到卖点（卖点优先，避免维度太细、每点声量=1） =====
+// 模型只做「每条评价归到哪些卖点 + 正负」，计数由代码精确累加（不靠模型报数，更准）
+export function buildAiAggregatePrompt(spNames: string[], items: string[]): { system: string; user: string } {
+  const system = '你是产品口碑归纳助手。下面给出一组「卖点清单」和一批用户评价（每条带序号）。请把每条评价归纳到最相关的卖点：一条评价可归到多个卖点，也可归到「其他」；同时判断情感倾向。只输出 JSON：{"items":[{"index":序号,"selling_points":["卖点名"],"sentiment":"positive或negative"}]}，不要任何其他文字。归纳要到位：相近说法（如"颜色准/发黄/偏红"）归同一个卖点，不要把评价原样当卖点，也不要自造清单之外的卖点。';
+  const user = '卖点清单：' + spNames.join('、') + '\n\n用户评价：\n' + items.map((it, i) => '[' + i + '] ' + it).join('\n') + '\n\n请输出归纳结果 JSON。';
+  return { system, user };
+}
+
+export function parseAiAggregate(text: string): { selling_points: string[]; sentiment: 'positive' | 'negative' }[] {
+  const t = String(text || '').trim();
+  if (!t) return [];
+  const candidates: any[] = [];
+  const tryJSON = (s: string): any => { try { return JSON.parse(s); } catch { return null; } };
+  const segs = [t];
+  for (const pair of [['{', '}'], ['[', ']']] as const) {
+    const s = t.indexOf(pair[0]); const e = t.lastIndexOf(pair[1]);
+    if (s >= 0 && e > s) segs.push(t.slice(s, e + 1));
+  }
+  for (const seg of segs) {
+    for (const v of [seg, seg.replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/,\s*}/g, '}').replace(/,\s*\]/g, ']')]) {
+      const p = tryJSON(v); if (p != null) { candidates.push(p); break; }
+    }
+  }
+  const normSent = (s: any): 'positive' | 'negative' => {
+    const v = String(s || '').trim().toLowerCase();
+    if (/neg|negative|差评|吐槽|不满|缺陷|负面/.test(v)) return 'negative';
+    return 'positive';
+  };
+  for (const c of candidates) {
+    let arr: any[] | null = null;
+    if (Array.isArray(c)) arr = c;
+    else if (c && typeof c === 'object') {
+      if (Array.isArray(c.items)) arr = c.items;
+      else if (Array.isArray(c.results)) arr = c.results;
+      else for (const k of Object.keys(c)) if (Array.isArray(c[k])) { arr = c[k]; break; }
+    }
+    if (!arr) continue;
+    const out: { selling_points: string[]; sentiment: 'positive' | 'negative' }[] = [];
+    for (const it of arr) {
+      if (!it || typeof it !== 'object') continue;
+      let sps: string[] = [];
+      if (Array.isArray(it.selling_points)) sps = it.selling_points.map(String);
+      else if (Array.isArray(it.dimensions)) sps = it.dimensions.map(String);
+      else if (it.selling_point) sps = [String(it.selling_point)];
+      sps = sps.map((s: string) => s.trim()).filter(Boolean);
+      if (sps.length) out.push({ selling_points: sps, sentiment: normSent(it.sentiment) });
+    }
+    if (out.length) return out;
+  }
+  return [];
 }

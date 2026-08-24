@@ -98,7 +98,7 @@ export default function UserVoice() {
       const blk = blocks[i];
       setCurBlock({ idx: i + 1, total: blocks.length, items: blk.items });
       setLog(prev => [...prev, '分析第 ' + (i + 1) + '/' + blocks.length + ' 块（' + blk.items.length + ' 条）...']);
-      const sys = '你是用户口碑分析专家。下面是一批用户对电子产品的真实评价。请提炼"用户最在意、最有价值的特性维度"。只输出 JSON，不要任何分析/解释/前后缀：{"dimensions":[{"name":"特性名","sentiment":"positive或negative"}]}。规则：1) 最多 12 个维度 2) 每个名称不超过 8 字 3) 特性要具体有用（如 续航/压感/外形/连接）4) positive=满意喜欢，negative=吐槽 5) 只依据给出的评价，不要编造。';
+      const sys = '你是用户口碑分析专家。下面是一批用户对电子产品的真实评价。请提炼"用户最在意、最有价值的特性维度"，并把相近的说法归纳合并成更高层的特性（如"颜色准/发黄/偏红"都归为"色彩还原"，"卡顿/延迟/拖影"归为"响应速度"），不要拆得太细。只输出 JSON，不要任何分析/解释/前后缀：{"dimensions":[{"name":"特性名","sentiment":"positive或negative"}]}。规则：1) 最多 12 个维度 2) 每个名称不超过 8 字 3) 特性要具体有用（如 续航/压感/外形/连接）4) positive=满意喜欢，negative=吐槽 5) 只依据给出的评价，不要编造。';
       const user = '用户评价：\n' + blk.items.join('\n');
       let full = '';
       setLiveChars(0);

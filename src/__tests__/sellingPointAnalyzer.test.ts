@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { allocateModuleCosts, computeSellingPointRows, classifyKind, parseAiDimMatch } from '../sellingPointAnalyzer';
+import { allocateModuleCosts, computeSellingPointRows, classifyKind, parseAiDimMatch, parseAiAggregate } from '../sellingPointAnalyzer';
 
 describe('allocateModuleCosts — 模块成本分摊', () => {
   it('单卖点独占模块 → 全额', () => {
@@ -18,22 +18,17 @@ describe('allocateModuleCosts — 模块成本分摊', () => {
   });
 });
 
-describe('computeSellingPointRows — 卖点价值计算', () => {
+describe('computeSellingPointRows — 卖点价值计算（卖点直接带声量）', () => {
   it('声量聚合 + 成本分摊', () => {
     const rows = computeSellingPointRows({
-      sps: [{ id: 1, name: '高刷屏' }, { id: 2, name: '鸡肋功能' }],
+      sps: [{ id: 1, name: '高刷屏', positive: 60, negative: 15 }, { id: 2, name: '鸡肋功能', positive: 1, negative: 2 }],
       modules: { 1: ['面板'], 2: ['结构件'] },
-      dims: { 1: [11, 12], 2: [13] },
       moduleCosts: { 面板: 500, 结构件: 100 },
-      dimById: {
-        11: { name: '刷新率', count: 45, positive: 35, negative: 10 },
-        12: { name: '分辨率', count: 30, positive: 25, negative: 5 },
-        13: { name: '某个点', count: 3, positive: 1, negative: 2 },
-      },
     });
     const a = rows.find(r => r.id === 1)!;
     expect(a.count).toBe(75);
     expect(a.positive).toBe(60);
+    expect(a.negative).toBe(15);
     expect(a.cost).toBe(500);
     const b = rows.find(r => r.id === 2)!;
     expect(b.count).toBe(3);
@@ -56,5 +51,16 @@ describe('parseAiDimMatch — AI 匹配解析', () => {
     expect(r.length).toBe(1);
     expect(r[0].selling_point).toBe('高刷屏');
     expect(r[0].dimensions).toEqual(['刷新率', '分辨率']);
+  });
+});
+
+describe('parseAiAggregate — AI 归纳解析', () => {
+  it('标准 JSON（每条评价归到卖点+正负）', () => {
+    const r = parseAiAggregate('{"items":[{"index":0,"selling_points":["高刷屏"],"sentiment":"positive"},{"index":1,"selling_points":["高刷屏","广色域"],"sentiment":"negative"}]}');
+    expect(r.length).toBe(2);
+    expect(r[0].selling_points).toEqual(['高刷屏']);
+    expect(r[0].sentiment).toBe('positive');
+    expect(r[1].selling_points).toEqual(['高刷屏', '广色域']);
+    expect(r[1].sentiment).toBe('negative');
   });
 });

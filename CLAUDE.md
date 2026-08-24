@@ -165,10 +165,11 @@
 
 ## 三·补8、卖点价值分析（2026-08-18 用户：原声结果对应"提前可编辑的卖点"，卖点对应成本，串起来让 AI 分析哪个卖点多少声量/成本/市场反响）
 
-- **核心**：卖点 = 原声(声量/反响) × BOM(成本) 的桥梁。数据层 db/selling.ts（selling_points 挂项目 / selling_point_modules 卖点↔模块 / selling_point_dims 卖点↔原声维度）；纯函数 sellingPointAnalyzer.ts（allocateModuleCosts 成本分摊 / computeSellingPointRows 价值计算 / classifyKind 客观分类 / buildAiDimMatchPrompt+parseAiDimMatch AI 语义匹配 / buildSellingPointAnalysisPrompt AI 分析）。
-- **成本分摊**：同一模块被多卖点引用 → 均分分摊（不重复计算，用户 2026-08-18：一个模块可能对应不同特性）；价值表标注"模块与 N 个卖点共享·已分摊"。
-- **分类（客观，不主观打分）**：声量高+好评高=star 强卖点 / 声量高+好评低=fix 待改进 / 声量低+成本高=overinvest 过度投入 / 其余=minor 次要（声量/成本取前 ~30% 分位）。
-- **UX**（SellingPointPanel 并入用户原声分析页）：选项目(成本)→添加卖点(名+描述)→关联 BOM 模块(多选)→「AI 自动对应维度」语义匹配原声维度(可人工改)→价值表(声量/好评率/正负/成本/声量成本比/类型/共享模块)→「AI 分析卖点价值」基于串起来的数据给取舍判断。
+- **核心（卖点优先，已改）**：卖点 = 原声(声量/反响) × BOM(成本) 的桥梁。用户反馈"AI 提炼的点太细、每点声量=1"→ 改为**先编辑卖点，再让 AI 把原声归纳到卖点**（卖点直接带 positive/negative 声量，不再走 voice_dimension 映射）。
+- **数据层** db/selling.ts：selling_points（挂项目 + positive/negative 声量列）/ selling_point_modules（卖点↔模块）。纯函数 sellingPointAnalyzer.ts：allocateModuleCosts 成本分摊 / computeSellingPointRows 价值计算（卖点直接带声量）/ classifyKind 客观分类 / buildAiAggregatePrompt+parseAiAggregate AI 归纳原声到卖点（模型只做归类+正负，计数由代码精确累加，不靠模型报数）/ buildSellingPointAnalysisPrompt AI 分析。
+- **成本分摊**：同一模块被多卖点引用 → 均分分摊（不重复计算）；价值表标注"模块·分摊"。
+- **分类（客观）**：声量高+好评高=star 强卖点 / 声量高+好评低=fix 待改进 / 声量低+成本高=overinvest 过度投入 / 其余=minor 次要（前 ~30% 分位）。
+- **UX**（SellingPointPanel 并入用户原声分析页）：选项目→添加卖点(名+描述+关联模块)→「归纳分析」把原声归类到卖点→价值表(声量/好评率/正负/成本/声量成本比/类型/共享模块)→「AI 分析卖点价值」取舍判断。顶部「开始分析」自由提炼维度降级为"发现漏掉卖点"的辅助，提示词也要求归纳合并。
 - **AI 留痕**：request_type 复用 voice_analyze（本地不涉外发）；num_predict 16384 不截断。
 
 ## 六、工作流约定

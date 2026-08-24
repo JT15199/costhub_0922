@@ -13,6 +13,8 @@ async function ensureSellingTables() {
       product TEXT DEFAULT '',
       name TEXT NOT NULL,
       description TEXT DEFAULT '',
+      positive INTEGER DEFAULT 0,
+      negative INTEGER DEFAULT 0,
       sort_order INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now','localtime'))
     )`);
@@ -31,6 +33,8 @@ async function ensureSellingTables() {
       voice_dimension_id INTEGER NOT NULL
     )`);
   } catch { }
+  try { await d.execute("ALTER TABLE selling_points ADD COLUMN positive INTEGER DEFAULT 0"); } catch { }
+  try { await d.execute("ALTER TABLE selling_points ADD COLUMN negative INTEGER DEFAULT 0"); } catch { }
   ensured = true;
 }
 
@@ -48,6 +52,10 @@ export async function addSellingPoint(projectId: number, product: string, name: 
 export async function updateSellingPoint(id: number, name: string, description = '') {
   await ensureSellingTables();
   await (await getDb()).execute('UPDATE selling_points SET name=?, description=? WHERE id=?', [name, description, id]);
+}
+export async function setSellingPointVoice(id: number, positive: number, negative: number) {
+  await ensureSellingTables();
+  await (await getDb()).execute('UPDATE selling_points SET positive=?, negative=? WHERE id=?', [positive, negative, id]);
 }
 export async function deleteSellingPoint(id: number) {
   await ensureSellingTables();
