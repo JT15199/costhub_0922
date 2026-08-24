@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { allocateModuleCosts, computeSellingPointRows, classifyKind, parseAiDimMatch, parseAiAggregate } from '../sellingPointAnalyzer';
+import { allocateModuleCosts, computeSellingPointRows, computeModuleValueRows, classifyKind, parseAiDimMatch, parseAiAggregate } from '../sellingPointAnalyzer';
 
 describe('allocateModuleCosts — 模块成本分摊', () => {
   it('单卖点独占模块 → 全额', () => {
@@ -62,5 +62,42 @@ describe('parseAiAggregate — AI 归纳解析', () => {
     expect(r[0].sentiment).toBe('positive');
     expect(r[1].selling_points).toEqual(['高刷屏', '广色域']);
     expect(r[1].sentiment).toBe('negative');
+  });
+});
+
+describe('allocateModuleCosts — 声量加权分摊（同模块多卖点，成本按声量占比分）', () => {
+  it('有声量按占比分摊', () => {
+    const { bySp } = allocateModuleCosts([
+      { spId: 1, module: '面板' }, { spId: 2, module: '面板' },
+    ], { 面板: 600 }, { 1: 80, 2: 20 });
+    expect(bySp[1]).toBeCloseTo(480);
+    expect(bySp[2]).toBeCloseTo(120);
+  });
+  it('无声量时均分兜底', () => {
+    const { bySp } = allocateModuleCosts([
+      { spId: 1, module: '面板' }, { spId: 2, module: '面板' },
+    ], { 面板: 600 }, { 1: 0, 2: 0 });
+    expect(bySp[1]).toBe(300);
+    expect(bySp[2]).toBe(300);
+  });
+});
+
+describe('computeModuleValueRows — 模块级价值分析（主视角）', () => {
+  it('模块成本精确、声量=支撑卖点声量合计', () => {
+    const rows = computeSellingPointRows({
+      sps: [{ id: 1, name: '高刷屏', positive: 60, negative: 15 }, { id: 2, name: '广色域', positive: 10, negative: 2 }],
+      modules: { 1: ['面板', '驱动板'], 2: ['面板'] },
+      moduleCosts: { 面板: 500, 驱动板: 100 },
+    });
+    const mods = computeModuleValueRows(rows, { 面板: 500, 驱动板: 100 });
+    const panel = mods.find(m => m.module === '面板')!;
+    expect(panel.cost).toBe(500);
+    expect(panel.count).toBe(87);
+    expect(panel.positive).toBe(70);
+    expect(panel.sellingPoints).toContain('高刷屏');
+    expect(panel.sellingPoints).toContain('广色域');
+    const driver = mods.find(m => m.module === '驱动板')!;
+    expect(driver.cost).toBe(100);
+    expect(driver.count).toBe(75);
   });
 });

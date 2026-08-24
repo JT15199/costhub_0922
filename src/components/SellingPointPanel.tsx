@@ -1,18 +1,19 @@
-// 卖点价值分析面板（v2.3.19，2026-08-18）：卖点 = 原声(声量/反响) × BOM(成本)
-// 流程：AI 按品类+档位预生成卖点建议 → 用户采纳/编辑 → 导入原声 → AI 归纳到卖点 → 价值表 → AI 分析
-// 交互：建议卡 hover 上浮一键采纳、价值表可视化条、归纳进度实时反馈（UI 高级巧妙不寡淡）
-import { useEffect, useMemo, useState } from 'react';
+// 卖点价值分析面板（v2.3.19，2026-08-18）：上一代已上市不可改，原声×成本 = 下一代产品定义指导
+// 统一流程：选项目 → AI 自动分析主要卖点+对应模块（用户可改）→ 归纳原声 → 模块级价值分析 → AI 给下一代建议
+// 成本：模块级精确不摊；卖点级用声量加权分摊（同模块多卖点时）
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, Select, Button, Table, Tag, Input, message, Empty, Popconfirm, Space, Modal, Tooltip } from 'antd';
-import { PlusOutlined, ThunderboltOutlined, RobotOutlined, DeleteOutlined, EditOutlined, LinkOutlined, BulbOutlined, CheckOutlined } from '@ant-design/icons';
+import { PlusOutlined, ThunderboltOutlined, RobotOutlined, DeleteOutlined, EditOutlined, LinkOutlined, SyncOutlined } from '@ant-design/icons';
 import { getProjects, getProjectBOMs, getAllVoiceItems, getSellingPoints, addSellingPoint, updateSellingPoint, deleteSellingPoint, setSellingPointModules, getSellingPointMaps, setSellingPointVoice, getSetting } from '../db';
 import { startOllamaStream, logLocalAICall } from '../ollama';
 import { chunkVoiceItems } from '../voiceAnalyer';
-import { computeSellingPointRows, buildAiAggregatePrompt, parseAiAggregate, buildAiSuggestPrompt, parseAiSuggest, buildSellingPointAnalysisPrompt, type SellingPointRow } from '../sellingPointAnalyzer';
+import { computeSellingPointRows, computeModuleValueRows, buildAiUnifiedPrompt, parseAiUnified, buildAiAggregatePrompt, parseAiAggregate, buildSellingPointAnalysisPrompt, type SellingPointRow, type ModuleValueRow } from '../sellingPointAnalyzer';
 
-const KIND_TAG: Record<string, { color: string; text: string }> = {
-  star: { color: 'red', text: '⭐强卖点' },
-  fix: { color: 'orange', text: '⚠️待改进' },
-  overinvest: { color: 'purple', text: '💸过度投入' },
+const MOD_KIND_TAG: Record<string, { color: string; text: string }> = {
+  cheap_good: { color: 'green', text: '✅好又便宜' },
+  good_expensive: { color: 'blue', text: '💰好但贵·降本' },
+  bad: { color: 'orange', text: '⚠️做得差' },
+  waste: { color: 'red', text: '❌花得不值' },
   minor: { color: 'default', text: '○次要' },
 };
 
@@ -27,44 +28,84 @@ export default function SellingPointPanel({ product }: { product: string }) {
   const [aiAnalysis, setAiAnalysis] = useState('');
   const [busy, setBusy] = useState(false);
   const [voiceCount, setVoiceCount] = useState(0);
-  const [suggestions, setSuggestions] = useState<{ name: string; description: string }[]>([]);
-  const [adopted, setAdopted] = useState<Set<string>>(new Set());
-  const [aggStatus, setAggStatus] = useState('');
-  const [suggesting, setSuggesting] = useState(false);
+  const [status, setStatus] = useState('');
+  const analyzedRef = useRef<number | null>(null);
 
   useEffect(() => { (async () => { try { setProjects(await getProjects('', '', '')); } catch { } })(); }, []);
   useEffect(() => { (async () => { try { setVoiceCount((await getAllVoiceItems(product)).length); } catch { setVoiceCount(0); } })(); }, [product]);
-  useEffect(() => {
-    if (!projectId) { setSellingPoints([]); setSpModules({}); setModuleOptions([]); setModuleCosts({}); setSuggestions([]); setAdopted(new Set()); return; }
-    (async () => {
-      try {
-        setSellingPoints(await getSellingPoints(projectId));
-        const maps = await getSellingPointMaps(projectId);
-        setSpModules(maps.modules);
-        const boms = await getProjectBOMs(projectId);
-        const mods = new Set<string>(); const costs: Record<string, number> = {};
-        boms.forEach((b: any) => { const m = b.module_name || '未归类'; mods.add(m); costs[m] = (costs[m] || 0) + (Number(b.part_cost) || 0) * (Number(b.quantity) || 1); });
-        setModuleOptions([...mods]); setModuleCosts(costs);
-      } catch { }
-    })();
-  }, [projectId]);
-
-  const currentProject = projects.find((p: any) => p.id === projectId);
-
-  const rows: SellingPointRow[] = useMemo(() => computeSellingPointRows({
-    sps: sellingPoints.map((s: any) => ({ id: s.id, name: s.name, positive: s.positive, negative: s.negative })),
-    modules: spModules, moduleCosts,
-  }), [sellingPoints, spModules, moduleCosts]);
-
-  const starCount = rows.filter(r => r.kind === 'star').length;
-  const fixCount = rows.filter(r => r.kind === 'fix').length;
-  const overCount = rows.filter(r => r.kind === 'overinvest').length;
 
   const refreshMaps = async (pid: number) => {
     setSellingPoints(await getSellingPoints(pid));
     const maps = await getSellingPointMaps(pid);
     setSpModules(maps.modules);
   };
+
+  const runUnifiedAnalyze = async (modOptions: string[], replace = false) => {
+    const proj = projects.find((p: any) => p.id === projectId);
+    if (!proj || modOptions.length === 0) { message.warning('该项目 BOM 无模块，无法自动分析卖点'); return; }
+    const base = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
+    const model = await getSetting('local_ai_model', '');
+    if (!model) { message.error('未配置本地模型（设置 → 连接设置）'); return; }
+    setBusy(true);
+    setStatus('AI 正在分析卖点与对应模块…');
+    try {
+      const { system, user } = buildAiUnifiedPrompt({ tier: proj.tier, category: proj.category }, modOptions);
+      let full = '';
+      await new Promise<void>((resolve, reject) => {
+        startOllamaStream(base, model, [{ role: 'system', content: system }, { role: 'user', content: user }],
+          t => { full += t; }, () => {}, () => resolve(), e => reject(new Error(e)),
+          { endpoint: 'native', think: false, json: false, num_predict: 16384 });
+      });
+      const parsed = parseAiUnified(full);
+      await logLocalAICall({ request_type: 'voice_analyze', system_prompt: system, user_prompt: user, response_summary: full.slice(0, 200), success: parsed.length > 0, error_message: parsed.length ? '' : full.slice(0, 200), model_name: model });
+      if (parsed.length === 0) {
+        message.warning('AI 未识别出卖点（模型输出：' + full.trim().replace(/\s+/g, ' ').slice(0, 120) + '），请手动添加');
+        return;
+      }
+      if (replace) {
+        const existing = await getSellingPoints(projectId!);
+        for (const sp of existing) await deleteSellingPoint(sp.id);
+      }
+      let added = 0;
+      for (const p of parsed) {
+        const id = await addSellingPoint(projectId!, product, p.name, p.description);
+        const mods = p.modules.filter(m => modOptions.includes(m));
+        await setSellingPointModules(id, mods);
+        added++;
+      }
+      await refreshMaps(projectId!);
+      message.success('AI 已按「' + (proj.tier || '') + ' ' + (proj.category || '') + '」生成 ' + added + ' 个卖点并关联模块，可继续编辑');
+    } catch (e: any) { message.error('智能分析失败：' + (e?.message || e)); }
+    finally { setBusy(false); setStatus(''); }
+  };
+
+  // 选项目后：加载卖点/BOM；若没有卖点 → 自动跑一次 AI 分析（用户可改）
+  useEffect(() => {
+    if (!projectId) { setSellingPoints([]); setSpModules({}); setModuleOptions([]); setModuleCosts({}); return; }
+    (async () => {
+      try {
+        const sps = await getSellingPoints(projectId);
+        setSellingPoints(sps);
+        const maps = await getSellingPointMaps(projectId);
+        setSpModules(maps.modules);
+        const boms = await getProjectBOMs(projectId);
+        const mods = new Set<string>(); const costs: Record<string, number> = {};
+        boms.forEach((b: any) => { const m = b.module_name || '未归类'; mods.add(m); costs[m] = (costs[m] || 0) + (Number(b.part_cost) || 0) * (Number(b.quantity) || 1); });
+        const modList = [...mods];
+        setModuleOptions(modList); setModuleCosts(costs);
+        if (sps.length === 0 && analyzedRef.current !== projectId && modList.length > 0) {
+          analyzedRef.current = projectId;
+          runUnifiedAnalyze(modList);
+        }
+      } catch { }
+    })();
+  }, [projectId]);
+
+  const rows: SellingPointRow[] = useMemo(() => computeSellingPointRows({
+    sps: sellingPoints.map((s: any) => ({ id: s.id, name: s.name, positive: s.positive, negative: s.negative })),
+    modules: spModules, moduleCosts,
+  }), [sellingPoints, spModules, moduleCosts]);
+  const moduleRows: ModuleValueRow[] = useMemo(() => computeModuleValueRows(rows, moduleCosts), [rows, moduleCosts]);
 
   const saveSellingPoint = async () => {
     if (!editing || !projectId) return;
@@ -84,38 +125,6 @@ export default function SellingPointPanel({ product }: { product: string }) {
     if (projectId) await refreshMaps(projectId);
   };
 
-  const runSuggest = async () => {
-    if (!currentProject) { message.warning('先选项目（品类+档位是 AI 生成卖点的依据）'); return; }
-    const base = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
-    const model = await getSetting('local_ai_model', '');
-    if (!model) { message.error('未配置本地模型（设置 → 连接设置）'); return; }
-    setSuggesting(true);
-    try {
-      const { system, user } = buildAiSuggestPrompt(currentProject.category || '', currentProject.tier || '');
-      let full = '';
-      await new Promise<void>((resolve, reject) => {
-        startOllamaStream(base, model, [{ role: 'system', content: system }, { role: 'user', content: user }],
-          t => { full += t; }, () => {}, () => resolve(), e => reject(new Error(e)),
-          { endpoint: 'native', think: false, json: false, num_predict: 16384 });
-      });
-      const sugg = parseAiSuggest(full);
-      setSuggestions(sugg);
-      setAdopted(new Set());
-      await logLocalAICall({ request_type: 'voice_analyze', system_prompt: system, user_prompt: user, response_summary: full.slice(0, 200), success: true, model_name: model });
-      if (sugg.length === 0) message.warning('AI 未生成建议，请手动添加卖点');
-      else message.success('AI 已按「' + (currentProject.tier || '') + ' ' + (currentProject.category || '') + '」生成 ' + sugg.length + ' 个卖点建议，点卡片即可采纳');
-    } catch (e: any) { message.error('生成建议失败：' + (e?.message || e)); }
-    finally { setSuggesting(false); }
-  };
-
-  const adoptSuggestion = async (name: string, description: string) => {
-    if (!projectId) return;
-    await addSellingPoint(projectId, product, name, description);
-    setAdopted(prev => new Set(prev).add(name));
-    await refreshMaps(projectId);
-    message.success('已采纳卖点「' + name + '」，可在下表编辑关联模块');
-  };
-
   const runAggregate = async () => {
     if (!projectId || sellingPoints.length === 0) { message.warning('先选项目并添加卖点'); return; }
     const base = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
@@ -129,7 +138,7 @@ export default function SellingPointPanel({ product }: { product: string }) {
       const spNames = sellingPoints.map((s: any) => s.name);
       const agg: Record<string, { positive: number; negative: number }> = {};
       for (let i = 0; i < blocks.length; i++) {
-        setAggStatus('正在归纳第 ' + (i + 1) + '/' + blocks.length + ' 块原声…');
+        setStatus('正在归纳第 ' + (i + 1) + '/' + blocks.length + ' 块原声…');
         const { system, user } = buildAiAggregatePrompt(spNames, blocks[i].items);
         let full = '';
         await new Promise<void>((resolve, reject) => {
@@ -147,7 +156,7 @@ export default function SellingPointPanel({ product }: { product: string }) {
         }
         await logLocalAICall({ request_type: 'voice_analyze', system_prompt: system, user_prompt: user, response_summary: full.slice(0, 200), success: true, model_name: model });
       }
-      setAggStatus('');
+      setStatus('');
       let updated = 0;
       for (const [name, v] of Object.entries(agg)) {
         let sp = sellingPoints.find((s: any) => s.name === name);
@@ -159,18 +168,18 @@ export default function SellingPointPanel({ product }: { product: string }) {
       setSellingPoints(await getSellingPoints(projectId));
       message.success('已归纳 ' + items.length + ' 条原声到 ' + updated + ' 个卖点（声量=提及人数）');
     } catch (e: any) { message.error('归纳失败：' + (e?.message || e)); }
-    finally { setBusy(false); setAggStatus(''); }
+    finally { setBusy(false); setStatus(''); }
   };
 
   const runAiAnalysis = async () => {
-    if (rows.length === 0) { message.warning('请先建卖点、关联模块并完成归纳分析'); return; }
+    if (moduleRows.length === 0) { message.warning('请先完成 AI 智能分析、关联模块并归纳原声'); return; }
     const base = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
     const model = await getSetting('local_ai_model', '');
     if (!model) { message.error('未配置本地模型（设置 → 连接设置）'); return; }
     setBusy(true);
     setAiAnalysis('');
     try {
-      const { system, user } = buildSellingPointAnalysisPrompt(rows);
+      const { system, user } = buildSellingPointAnalysisPrompt(rows, moduleRows);
       let full = '';
       await new Promise<void>((resolve, reject) => {
         startOllamaStream(base, model, [{ role: 'system', content: system }, { role: 'user', content: user }],
@@ -187,59 +196,51 @@ export default function SellingPointPanel({ product }: { product: string }) {
 
   return (
     <Card size="small" style={{ marginTop: 12 }}>
-      <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 8 }}><LinkOutlined /> 卖点价值分析（原声声量 × BOM成本）</div>
+      <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 8 }}><LinkOutlined /> 卖点价值分析（上一代原声 × 成本 → 下一代产品定义指导）</div>
       <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 10, lineHeight: 1.6 }}>
-        先让 AI 按品类+档位生成卖点建议 → 采纳/编辑 → 关联 BOM 模块 → 「归纳分析」把原声归类到卖点 → 一张表看穿「哪个卖点值不值、市场反响、投入产出」。
+        已上市的上代产品无法改变，但它的用户原声（声量/好评）和 BOM 成本是下一代定义的最好参考：选项目后 AI 自动分析主要卖点与对应模块，你可修改；再归纳原声，看哪个模块好又便宜、差又贵、花得不值，AI 给出下一代表保留/降本/减配的建议。
       </div>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
-        <Select style={{ width: 220 }} placeholder="选择项目（品类+档位）" value={projectId} allowClear
+        <Select style={{ width: 240 }} placeholder="选择项目（上代产品，品类+档位）" value={projectId} allowClear
           options={projects.map((p: any) => ({ value: p.id, label: (p.code || '') + ' ' + (p.name || '') + (p.tier ? ' · ' + p.tier : '') }))}
           onChange={(v: number | undefined) => setProjectId(v)} showSearch optionFilterProp="label" />
-        <Button className="tappable" icon={<BulbOutlined />} loading={suggesting} onClick={runSuggest} disabled={!projectId}>AI 生成卖点建议</Button>
-        <Button className="tappable" icon={<ThunderboltOutlined />} loading={busy} onClick={runAggregate} disabled={!projectId || sellingPoints.length === 0 || voiceCount === 0}>归纳分析（{voiceCount} 条原声）</Button>
-        <Button className="tappable" icon={<RobotOutlined />} loading={busy} onClick={runAiAnalysis} disabled={rows.length === 0}>AI 分析卖点价值</Button>
+        <Button className="tappable" icon={<SyncOutlined />} loading={busy} onClick={() => runUnifiedAnalyze(moduleOptions, true)} disabled={!projectId}>重新智能分析</Button>
+        <Button className="tappable" icon={<ThunderboltOutlined />} loading={busy} onClick={runAggregate} disabled={!projectId || sellingPoints.length === 0 || voiceCount === 0}>归纳原声（{voiceCount} 条）</Button>
+        <Button className="tappable" icon={<RobotOutlined />} loading={busy} onClick={runAiAnalysis} disabled={moduleRows.length === 0}>AI 下一代定义建议</Button>
       </div>
-      {aggStatus && <div style={{ fontSize: 11.5, color: '#0A84FF', marginBottom: 8 }}>⏳ {aggStatus}</div>}
-
-      {suggestions.length > 0 && (
-        <div style={{ marginBottom: 10, background: '#F8FAFF', border: '1px solid #DBEAFE', borderRadius: 12, padding: '10px 12px' }}>
-          <div style={{ fontSize: 11, color: '#64748B', marginBottom: 8 }}>💡 AI 建议的卖点（点击卡片即采纳，可编辑）：</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {suggestions.map((s, i) => {
-              const isAdopted = adopted.has(s.name);
-              return (
-                <div key={i} className={'sp-suggest-card pop-in' + (isAdopted ? ' adopted' : '')}
-                  style={{ padding: '8px 12px', minWidth: 160, maxWidth: 230 }}
-                  onClick={() => { if (!isAdopted) adoptSuggestion(s.name, s.description); }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <b style={{ fontSize: 12.5 }}>{s.name}</b>
-                    {isAdopted ? <CheckOutlined style={{ color: '#10B981' }} /> : <span style={{ fontSize: 11, color: '#0A84FF' }}>＋采纳</span>}
-                  </div>
-                  {s.description && <div style={{ fontSize: 11, color: '#64748B', lineHeight: 1.5, marginTop: 2 }}>{s.description}</div>}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {status && <div style={{ fontSize: 11.5, color: '#0A84FF', marginBottom: 8 }}>⏳ {status}</div>}
 
       {!projectId ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先选项目，再生成卖点建议或手动添加" style={{ margin: '12px 0' }} />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选一个上代产品项目，AI 会自动分析它的卖点和对应模块" style={{ margin: '12px 0' }} />
       ) : (
         <>
+          {moduleRows.length > 0 && (
+            <div className="pop-in" style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: '#334155' }}>🧩 模块价值分析（主视角：成本精确，声量=该模块支撑卖点的声量）</div>
+              <Table size="small" dataSource={moduleRows} rowKey="module" pagination={false}
+                columns={[
+                  { title: '模块', dataIndex: 'module', render: (v: string) => <b>{v}</b> },
+                  { title: '💰成本', dataIndex: 'cost', width: 80, align: 'right', render: (v: number) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>¥{v.toFixed(0)}</span> },
+                  { title: '🔥声量', dataIndex: 'count', width: 70, align: 'center', render: (v: number) => <b style={{ color: '#0A84FF', fontSize: 14 }}>{v}</b> },
+                  { title: '💬好评率', key: 'q', width: 84, align: 'center', render: (_: any, r: ModuleValueRow) => { const q = Math.round(r.quality * 100); return <Tag color={q >= 60 ? 'green' : q >= 30 ? 'orange' : 'red'}>{q}%</Tag>; } },
+                  { title: '类型', key: 'kind', width: 122, align: 'center', render: (_: any, r: ModuleValueRow) => <Tag color={MOD_KIND_TAG[r.kind].color}>{MOD_KIND_TAG[r.kind].text}</Tag> },
+                  { title: '支撑卖点', key: 'sps', render: (_: any, r: ModuleValueRow) => <span style={{ fontSize: 11, color: '#64748B' }}>{r.sellingPoints.join('、') || '—'}</span> },
+                ]} />
+            </div>
+          )}
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-            <Button className="tappable" size="small" icon={<PlusOutlined />} onClick={() => setEditing({ name: '', description: '', modules: [] })}>手动添加卖点</Button>
-            {rows.length > 0 && (
-              <span style={{ fontSize: 11, color: '#94A3B8' }}>
-                {starCount > 0 && <Tag color="red" style={{ marginRight: 4 }}>⭐ {starCount} 强卖点</Tag>}
-                {fixCount > 0 && <Tag color="orange" style={{ marginRight: 4 }}>⚠️ {fixCount} 待改进</Tag>}
-                {overCount > 0 && <Tag color="purple">💸 {overCount} 过度投入</Tag>}
-              </span>
-            )}
+            <Button className="tappable" size="small" icon={<PlusOutlined />} onClick={() => setEditing({ name: '', description: '', modules: [] })}>手动添加/编辑卖点</Button>
+            <span style={{ fontSize: 11, color: '#94A3B8' }}>
+              {moduleRows.filter(x => x.kind === 'cheap_good').length > 0 && <Tag color="green" style={{ marginRight: 4 }}>✅ {moduleRows.filter(x => x.kind === 'cheap_good').length} 好又便宜</Tag>}
+              {moduleRows.filter(x => x.kind === 'waste').length > 0 && <Tag color="red" style={{ marginRight: 4 }}>❌ {moduleRows.filter(x => x.kind === 'waste').length} 花得不值</Tag>}
+              {moduleRows.filter(x => x.kind === 'bad').length > 0 && <Tag color="orange" style={{ marginRight: 4 }}>⚠️ {moduleRows.filter(x => x.kind === 'bad').length} 做得差</Tag>}
+              {moduleRows.filter(x => x.kind === 'good_expensive').length > 0 && <Tag color="blue">💰 {moduleRows.filter(x => x.kind === 'good_expensive').length} 好但贵</Tag>}
+            </span>
           </div>
           {sellingPoints.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有卖点，点「AI 生成卖点建议」或「手动添加」先建几个" style={{ margin: '8px 0' }} />
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="AI 正在分析卖点，或点击「重新智能分析」/「手动添加卖点」" style={{ margin: '8px 0' }} />
           ) : (
             <Table size="small" dataSource={rows} rowKey="id" pagination={false} style={{ marginBottom: 10 }}
               columns={[
@@ -247,15 +248,14 @@ export default function SellingPointPanel({ product }: { product: string }) {
                 { title: '🔥声量', dataIndex: 'count', width: 70, align: 'center', render: (v: number) => <b style={{ color: '#0A84FF', fontSize: 14, fontVariantNumeric: 'tabular-nums' }}>{v}</b> },
                 { title: '💬好评率', key: 'q', width: 84, align: 'center', render: (_: any, r: SellingPointRow) => { const q = Math.round(r.quality * 100); return <Tag color={q >= 60 ? 'green' : q >= 30 ? 'orange' : 'red'}>{q}%</Tag>; } },
                 { title: '👍/👎', key: 'pn', width: 70, align: 'center', render: (_: any, r: SellingPointRow) => <span style={{ fontSize: 11 }}><span style={{ color: '#10B981' }}>{r.positive}</span>/<span style={{ color: '#DC2626' }}>{r.negative}</span></span> },
-                { title: '💰成本', dataIndex: 'cost', width: 80, align: 'right', render: (v: number) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>¥{v.toFixed(0)}</span> },
-                { title: '声量成本比', key: 'ratio', width: 108, align: 'center', render: (_: any, r: SellingPointRow) => {
+                { title: '💰成本(分摊)', dataIndex: 'cost', width: 96, align: 'right', render: (v: number) => <Tooltip title="声量加权分摊（同模块多卖点时按声量占比分）"><span style={{ fontVariantNumeric: 'tabular-nums' }}>¥{v.toFixed(0)}</span></Tooltip> },
+                { title: '声量成本比', key: 'ratio', width: 100, align: 'center', render: (_: any, r: SellingPointRow) => {
                   const pct = r.cost > 0 ? Math.min(100, Math.round((r.costRatio / maxRatio) * 100)) : 0;
-                  return <Tooltip title="每千元成本带来的声量（越大越划算）"><div style={{ width: 76, margin: '0 auto' }}>
+                  return <Tooltip title="每千元成本带来的声量（越大越划算）"><div style={{ width: 72, margin: '0 auto' }}>
                     <div className="sp-ratio-bar"><div style={{ width: pct + '%' }} /></div>
                     <div style={{ fontSize: 10.5, color: '#64748B', marginTop: 2 }}>{r.cost > 0 ? r.costRatio : '—'}</div>
                   </div></Tooltip>;
                 } },
-                { title: '类型', key: 'kind', width: 96, align: 'center', render: (_: any, r: SellingPointRow) => <Tag color={KIND_TAG[r.kind].color}>{KIND_TAG[r.kind].text}</Tag> },
                 { title: '关联模块', key: 'maps', render: (_: any, r: SellingPointRow) => (
                   <div style={{ fontSize: 11, color: '#64748B', lineHeight: 1.5 }}>
                     {r.modules.length > 0 ? r.modules.map(m => <Tag key={m} style={{ margin: 1 }} color="blue">{m}{r.sharedModules.includes(m) ? '·分摊' : ''}</Tag>) : <span style={{ color: '#94A3B8' }}>未关联</span>}
@@ -275,7 +275,7 @@ export default function SellingPointPanel({ product }: { product: string }) {
 
       {aiAnalysis && (
         <div className="pop-in" style={{ marginTop: 8, background: '#FAFBFC', border: '1px solid #EEF1F4', borderRadius: 8, padding: '10px 12px', whiteSpace: 'pre-wrap', fontSize: 12, color: '#334155', lineHeight: 1.7 }}>
-          <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>🤖 AI 卖点价值判断（基于上表数据）：</div>
+          <div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 4 }}>🤖 AI 下一代产品定义建议（基于上表数据）：</div>
           {aiAnalysis}
         </div>
       )}
@@ -292,7 +292,7 @@ export default function SellingPointPanel({ product }: { product: string }) {
               <Input value={editing.description} placeholder="一句话说明这个卖点" onChange={e => setEditing({ ...editing, description: e.target.value })} />
             </div>
             <div>
-              <div style={{ fontSize: 12, marginBottom: 4 }}>关联 BOM 模块（成本来源，可多选；同模块被多个卖点引用会自动均分）</div>
+              <div style={{ fontSize: 12, marginBottom: 4 }}>关联 BOM 模块（成本来源，可多选；同模块被多个卖点引用时按声量加权分摊）</div>
               <Select mode="multiple" style={{ width: '100%' }} value={editing.modules} options={moduleOptions.map(m => ({ value: m, label: m }))} onChange={(v: string[]) => setEditing({ ...editing, modules: v })} placeholder="选择模块" />
             </div>
           </div>
