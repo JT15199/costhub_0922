@@ -66,6 +66,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef({ aborted: false });
+  const pendingRetryRef = useRef<{ prompt: string } | null>(null); // 云端申请等待确认：确认后自动重发（costhub-insight-request）
   const followRef = useRef(true);
 
   // 上下文联动：页面切换 + 页面内选中对象（costhub-ai-ctx 事件，detail: { label }）
@@ -119,6 +120,19 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         }
       } catch { /* 拉取失败不影响 */ }
     })();
+  }, []);
+
+  // 云端审批确认后自动续跑（2026-08-18 用户：同意审批两次却失败——确认触发的是后台 autoInsight 重跑，不是对话）
+  // 对话里遇到 'pending'/工具返回'等待确认'时记下提问；底部横幅确认后 costhub-insight-request → 自动重发，第二次审批放行 → 云端真正调用
+  useEffect(() => {
+    const h = () => {
+      const pr = pendingRetryRef.current;
+      if (!pr) return;
+      pendingRetryRef.current = null;
+      setTimeout(() => { sendRef.current?.(pr.prompt); }, 300);
+    };
+    window.addEventListener('costhub-insight-request', h);
+    return () => window.removeEventListener('costhub-insight-request', h);
   }, []);
 
   // 模型状态探测
@@ -195,6 +209,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     try { prefCtx = await import('../aiLearning').then(m => m.buildPreferenceContext()); } catch { prefCtx = ''; }
     const sys = buildThinkSystemPrompt(toolList, prefCtx) + '\n\n【任务执行】用户让你做任何查询/分析/洞察时，必须先用工具获取真实数据再回答：\n' +
       '· 查已有物料洞察/趋势结论 → query_price_insights\n' +
+      '· 查物料是否洞察过/最近洞察结论 → query_material_insight（如 Scaler IC）\n' +
       '· 查最新行情趋势（需云端，走审批横幅） → insight_material_trend\n' +
       '· 查项目/器件/供应商/竞品/原声/目标 → 对应 query_* 工具\n' +
       '· 计算核验 → calc\n' +
@@ -219,14 +234,20 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         think: deepThink,
         images,
         localTools: tools.map(x => ({ id: x.id, desc: x.desc, params: x.params })),
-        executeTool: async (id, args) => { try { return await executeTool(id, args); } catch (e: any) { return { ok: false, text: String(e?.message || e) }; } },
+        executeTool: async (id, args) => {
+          const res = await executeTool(id, args);
+          if (!res.ok && res.text.includes('等待云端发送确认')) pendingRetryRef.current = { prompt: userContent };
+          return res;
+        },
         approveCloud: async (call) => {
           const { requestCloudConfirm, getPendingConfirms } = await import('../cloudConfirm');
           const material = String(call.material_name || '');
           const ok = await requestCloudConfirm({ material, category: String(call.category || '') });
           if (ok) return true;
           // false 分两种情况：①刚入队/已在队列=等待确认（'pending'，不能误报"用户拒绝"）②本会话已跳过=真拒绝
-          return getPendingConfirms().some(p => p.material === material) ? 'pending' : false;
+          const inQueue = getPendingConfirms().some(p => p.material === material);
+          if (inQueue) { pendingRetryRef.current = { prompt: userContent }; return 'pending'; }
+          return false;
         },
         runCloud: async (call) => {
           const { agentSearchLoop } = await import('../trendService');

@@ -222,6 +222,8 @@
   · **附件**：输入区 📎 支持 Excel（XLSX 读表文本拼进提问）与图片（base64 走 Ollama images 字段，需 VL 模型如 qwen3-vl）；runThinkLoop 加 images 选项（初始 user message 带 images）。
   · **头部压缩**：去掉「离线分析」框，模型名合并为下拉，上下文行压缩——表头不再占空间。
   · **审批三态**：runThinkLoop 的 approveCloud 返回 boolean|'pending'——''pending''=已入队等待确认（不误报"用户拒绝"，明确告知去底部横幅确认后重新提问）；AiPanel 用 getPendingConfirms 区分"入队"vs"本会话已跳过"。
+  · **物料洞察历史工具**：query_material_insight（第 25 个，图标 HistoryOutlined）——按物料名查 trend_items+trend_snapshots（方向/置信度/摘要/时间/来源 免分解quick/分解/自动auto）。模型先查历史再决定查最新（用户：Scaler IC 已洞察过但 AI 不知道，且 query_price_insights 是报价情报不是物料行情）。
+  · **审批确认自动续跑**：AiPanel 记 pendingRetryRef（approveCloud 返回 'pending' 或工具结果含"等待云端发送确认"时）→ CloudConfirmBar 确认触发 costhub-insight-request → AiPanel 自动重发上一条提问 → 二次审批放行（confirmedKeys）→ 云端真正调用（用户：同意两次却失败，确认触发的是后台 autoInsight 重跑不是对话）。
   · **工具优先**：AiPanel systemPrompt 追加【任务执行】——查已有洞察用 query_price_insights、查行情用 insight_material_trend（走审批）、禁凭空"搜索/综合"，工具结果回填后基于真实数据回答（用户：让AI洞察却没用工具）。
 
 ## 六、工作流约定

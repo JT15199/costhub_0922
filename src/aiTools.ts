@@ -50,6 +50,7 @@ export const TOOL_ICONS: Record<string, React.ComponentType> = {
   add_goal: AimOutlined,
   query_voice_dims: MessageOutlined,
   query_data_readiness: SafetyCertificateOutlined,
+  query_material_insight: HistoryOutlined,
 };
 export function toolIcon(id: string): React.ComponentType {
   return TOOL_ICONS[id] || FolderOutlined;
@@ -534,6 +535,29 @@ const tools: AiTool[] = [
     execute: async () => {
       const { getDataReadiness, readinessToText } = await import('./dataReadiness');
       return readinessToText(await getDataReadiness());
+    },
+  },
+  {
+    id: 'query_material_insight',
+    name: '查询物料洞察历史',
+    desc: '查某物料是否洞察过及最近洞察结论（趋势方向/置信度/摘要/时间/来源：免分解/分解/自动）。参数 material_name 必填（物料通用名，如 Scaler IC、液晶面板）。先查历史洞察再决定是否需要查最新行情。',
+    params: [{ key: 'material_name', type: 'string', required: true, desc: '物料通用名' }],
+    execute: async (a) => {
+      const { getDb } = await import('./db');
+      const db = await getDb();
+      const name = String(a.material_name || '').trim();
+      if (!name) return '物料名不能为空';
+      const items = await db.select<any[]>('SELECT * FROM trend_items WHERE query_category LIKE ? ORDER BY last_queried_at DESC, id DESC', ['%' + name + '%']);
+      if (items.length === 0) return '「' + name + '」还没有洞察记录（可在物料趋势洞察页洞察，或告诉我用 insight_material_trend 查最新行情）';
+      const lines: string[] = [];
+      for (const it of items.slice(0, 5)) {
+        const src = it.source_type === 'quick' ? '免分解' : it.source_type === 'auto' ? '自动洞察' : '分解洞察';
+        const snaps = await db.select<any[]>('SELECT * FROM trend_snapshots WHERE trend_item_id = ? ORDER BY query_time DESC, id DESC LIMIT 1', [it.id]);
+        if (snaps.length === 0) { lines.push('「' + it.query_category + '」（' + src + '）有物料但暂无洞察结论' + (it.last_queried_at ? '，上次查询 ' + String(it.last_queried_at || '').slice(0, 16) : '')); continue; }
+        const s = snaps[0];
+        lines.push('「' + it.query_category + '」（' + src + '）最近洞察 ' + String(s.query_time || '').slice(0, 16) + '：趋势 ' + (s.direction || '-') + '，置信度 ' + (s.confidence_level || '-') + (s.summary ? '。摘要：' + String(s.summary || '').slice(0, 150) : ''));
+      }
+      return lines.join('\n');
     },
   },
 ];
