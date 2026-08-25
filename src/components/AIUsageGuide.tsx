@@ -21,7 +21,7 @@ const EXAMPLES: { label: string; prompt: string; note: string; icon: any }[] = [
 ];
 
 const GROUPS: { title: string; match: (id: string) => boolean; color: string }[] = [
-  { title: '📊 数据查询（16）', match: id => id.startsWith('query_') || id === 'compare_subcategory_cost', color: 'blue' },
+  { title: '📊 数据查询', match: id => id.startsWith('query_') || id === 'compare_subcategory_cost', color: 'blue' },
   { title: '🔍 分析（2）', match: id => id === 'quote_review' || id === 'insight_material_trend', color: 'purple' },
   { title: '📄 文件/导入（1）', match: id => id === 'read_excel', color: 'green' },
   { title: '🧮 计算/工具（2）', match: id => id === 'calc' || id === 'now', color: 'cyan' },
@@ -97,7 +97,7 @@ export default function AIUsageGuide({ open, onClose, onOpenSettings }: Props) {
           if (items.length === 0) return null;
           return (
             <div key={gi} style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 11.5, color: '#475569', fontWeight: 600, marginBottom: 4 }}>{g.title}</div>
+              <div style={{ fontSize: 11.5, color: '#475569', fontWeight: 600, marginBottom: 4 }}>{g.title}（{items.length}）</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {items.map(t => (
                   <Tooltip key={t.id} title={t.desc}>
