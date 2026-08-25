@@ -325,6 +325,17 @@ export default function App() {
     setTimeout(() => window.dispatchEvent(new CustomEvent('costhub-open-insights')), 300);
   }, [navigate]);
 
+  // 数据就绪度引导：dispatch costhub-open-ai-prompt → 切到本地 AI 助手并预填提问（数据就绪度卡片「让 AI 引导我」）
+  // ⚠️ 与 openInsightsEntry 同理：LocalAIAssistant 是懒加载，先 navigate 挂载 + 延迟重发事件双保险；提问内容在 localStorage（costhub-ai-prompt-pending）由助手消费
+  useEffect(() => {
+    const h = () => {
+      navigate('localAI');
+      setTimeout(() => window.dispatchEvent(new CustomEvent('costhub-open-ai-prompt')), 300);
+    };
+    window.addEventListener('costhub-open-ai-prompt', h);
+    return () => window.removeEventListener('costhub-open-ai-prompt', h);
+  }, [navigate]);
+
   const setZoomLevel = (level: number) => {
     setZoom(level);
     localStorage.setItem('app-zoom', String(level));

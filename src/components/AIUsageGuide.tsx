@@ -5,6 +5,7 @@ import { Modal, Tag, Button, Tooltip, message } from 'antd';
 import { RobotOutlined, SettingOutlined, CopyOutlined, ExperimentOutlined, CalculatorOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { getAllApiProviders, getSetting } from '../db';
 import { listTools } from '../aiTools';
+import DataReadiness from './DataReadiness';
 
 interface Props { open: boolean; onClose: () => void; onOpenSettings: () => void; }
 
@@ -63,6 +64,14 @@ export default function AIUsageGuide({ open, onClose, onOpenSettings }: Props) {
           {localModel ? <Tag color="green">本地模型已配置：{localModel}</Tag> : <Tag color="orange">未配置本地模型</Tag>}
           {llmReady ? <Tag color="green">云端已就绪：{llmName}</Tag> : <Tag color="default">云端未配置</Tag>}
           <span style={{ marginLeft: 8, color: '#94A3B8' }}>本地模型是大脑（离线分析），云端仅查行情（需确认）</span>
+        </div>
+
+        {/* 1.5 数据就绪度：缺什么数据 → 能做到什么样 → 建议补什么（引导客户如何使用） */}
+        <div style={{ marginBottom: 14 }}>
+          <DataReadiness onAskAi={() => {
+            onClose();
+            window.dispatchEvent(new CustomEvent('costhub-open-ai-prompt'));
+          }} />
         </div>
 
         {/* 2. 怎么用（示例提问） */}

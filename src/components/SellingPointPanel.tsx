@@ -8,6 +8,7 @@ import { getProjects, getProjectBOMs, getAllVoiceItems, getSellingPoints, addSel
 import { startOllamaStream, logLocalAICall } from '../ollama';
 import { chunkVoiceItems } from '../voiceAnalyer';
 import { computeSellingPointRows, computeModuleValueRows, buildAiUnifiedPrompt, parseAiUnified, buildAiAggregatePrompt, parseAiAggregate, buildSellingPointAnalysisPrompt, type SellingPointRow, type ModuleValueRow } from '../sellingPointAnalyzer';
+import ModuleValueMatrix from './ModuleValueMatrix';
 
 const MOD_KIND_TAG: Record<string, { color: string; text: string }> = {
   cheap_good: { color: 'green', text: '✅好又便宜' },
@@ -31,6 +32,7 @@ export default function SellingPointPanel({ product }: { product: string }) {
   const [status, setStatus] = useState('');
   const [specs, setSpecs] = useState<any[]>([]);
   const [specModal, setSpecModal] = useState<null | { id?: number; name: string; value: string }>(null);
+  const [viewMode, setViewMode] = useState<'table' | 'chart'>('chart');
   const analyzedRef = useRef<number | null>(null);
 
   useEffect(() => { (async () => { try { setProjects(await getProjects('', '', '')); } catch { } })(); }, []);
@@ -247,8 +249,14 @@ export default function SellingPointPanel({ product }: { product: string }) {
         <>
           {moduleRows.length > 0 && (
             <div className="pop-in" style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: '#334155' }}>🧩 模块价值分析（主视角：成本精确，声量=该模块支撑卖点的声量）</div>
-              <Table size="small" dataSource={moduleRows} rowKey="module" pagination={false}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>🧩 模块价值分析（声量 × 成本 × 好评）</span>
+                <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                  <button className="tappable" onClick={() => setViewMode('chart')} style={{ padding: '2px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer', border: viewMode === 'chart' ? '1px solid #181713' : '1px solid #E6E4DC', background: viewMode === 'chart' ? '#181713' : '#fff', color: viewMode === 'chart' ? '#fff' : '#5F5D54' }}>图表</button>
+                  <button className="tappable" onClick={() => setViewMode('table')} style={{ padding: '2px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer', border: viewMode === 'table' ? '1px solid #181713' : '1px solid #E6E4DC', background: viewMode === 'table' ? '#181713' : '#fff', color: viewMode === 'table' ? '#fff' : '#5F5D54' }}>表格</button>
+                </span>
+              </div>
+              {viewMode === 'table' && (<Table size="small" dataSource={moduleRows} rowKey="module" pagination={false}
                 columns={[
                   { title: '模块', dataIndex: 'module', render: (v: string) => <b>{v}</b> },
                   { title: '💰成本', dataIndex: 'cost', width: 80, align: 'right', render: (v: number) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>¥{v.toFixed(0)}</span> },
@@ -256,7 +264,8 @@ export default function SellingPointPanel({ product }: { product: string }) {
                   { title: '💬好评率', key: 'q', width: 84, align: 'center', render: (_: any, r: ModuleValueRow) => { const q = Math.round(r.quality * 100); return <Tag color={q >= 60 ? 'green' : q >= 30 ? 'orange' : 'red'}>{q}%</Tag>; } },
                   { title: '类型', key: 'kind', width: 122, align: 'center', render: (_: any, r: ModuleValueRow) => <Tag color={MOD_KIND_TAG[r.kind].color}>{MOD_KIND_TAG[r.kind].text}</Tag> },
                   { title: '支撑卖点', key: 'sps', render: (_: any, r: ModuleValueRow) => <span style={{ fontSize: 11, color: '#64748B' }}>{r.sellingPoints.join('、') || '—'}</span> },
-                ]} />
+                ]} />)}
+              {viewMode === 'chart' && <ModuleValueMatrix rows={moduleRows} />}
             </div>
           )}
 

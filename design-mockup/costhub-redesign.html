@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>CostHub · 重新设计（工作台 + 项目工作台 · 无 AI 味）</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { width:1600px; height:1000px; overflow:hidden; }
+  :root{
+    --bg:#F5F4F0; --card:#FFFFFF; --line:#E6E4DC; --line2:#D5D2C6;
+    --ink:#1C1B17; --ink2:#5F5D54; --ink3:#98958A;
+    --risk:#B3392B; --risk-bg:#FBF0EE; --good:#1F7A4C; --good-bg:#EFF7F2;
+    --warn:#8A6D1F; --warn-bg:#FAF5E9; --accent:#1C1B17;
+    --hover:#FAF9F6; --sel:#EFEDE7;
+  }
+  body{ font-family:"Segoe UI","Microsoft YaHei UI","PingFang SC",-apple-system,sans-serif; background:var(--bg); color:var(--ink); font-size:13px; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .mono{ font-family:"Cascadia Mono","SF Mono",Consolas,monospace; font-feature-settings:"tnum"; font-variant-numeric:tabular-nums; }
+  svg{ fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+  .app{ display:flex; flex-direction:column; width:1600px; height:1000px; }
+
+  /* ===== 顶栏 ===== */
+  .topbar{ height:52px; background:var(--card); border-bottom:1px solid var(--line); display:flex; align-items:center; gap:6px; padding:0 18px; flex-shrink:0; }
+  .brand{ display:flex; align-items:center; gap:10px; margin-right:22px; }
+  .mark{ width:26px; height:26px; background:var(--ink); border-radius:7px; color:#fff; display:flex; align-items:center; justify-content:center; font-family:Georgia,serif; font-size:15px; font-weight:700; letter-spacing:-1px; }
+  .bname{ font-size:15px; font-weight:700; letter-spacing:.01em; }
+  .tab{ display:flex; align-items:center; gap:7px; padding:6px 13px; border-radius:7px; font-size:13px; color:var(--ink2); cursor:pointer; }
+  .tab:hover{ background:var(--hover); color:var(--ink); }
+  .tab.active{ background:var(--ink); color:#fff; font-weight:600; }
+  .tab svg{ width:14px; height:14px; }
+  .cmdbar{ display:flex; align-items:center; gap:8px; width:320px; height:32px; border:1px solid var(--line2); border-radius:7px; background:var(--bg); padding:0 10px; color:var(--ink3); font-size:12.5px; cursor:pointer; }
+  .cmdbar:hover{ border-color:var(--ink3); }
+  .cmdbar .k{ margin-left:auto; font-family:Consolas,monospace; font-size:10.5px; color:var(--ink3); border:1px solid var(--line2); border-bottom-width:2px; border-radius:4px; padding:0 5px; background:var(--card); }
+  .spacer{ flex:1; }
+  .iconbtn{ width:30px; height:30px; border-radius:7px; display:flex; align-items:center; justify-content:center; color:var(--ink2); cursor:pointer; }
+  .iconbtn:hover{ background:var(--hover); color:var(--ink); }
+  .iconbtn svg{ width:15px; height:15px; }
+
+  /* ===== 工作台 ===== */
+  .view{ display:none; flex:1; min-height:0; flex-direction:column; padding:18px 22px; gap:14px; overflow:hidden; }
+  .view.on{ display:flex; }
+  .row-metrics{ display:grid; grid-template-columns:repeat(6,1fr); gap:12px; flex-shrink:0; }
+  .metric{ background:var(--card); border:1px solid var(--line); border-radius:10px; padding:13px 16px; cursor:pointer; transition:box-shadow .15s, transform .15s; }
+  .metric:hover{ box-shadow:0 4px 14px rgba(28,27,23,.06); transform:translateY(-1px); }
+  .metric .k{ font-size:11px; color:var(--ink3); letter-spacing:.02em; }
+  .metric .v{ font-size:26px; font-weight:700; margin-top:3px; letter-spacing:-.01em; }
+  .metric .s{ font-size:11px; color:var(--ink2); margin-top:3px; display:flex; align-items:center; gap:5px; }
+  .metric .s .up{ color:var(--good); font-weight:600; } .metric .s .down{ color:var(--risk); font-weight:600; }
+
+  .grid2{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:14px; flex:1; min-height:0; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:10px; display:flex; flex-direction:column; min-height:0; }
+  .card-h{ display:flex; align-items:center; gap:8px; padding:11px 16px 9px; border-bottom:1px solid var(--line); font-size:12.5px; font-weight:700; }
+  .card-h .sub{ font-size:11px; color:var(--ink3); font-weight:400; margin-left:auto; }
+  .card-h .act{ font-size:11px; color:var(--accent); font-weight:600; cursor:pointer; }
+  .card-h .act:hover{ text-decoration:underline; }
+
+  /* 成本结构 */
+  .stack{ display:flex; height:26px; border-radius:6px; overflow:hidden; margin:14px 16px 12px; border:1px solid var(--line2); }
+  .stack i{ display:block; height:100%; }
+  .legend{ display:grid; grid-template-columns:1fr 1fr; column-gap:26px; row-gap:3px; padding:0 16px 14px; }
+  .lg{ display:flex; align-items:center; gap:9px; padding:6px 0; border-bottom:1px dashed var(--line); font-size:12px; }
+  .lg:last-child{ border-bottom:none; }
+  .sw{ width:9px; height:9px; border-radius:2.5px; flex-shrink:0; }
+  .lg-n{ color:var(--ink2); }
+  .lg-p{ margin-left:auto; font-weight:700; }
+  .lg-a{ color:var(--ink3); width:70px; text-align:right; font-size:11.5px; }
+
+  /* 机会风险 */
+  .sig{ display:flex; align-items:center; gap:10px; padding:9px 16px; border-bottom:1px dashed var(--line); }
+  .sig:last-child{ border-bottom:none; }
+  .sig .t{ width:56px; font-size:10px; padding:2px 0; border-radius:4px; text-align:center; flex-shrink:0; font-weight:600; }
+  .sig .t.risk{ background:var(--risk-bg); color:var(--risk); } .sig .t.good{ background:var(--good-bg); color:var(--good); } .sig .t.warn{ background:var(--warn-bg); color:var(--warn); }
+  .sig .body{ flex:1; min-width:0; }
+  .sig .ti{ font-size:12.5px; font-weight:600; }
+  .sig .de{ font-size:11.5px; color:var(--ink2); margin-top:1px; }
+  .sig .amt{ font-size:12.5px; font-weight:700; flex-shrink:0; }
+  .sig .amt.down{ color:var(--risk); } .sig .amt.up{ color:var(--good); }
+  .sig .go{ font-size:11.5px; color:var(--accent); font-weight:600; cursor:pointer; padding:3px 0 3px 8px; flex-shrink:0; }
+  .sig .go:hover{ text-decoration:underline; }
+
+  /* 底部 */
+  .grid3{ display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:14px; height:230px; flex-shrink:0; }
+  .feed{ padding:2px 0; overflow:auto; }
+  .f-it{ display:flex; gap:12px; padding:8px 16px; }
+  .f-it:hover{ background:var(--hover); }
+  .f-t{ width:58px; flex-shrink:0; font-size:11px; color:var(--ink3); font-family:Consolas,monospace; padding-top:1px; }
+  .f-b{ flex:1; border-bottom:1px dashed var(--line); padding-bottom:8px; }
+  .f-it:last-child .f-b{ border-bottom:none; }
+  .f-ti{ font-size:12.5px; }
+  .f-am{ float:right; font-size:12px; font-weight:700; margin-left:8px; }
+  .f-de{ font-size:11.5px; color:var(--ink2); margin-top:1px; }
+
+  /* 价值矩阵 */
+  .vm{ padding:10px 12px; display:flex; flex-direction:column; gap:8px; overflow:auto; }
+  .vm .grp{ }
+  .vm .g-t{ font-size:10.5px; color:var(--ink3); margin-bottom:4px; letter-spacing:.04em; }
+  .vm .chip{ display:flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:8px; padding:7px 10px; margin-bottom:5px; background:var(--card); }
+  .vm .chip .n{ font-size:12.5px; font-weight:600; }
+  .vm .chip .m{ margin-left:auto; font-size:11.5px; color:var(--ink3); }
+
+  /* ===== 项目工作台 ===== */
+  .ws{ display:flex; flex:1; min-height:0; }
+  .rail{ width:216px; background:var(--card); border-right:1px solid var(--line); display:flex; flex-direction:column; flex-shrink:0; }
+  .rail .sec{ font-size:10px; color:var(--ink3); letter-spacing:.12em; font-weight:600; padding:12px 16px 6px; }
+  .rail .pi{ display:flex; align-items:center; gap:8px; padding:8px 14px; margin:0 8px; border-radius:7px; font-size:12.5px; color:var(--ink2); cursor:pointer; }
+  .rail .pi:hover{ background:var(--hover); }
+  .rail .pi.active{ background:var(--sel); color:var(--ink); font-weight:600; }
+  .rail .pi .c{ font-family:Consolas,monospace; font-size:11px; color:var(--ink3); }
+  .rail .pi.active .c{ color:var(--ink2); }
+  .rail .pi .b{ margin-left:auto; font-size:11px; color:var(--ink3); }
+  .rail .specs{ padding:4px 12px 12px; display:flex; flex-wrap:wrap; gap:5px; }
+  .rail .spec{ font-size:10.5px; border:1px solid var(--line2); border-radius:10px; padding:2px 8px; color:var(--ink2); background:var(--bg); }
+  .main{ flex:1; display:flex; flex-direction:column; min-width:0; padding:16px 20px; gap:14px; overflow:hidden; }
+  .phead{ display:flex; align-items:flex-end; gap:12px; }
+  .phead .t{ font-size:19px; font-weight:700; letter-spacing:-.01em; }
+  .phead .tag{ font-size:10.5px; border:1px solid var(--line2); border-radius:6px; padding:2px 8px; color:var(--ink2); }
+  .phead .cost{ font-size:15px; font-weight:700; margin-left:6px; }
+  .phead .cost .lbl{ font-size:11px; color:var(--ink3); font-weight:400; margin-right:5px; }
+  .phead .acts{ margin-left:auto; display:flex; gap:8px; }
+  .btn{ height:32px; padding:0 16px; border-radius:7px; font-size:12.5px; font-weight:600; cursor:pointer; border:1px solid var(--line2); background:var(--card); color:var(--ink); }
+  .btn:hover{ border-color:var(--ink3); }
+  .btn.solid{ background:var(--ink); color:#fff; border-color:var(--ink); }
+  .btn.solid:hover{ background:#000; }
+  .table-wrap{ background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:auto; }
+  table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  th{ text-align:left; font-weight:600; color:var(--ink3); font-size:10.5px; letter-spacing:.05em; padding:9px 16px; border-bottom:1px solid var(--line); white-space:nowrap; background:var(--card); position:sticky; top:0; }
+  td{ padding:8px 16px; border-bottom:1px dashed var(--line); }
+  tr:hover td{ background:var(--hover); }
+  td.num{ text-align:right; font-variant-numeric:tabular-nums; }
+  .mod{ font-size:11px; color:var(--ink3); }
+  .cell-cost{ font-weight:700; }
+  .subtotal td{ border-top:1px solid var(--line2); font-weight:700; background:var(--sel); }
+  .right{ width:336px; border-left:1px solid var(--line); background:var(--card); display:flex; flex-direction:column; flex-shrink:0; }
+  .right .r-sec{ padding:13px 16px; border-bottom:1px solid var(--line); }
+  .right .r-sec .rt{ font-size:12.5px; font-weight:700; display:flex; align-items:center; gap:8px; }
+  .right .r-sec .rs{ font-size:10.5px; color:var(--ink3); margin-top:2px; }
+  .right .cost2{ padding:12px 16px; }
+  .mini-stack{ display:flex; height:14px; border-radius:4px; overflow:hidden; margin:10px 0 12px; border:1px solid var(--line); }
+  .mini-stack i{ display:block; height:100%; }
+  .mini-lg{ display:flex; justify-content:space-between; font-size:11.5px; padding:3px 0; color:var(--ink2); }
+  .mini-lg b{ font-weight:700; color:var(--ink); }
+  .exec{ padding:8px 16px 14px; flex:1; overflow:auto; }
+  .ex{ display:flex; gap:10px; padding:5px 0; font-size:11.5px; color:var(--ink2); }
+  .ex .t{ width:40px; flex-shrink:0; font-family:Consolas,monospace; font-size:10.5px; color:var(--ink3); padding-top:1px; }
+  .ex .d{ flex:1; }
+  .ex .d b{ color:var(--ink); font-weight:600; }
+  .ex .d .r{ color:var(--ink3); font-size:11px; }
+  .ex .ln{ width:2px; background:var(--line2); margin:2px 0 2px 5px; }
+  .ex.first{ }
+  .hidden{ display:none !important; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="brand"><div class="mark">C</div><div class="bname">CostHub</div></div>
+    <div class="tab active" data-v="wb"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></svg>工作台</div>
+    <div class="tab" data-v="proj"><svg viewBox="0 0 24 24"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg>项目</div>
+    <div class="tab"><svg viewBox="0 0 24 24"><path d="M12 3v10l7 4"/><circle cx="12" cy="12" r="9"/></svg>器件</div>
+    <div class="tab"><svg viewBox="0 0 24 24"><path d="M20 12l-4-4m0 8l4-4-4 4M4 12l4-4m0 8l-4-4 4 4"/><path d="M3 12h4m10 0h4"/></svg>竞品</div>
+    <div class="tab"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c1-4 3-6 6-6s5 2 6 6"/><circle cx="18" cy="9" r="2.5"/><path d="M15 20c.5-3 1.5-4.5 3-4.5 1.5 0 2.5 1.5 3 4.5"/></svg>供应商</div>
+    <div class="spacer"></div>
+    <div class="cmdbar"><svg viewBox="0 0 24 24" style="width:13px;height:13px"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>搜索项目、器件、或输入指令<span class="k">⌘K</span></div>
+    <div class="iconbtn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4m0 4h.01"/></svg></div>
+    <div class="iconbtn"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></div>
+  </div>
+
+  <!-- ===== 工作台 ===== -->
+  <div class="view on" id="v-wb">
+    <div class="row-metrics">
+      <div class="metric"><div class="k">成本健康度</div><div class="v">82<span style="font-size:13px;color:var(--ink3)">/100</span></div><div class="s">本月 <span class="up">↑ 6</span></div></div>
+      <div class="metric"><div class="k">在研项目</div><div class="v">6</div><div class="s"><span class="down">2 超目标</span></div></div>
+      <div class="metric"><div class="k">平均 BOM</div><div class="v mono">¥1,248</div><div class="s">较上月 <span class="up">↓ 3.2%</span></div></div>
+      <div class="metric"><div class="k">待审报价</div><div class="v">3</div><div class="s">驱动板价高 ¥15</div></div>
+      <div class="metric"><div class="k">待办</div><div class="v">4</div><div class="s">2 条来自成本分析</div></div>
+      <div class="metric"><div class="k">本月降本</div><div class="v mono">-¥86</div><div class="s"><span class="up">2 项目达成</span></div></div>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <div class="card-h">成本结构<span class="sub">M270 · 整机 BOM ¥1,248</span></div>
+        <div class="stack"><i style="width:41%;background:#1C1B17"></i><i style="width:22%;background:#8B887E"></i><i style="width:15%;background:#5C5A52"></i><i style="width:11%;background:#B8B4A8"></i><i style="width:6%;background:#D3CFC2"></i><i style="width:5%;background:#E8E4D8"></i></div>
+        <div class="legend">
+          <div class="lg"><span class="sw" style="background:#1C1B17"></span><span class="lg-n">面板模块</span><span class="lg-p">41%</span><span class="lg-a mono">¥512</span></div>
+          <div class="lg"><span class="sw" style="background:#8B887E"></span><span class="lg-n">主控模块</span><span class="lg-p">22%</span><span class="lg-a mono">¥275</span></div>
+          <div class="lg"><span class="sw" style="background:#5C5A52"></span><span class="lg-n">结构模块</span><span class="lg-p">15%</span><span class="lg-a mono">¥187</span></div>
+          <div class="lg"><span class="sw" style="background:#B8B4A8"></span><span class="lg-n">电源模块</span><span class="lg-p">11%</span><span class="lg-a mono">¥137</span></div>
+          <div class="lg"><span class="sw" style="background:#D3CFC2"></span><span class="lg-n">线材模块</span><span class="lg-p">6%</span><span class="lg-a mono">¥75</span></div>
+          <div class="lg"><span class="sw" style="background:#E8E4D8"></span><span class="lg-n">包材/其他</span><span class="lg-p">5%</span><span class="lg-a mono">¥62</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-h">机会与风险<span class="act">全部 →</span></div>
+        <div style="overflow:auto;flex:1">
+          <div class="sig"><span class="t risk">风险</span><div class="body"><div class="ti">驱动板报价偏高</div><div class="de">M270 · 仅 1 家供应商，高于同类均值 24%</div></div><span class="amt down mono">¥15</span><span class="go">谈价 →</span></div>
+          <div class="sig"><span class="t risk">风险</span><div class="body"><div class="ti">面板近月涨价</div><div class="de">M270/M271 · 液晶面板行情 +5%</div></div><span class="amt down mono">+5%</span><span class="go">比价 →</span></div>
+          <div class="sig"><span class="t good">机会</span><div class="body"><div class="ti">电源适配器已降 8%</div><div class="de">M270 · 换高效版，供应商 A</div></div><span class="amt up mono">-¥36</span><span class="go">查看 →</span></div>
+          <div class="sig"><span class="t good">机会</span><div class="body"><div class="ti">结构件有下探空间</div><div class="de">M270 · 同类项目均值 ¥87，当前 ¥95</div></div><span class="amt up mono">-¥8</span><span class="go">谈价 →</span></div>
+          <div class="sig"><span class="t warn">提示</span><div class="body"><div class="ti">面板模块声量高、好评高</div><div class="de">原声 87 条 · 好又便宜，下代应保留放大</div></div><span class="go">看原声 →</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid3">
+      <div class="card">
+        <div class="card-h">最近变动<span class="sub">成本快照 · 可追溯</span></div>
+        <div class="feed">
+          <div class="f-it"><div class="f-t">08-25</div><div class="f-b"><span class="f-am mono" style="color:var(--good)">-¥36</span><div class="f-ti">M270 电源适配器换型</div><div class="f-de">24V 3A → 高效版 · 原因：改型降价</div></div></div>
+          <div class="f-it"><div class="f-t">08-24</div><div class="f-b"><span class="f-am mono" style="color:var(--risk)">+¥24</span><div class="f-ti">M271 液晶面板调价</div><div class="f-de">供应商 B 上调 · 原因：面板行情上涨</div></div></div>
+          <div class="f-it"><div class="f-t">08-24</div><div class="f-b"><span class="f-am mono">±0</span><div class="f-ti">M272 快照（手动）</div><div class="f-de">设计定型，BOM 锁定</div></div></div>
+          <div class="f-it"><div class="f-t">08-23</div><div class="f-b"><span class="f-am mono" style="color:var(--good)">-¥12</span><div class="f-ti">M273 驱动板谈价落地</div><div class="f-de">供应商 C 让步，单价 76 → 64</div></div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-h">模块价值<span class="sub">原声 × 成本</span></div>
+        <div class="vm">
+          <div class="grp"><div class="g-t">保留放大</div>
+            <div class="chip"><span class="n">面板模块</span><span style="font-size:11px;color:var(--good);font-weight:600">好又便宜</span><span class="m mono">¥512 · 声量87</span></div>
+            <div class="chip"><span class="n">电源模块</span><span style="font-size:11px;color:var(--good);font-weight:600">好又便宜</span><span class="m mono">¥137 · 声量9</span></div>
+          </div>
+          <div class="grp"><div class="g-t">降本机会</div>
+            <div class="chip"><span class="n">主控模块</span><span style="font-size:11px;color:var(--warn);font-weight:600">好但贵</span><span class="m mono">¥275</span></div>
+          </div>
+          <div class="grp"><div class="g-t">下代减配</div>
+            <div class="chip"><span class="n">驱动板</span><span style="font-size:11px;color:var(--risk);font-weight:600">花得不值</span><span class="m mono">¥76 · 声量3</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 项目工作台 ===== -->
+  <div class="view" id="v-proj">
+    <div class="ws">
+      <div class="rail">
+        <div class="sec">项目</div>
+        <div class="pi active"><span class="c">M270</span>中高端显示器<span class="b mono">¥1,248</span></div>
+        <div class="pi"><span class="c">M271</span>电竞显示器<span class="b mono">¥1,386</span></div>
+        <div class="pi"><span class="c">M272</span>办公显示器<span class="b mono">¥986</span></div>
+        <div class="pi"><span class="c">M273</span>设计显示器<span class="b mono">¥1,520</span></div>
+        <div class="sec">规格分类（M270）</div>
+        <div class="specs">
+          <span class="spec">分辨率：2K</span><span class="spec">刷新率：144Hz</span><span class="spec">色域：95% DCI-P3</span><span class="spec">接口：Type-C</span><span class="spec">外观：窄边框</span>
+        </div>
+        <div class="sec">M270 原声</div>
+        <div class="specs" style="flex-direction:column;gap:2px;padding:0 16px 10px">
+          <div style="font-size:11.5px;color:var(--ink2)">已导入 <b>68</b> 条 · 声量最高：分辨率(31)、刷新率(24)、色准(18)</div>
+        </div>
+      </div>
+
+      <div class="main">
+        <div class="phead">
+          <div class="t">M270</div><span class="tag">在研</span><span class="tag">中高端</span><span class="cost"><span class="lbl">整机 BOM</span><span class="mono">¥1,248</span></span>
+          <div class="acts">
+            <button class="btn">审价</button>
+            <button class="btn">行情</button>
+            <button class="btn solid">成本分析</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <tr><th>模块</th><th>器件</th><th>型号</th><th style="text-align:right">数量</th><th style="text-align:right">单价</th><th style="text-align:right">小计</th></tr>
+            <tr><td class="mod">面板模块</td><td>27寸液晶面板</td><td class="mono">M270QAN</td><td class="num mono">1</td><td class="num mono">¥510.00</td><td class="num mono cell-cost">¥510.00</td></tr>
+            <tr><td class="mod">主控模块</td><td>主控板</td><td class="mono">MNT-MAIN</td><td class="num mono">1</td><td class="num mono">¥185.00</td><td class="num mono cell-cost">¥185.00</td></tr>
+            <tr><td class="mod">电源模块</td><td>电源适配器</td><td class="mono">24V 3A</td><td class="num mono">1</td><td class="num mono">¥42.00</td><td class="num mono cell-cost">¥42.00</td></tr>
+            <tr><td class="mod">结构模块</td><td>外壳套件</td><td class="mono">SHELL-27</td><td class="num mono">1</td><td class="num mono">¥95.00</td><td class="num mono cell-cost">¥95.00</td></tr>
+            <tr><td class="mod">驱动模块</td><td>驱动板组件</td><td class="mono">DRV-27</td><td class="num mono">1</td><td class="num mono">¥76.00</td><td class="num mono cell-cost" style="color:var(--risk)">¥76.00</td></tr>
+            <tr class="subtotal"><td colspan="5">合计（42 项）</td><td class="num mono">¥1,248.00</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="right">
+        <div class="r-sec cost2">
+          <div class="rt">成本结构</div>
+          <div class="rs">按模块 · 驱动板高于同类均值 24%</div>
+          <div class="mini-stack"><i style="width:41%;background:#1C1B17"></i><i style="width:22%;background:#8B887E"></i><i style="width:15%;background:#5C5A52"></i><i style="width:11%;background:#B8B4A8"></i><i style="width:6%;background:#D3CFC2"></i><i style="width:5%;background:#E8E4D8"></i></div>
+          <div class="mini-lg"><span>面板模块</span><b class="mono">41% · ¥512</b></div>
+          <div class="mini-lg"><span>主控模块</span><b class="mono">22% · ¥275</b></div>
+          <div class="mini-lg"><span>驱动模块</span><b class="mono" style="color:var(--risk)">6% · ¥76</b></div>
+        </div>
+        <div class="r-sec" style="flex:1;display:flex;flex-direction:column;padding:0">
+          <div style="padding:13px 16px 6px;display:flex;align-items:center;gap:8px"><span style="font-size:12.5px;font-weight:700">执行记录</span><span style="font-size:10.5px;color:var(--ink3);margin-left:auto">本次成本分析 · 可追溯</span></div>
+          <div class="exec">
+            <div class="ex"><div class="t">12:01</div><div class="d"><b>读取成本结构</b><div class="r">项目 M270 · 42 项 · ¥1,248</div></div></div>
+            <div class="ex"><div class="t">12:02</div><div class="d"><b>比对同类器件报价</b><div class="r">驱动板 ¥76 &gt; 同类均值 ¥61（+24%）· 单一供应商</div></div></div>
+            <div class="ex"><div class="t">12:03</div><div class="d"><b>核对目标成本</b><div class="r">目标 ¥1,200 · 超支 ¥48（96%）</div></div></div>
+            <div class="ex"><div class="t">12:04</div><div class="d"><b>生成建议</b><div class="r">谈驱动板价（-¥12）· 面板二次比价（-¥20）· 合计可降 -¥40</div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  var tabs = document.querySelectorAll('.tab[data-v]');
+  tabs.forEach(function(el){
+    el.addEventListener('click', function(){
+      tabs.forEach(function(x){ x.classList.remove('active'); });
+      el.classList.add('active');
+      document.getElementById('v-wb').classList.toggle('on', el.getAttribute('data-v') === 'wb');
+      document.getElementById('v-proj').classList.toggle('on', el.getAttribute('data-v') === 'proj');
+    });
+  });
+</script>
+</body>
+</html>

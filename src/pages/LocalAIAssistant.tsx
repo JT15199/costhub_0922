@@ -1169,6 +1169,27 @@ export default function LocalAIAssistant() {
     refreshNetStatus();
   }, []);
 
+  // 数据就绪度引导：任何页面 dispatch costhub-open-ai-prompt → 预填提问（可 auto 自动发送）
+  // 提问内容在 localStorage（costhub-ai-prompt-pending），本组件挂载时消费 + 事件触发时消费（双保险，App 导航后 300ms 重发兜底）
+  const sendMessageRef = useRef<((c: string) => void) | null>(null);
+  useEffect(() => { sendMessageRef.current = sendMessage; });
+  useEffect(() => {
+    const consume = () => {
+      let raw: string | null = null;
+      try { raw = localStorage.getItem('costhub-ai-prompt-pending'); } catch { }
+      if (!raw) return;
+      try { localStorage.removeItem('costhub-ai-prompt-pending'); } catch { }
+      let prompt = raw, auto = false;
+      try { const j = JSON.parse(raw); if (j && typeof j.prompt === 'string') { prompt = j.prompt; auto = !!j.auto; } } catch { }
+      if (!prompt.trim()) return;
+      setInput(prompt);
+      if (auto) setTimeout(() => { sendMessageRef.current?.(prompt); }, 500);
+    };
+    consume();
+    window.addEventListener('costhub-open-ai-prompt', consume);
+    return () => window.removeEventListener('costhub-open-ai-prompt', consume);
+  }, []);
+
   // 智能跟随滚动：仅当用户位于底部附近时才自动滚到底部；
   // 用户向上回看已生成内容时，不强制打断
   useEffect(() => {

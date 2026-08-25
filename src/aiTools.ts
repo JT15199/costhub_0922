@@ -21,7 +21,7 @@ import {
   FolderOutlined, ProfileOutlined, DollarOutlined, ShopOutlined, LineChartOutlined,
   AimOutlined, HistoryOutlined, FundOutlined, BulbOutlined, BookOutlined,
   CheckSquareOutlined, ThunderboltOutlined, BarChartOutlined, AuditOutlined, AppstoreOutlined, HeartOutlined,
-  FileExcelOutlined, CalculatorOutlined, ClockCircleOutlined, MessageOutlined,
+  FileExcelOutlined, CalculatorOutlined, ClockCircleOutlined, MessageOutlined, SafetyCertificateOutlined,
 } from '@ant-design/icons';
 
 /** 工具图标映射（数据特征 → 语义图标；存组件引用以便在 .ts 中使用，UI 层再实例化） */
@@ -49,6 +49,7 @@ export const TOOL_ICONS: Record<string, React.ComponentType> = {
   create_todo: CheckSquareOutlined,
   add_goal: AimOutlined,
   query_voice_dims: MessageOutlined,
+  query_data_readiness: SafetyCertificateOutlined,
 };
 export function toolIcon(id: string): React.ComponentType {
   return TOOL_ICONS[id] || FolderOutlined;
@@ -523,6 +524,16 @@ const tools: AiTool[] = [
         out.push('  模块：' + [...modMap.entries()].sort((x, y) => y[1] - x[1]).map(([m, c2]) => m + ' ' + fmtMoney(c2)).join('、'));
       }
       return out.join('\n');
+    },
+  },
+  {
+    id: 'query_data_readiness',
+    name: '数据就绪度诊断',
+    desc: '扫描用户全部数据（本地模型/项目BOM/器件与供应商报价/用户原声/目标成本/竞品/规格分类），逐项给出 有/缺/半 状态、现在能做什么、缺了影响什么、建议补什么。用户问"我该补什么数据/现在能做哪些分析"或刚上手想了解能做什么时调用。无参数。',
+    params: [],
+    execute: async () => {
+      const { getDataReadiness, readinessToText } = await import('./dataReadiness');
+      return readinessToText(await getDataReadiness());
     },
   },
 ];

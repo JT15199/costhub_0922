@@ -193,6 +193,16 @@
 - **DSH 式轨迹时间线（TraceTimeline.tsx，2026-08-18 用户：发什么prompt→调什么工具→生成什么结果→又发什么prompt，卡片串起来更清晰）**：thinkEngine 加 onPrompt 事件（初始问题 + 每轮回填结果后的继续 prompt 都发事件）；Agent 执行区用 TraceTimeline 把 📤发送给模型/🔧工具调用(参数+结果)/🔐云端/📌结论 串成带连接线的卡片链，点卡片可展开全文——每次调什么工具、喂了什么数据、得出什么一目了然。
 - **规格分类模板（2026-08-18 用户：原声分析要关联项目源声与模块成本；具体特性有针对性项目的规格分类，AI 分析往上面靠）**：project_spec_templates 表（每项目可编辑 规格分类名+参考规格值）；卖点面板顶部「⚙ 规格分类」chips 可点编辑/加；AI 智能分析（buildAiUnifiedPrompt）有规格分类时**严格按这些分类生成卖点**（不新增/改名），原声归纳也归到这些类——规格分类×声量×模块成本 直接串起来。源声↔模块成本关系 = 规格分类(=卖点)↔模块 映射 + 归纳声量（既有卖点价值分析）。
 - **模块库选中合计**：勾选模块后工具栏显示「已选 N 个模块 · 合计 ¥X」（累加所选实例成本）。
+- **交付标准（2026-08-18 用户：希望 AI 产出像 mockup 那样，不要半吊子）**：功能交付标准 = 演示级 mockup 水准——设计先行（v2 视觉语言：骨色底+墨色+信号色/风险红·机会绿·提示金/等宽数字/无 AI 味），每个功能打开就是这个审美，半吊子不交付。已落地第一个：ModuleValueMatrix.tsx（真实数据 声量×成本 四象限散点，气泡大小=好评率，四象限=好又便宜/好但贵/花得不值/次要），卖点价值分析 表格/图表 切换。后续核心界面按此标准逐个重建（设计 token 先行）。
+
+
+## 三·补10、数据就绪度引导（2026-08-18 用户：引导客户如何使用——发现用户给的数据哪些缺失、没有这些数据能做到什么样、建议是什么）
+
+- **能力**：扫一遍用户全部数据（本地模型/项目BOM/器件库+供应商报价/用户原声/目标成本/竞品/规格分类），逐项给出 **有✅/半⚠️/缺❌ + 现状 + 能做什么/缺了会怎样 + 建议补什么**——回答"我现在能做什么、缺什么、下一步干嘛"。
+- **纯函数**（src/dataReadiness.ts）：getDataReadiness()（扫库）→ ReadinessItem[]；readinessToText(items)（→文本，ok 用「现在能」、partial/missing 用「缺了会」前缀）；+5 测试（dataReadiness.test.ts）。
+- **AI 工具**：query_data_readiness（第 24 个，无参数，图标 SafetyCertificateOutlined）——大脑在 对话/Agent 里答"我缺什么数据/现在能做哪些分析"时调用，返回逐项就绪度文本。
+- **UI**（DataReadiness.tsx，v2 视觉：骨色底+墨色+信号色）：就绪度卡片（N 项能力 · X 就绪 · Y 半就绪 · Z 缺数据 + 每项 状态色条/现状/影响/建议）+「让 AI 引导我」按钮 → 预填提问自动发给本地 AI 助手（让模型用 query_data_readiness 当面引导）。
+- **预填链路**：DataReadiness 写 localStorage(costhub-ai-prompt-pending, {prompt,auto:true}) + dispatch costhub-open-ai-prompt → App 监听 navigate('localAI') + 300ms 重发兜底（LocalAIAssistant 懒加载，与 openInsightsEntry 同款双保险）→ LAI 挂载/事件消费：setInput + sendMessageRef.current(prompt) 自动发送。
 
 ## 六、工作流约定
 

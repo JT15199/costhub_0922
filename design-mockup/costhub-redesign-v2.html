@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>CostHub · 成本总览（演示级图表 · PPT 可用）</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { width:1600px; height:1000px; overflow:hidden; }
+  :root{
+    --bg:#F4F3EE; --card:#FFFFFF; --line:#E6E4DC; --line2:#D5D2C6;
+    --ink:#181713; --ink2:#5F5D54; --ink3:#9A978B;
+    --risk:#C0392B; --risk-bg:#FBEFED; --good:#1F7A4C; --good-bg:#EDF6F0;
+    --warn:#A67C1F; --warn-bg:#FAF4E4; --amber:#B0895A; --slate:#4A4F55;
+  }
+  body{ font-family:"Segoe UI","Microsoft YaHei UI","PingFang SC",-apple-system,sans-serif; background:var(--bg); color:var(--ink); font-size:13px; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .mono{ font-family:"Cascadia Mono","SF Mono",Consolas,monospace; font-variant-numeric:tabular-nums; }
+  .app{ width:1600px; height:1000px; padding:22px 26px; display:flex; flex-direction:column; gap:14px; }
+
+  /* 页头（slide 标题行） */
+  .head{ display:flex; align-items:flex-end; gap:14px; flex-shrink:0; }
+  .head .t{ font-size:24px; font-weight:800; letter-spacing:-.02em; }
+  .head .sub{ font-size:12.5px; color:var(--ink3); margin-bottom:4px; }
+  .head .date{ font-size:12px; color:var(--ink3); margin-left:6px; margin-bottom:4px; }
+  .head .exp{ margin-left:auto; display:flex; gap:8px; }
+  .btn{ height:32px; padding:0 16px; border-radius:7px; font-size:12.5px; font-weight:600; cursor:pointer; border:1px solid var(--line2); background:var(--card); color:var(--ink); }
+  .btn:hover{ border-color:var(--ink3); }
+  .btn.solid{ background:var(--ink); color:#fff; border-color:var(--ink); }
+  .btn.solid:hover{ background:#000; }
+
+  /* KPI 行 */
+  .kpis{ display:grid; grid-template-columns:repeat(6,1fr); gap:12px; flex-shrink:0; }
+  .kpi{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; display:flex; flex-direction:column; gap:2px; box-shadow:0 1px 2px rgba(24,23,19,.03); }
+  .kpi .k{ font-size:10.5px; color:var(--ink3); letter-spacing:.04em; }
+  .kpi .row{ display:flex; align-items:baseline; gap:6px; }
+  .kpi .v{ font-size:22px; font-weight:800; letter-spacing:-.02em; }
+  .kpi .d{ font-size:10.5px; font-weight:600; }
+  .kpi .d.up{ color:var(--good); } .kpi .d.down{ color:var(--risk); }
+  .kpi .spark{ height:16px; margin-top:2px; }
+
+  /* 图表卡片 */
+  .charts{ display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); gap:14px; flex:1; min-height:0; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:12px; display:flex; flex-direction:column; min-height:0; box-shadow:0 1px 3px rgba(24,23,19,.04); }
+  .card-h{ padding:12px 18px 0; }
+  .card-h .t{ font-size:14px; font-weight:700; }
+  .card-h .s{ font-size:11px; color:var(--ink3); margin-top:1px; }
+  .card-b{ flex:1; display:flex; align-items:center; justify-content:center; padding:8px 14px 10px; min-height:0; }
+  .note{ font-size:10px; color:var(--ink3); padding:0 18px 10px; }
+
+  /* 底部 */
+  .bottom{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:14px; height:236px; flex-shrink:0; }
+
+  .impact{ display:flex; flex-direction:column; gap:10px; padding:12px 18px 10px; }
+  .imp .lab{ font-size:11px; color:var(--ink3); margin-bottom:4px; display:flex; justify-content:space-between; }
+  .imp .lab b{ color:var(--ink); font-size:13px; }
+  .imp .bar{ display:flex; height:22px; border-radius:6px; overflow:hidden; }
+  .imp .bar i{ display:block; height:100%; }
+  .imp .seg{ display:flex; gap:10px; font-size:10.5px; color:var(--ink2); margin-top:5px; flex-wrap:wrap; }
+  .seg span{ display:flex; align-items:center; gap:5px; }
+  .dot{ width:8px; height:8px; border-radius:2px; }
+
+  .chart-wrap{ width:100%; height:100%; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="head">
+    <div>
+      <div class="t">成本总览</div>
+      <div class="sub">M270 系列 · 原声 × 成本 × 反响 —— 驱动下一代定义</div>
+    </div>
+    <div class="date">2026-08 · 数据截至今日</div>
+    <div class="exp"><button class="btn">导出图表到 PPT</button><button class="btn solid">生成简报</button></div>
+  </div>
+
+  <!-- KPI 行（带 sparkline） -->
+  <div class="kpis">
+    <div class="kpi"><div class="k">成本健康度</div><div class="row"><span class="v">82</span><span class="d up">▲ 6</span></div>
+      <svg class="spark" viewBox="0 0 90 16"><polyline points="0,13 18,11 36,12 54,8 72,6 90,4" fill="none" stroke="#1F7A4C" stroke-width="1.6"/></svg></div>
+    <div class="kpi"><div class="k">平均 BOM</div><div class="row"><span class="v mono">¥1,248</span><span class="d up">▼3.2%</span></div>
+      <svg class="spark" viewBox="0 0 90 16"><polyline points="0,4 18,6 36,7 54,9 72,11 90,12" fill="none" stroke="#1C1B17" stroke-width="1.6"/></svg></div>
+    <div class="kpi"><div class="k">在研项目</div><div class="row"><span class="v">6</span><span class="d down">2 超目标</span></div>
+      <svg class="spark" viewBox="0 0 90 16"><rect x="2" y="8" width="10" height="6" rx="1" fill="#C9C4B5"/><rect x="16" y="5" width="10" height="9" rx="1" fill="#C9C4B5"/><rect x="30" y="9" width="10" height="5" rx="1" fill="#C9C4B5"/><rect x="44" y="4" width="10" height="10" rx="1" fill="#B0895A"/><rect x="58" y="7" width="10" height="7" rx="1" fill="#C9C4B5"/><rect x="72" y="10" width="10" height="4" rx="1" fill="#C9C4B5"/></svg></div>
+    <div class="kpi"><div class="k">待审报价</div><div class="row"><span class="v">3</span><span class="d down">驱动 ¥15</span></div>
+      <svg class="spark" viewBox="0 0 90 16"><polyline points="0,8 22,6 44,9 66,5 90,3" fill="none" stroke="#C0392B" stroke-width="1.6"/></svg></div>
+    <div class="kpi"><div class="k">本月降本</div><div class="row"><span class="v mono">-¥86</span><span class="d up">达成</span></div>
+      <svg class="spark" viewBox="0 0 90 16"><rect x="2" y="9" width="12" height="5" rx="1" fill="#1F7A4C"/><rect x="18" y="6" width="12" height="8" rx="1" fill="#1F7A4C"/><rect x="34" y="4" width="12" height="10" rx="1" fill="#1F7A4C"/><rect x="50" y="3" width="12" height="11" rx="1" fill="#1F7A4C"/><rect x="66" y="2" width="12" height="12" rx="1" fill="#1F7A4C"/><rect x="82" y="1" width="12" height="13" rx="1" fill="#1F7A4C"/></svg></div>
+    <div class="kpi"><div class="k">原声样本</div><div class="row"><span class="v">204</span><span class="d">3 产品</span></div>
+      <svg class="spark" viewBox="0 0 90 16"><circle cx="22" cy="8" r="7" fill="#C9C4B5"/><circle cx="48" cy="8" r="6" fill="#B0895A"/><circle cx="72" cy="8" r="5" fill="#4A4F55"/></svg></div>
+  </div>
+
+  <!-- 主图表区 -->
+  <div class="charts">
+    <!-- 成本结构环形图 -->
+    <div class="card">
+      <div class="card-h"><div class="t">成本结构 · 整机 BOM</div><div class="s">按模块 · 面板与主控占六成，是降本主战场</div></div>
+      <div class="card-b">
+        <svg viewBox="0 0 640 330" width="100%" height="100%" style="max-height:320px">
+          <!-- 环形 -->
+          <circle cx="215" cy="165" r="92" fill="#FBF9F4"/>
+          <circle cx="215" cy="165" r="92" fill="none" stroke="#F1EFE7" stroke-width="30"/>
+          <circle cx="215" cy="165" r="92" fill="none" stroke="#1C1B17" stroke-width="30" stroke-dasharray="123.7 177.9" transform="rotate(-90 215 165)" stroke-linecap="butt"/>
+          <circle cx="215" cy="165" r="92" fill="none" stroke="#8B887E" stroke-width="30" stroke-dasharray="66.4 235.2" transform="rotate(57.6 215 165)"/>
+          <circle cx="215" cy="165" r="92" fill="none" stroke="#B0895A" stroke-width="30" stroke-dasharray="45.2 256.4" transform="rotate(136.8 215 165)"/>
+          <circle cx="215" cy="165" r="92" fill="none" stroke="#4A4F55" stroke-width="30" stroke-dasharray="33.2 268.4" transform="rotate(190.8 215 165)"/>
+          <circle cx="215" cy="165" r="92" fill="none" stroke="#C9C4B5" stroke-width="30" stroke-dasharray="18.1 283.5" transform="rotate(230.4 215 165)"/>
+          <circle cx="215" cy="165" r="92" fill="none" stroke="#E4E0D2" stroke-width="30" stroke-dasharray="15.1 286.5" transform="rotate(252 215 165)"/>
+          <text x="215" y="150" text-anchor="middle" font-size="30" font-weight="800" fill="#181713" font-family="Consolas,monospace">¥1,248</text>
+          <text x="215" y="172" text-anchor="middle" font-size="11" fill="#9A978B">整机 BOM · 42 项</text>
+          <text x="215" y="192" text-anchor="middle" font-size="10.5" fill="#1F7A4C" font-weight="600">目标 ¥1,200 · 超支 ¥48</text>
+          <!-- 图例 -->
+          <g font-size="11.5">
+            <rect x="400" y="70" width="10" height="10" rx="2" fill="#1C1B17"/><text x="416" y="79" fill="#5F5D54">面板模块</text><text x="540" y="79" text-anchor="end" fill="#181713" font-weight="700">41%</text><text x="620" y="79" text-anchor="end" fill="#9A978B" font-family="Consolas,monospace">¥512</text>
+            <rect x="400" y="102" width="10" height="10" rx="2" fill="#8B887E"/><text x="416" y="111" fill="#5F5D54">主控模块</text><text x="540" y="111" text-anchor="end" fill="#181713" font-weight="700">22%</text><text x="620" y="111" text-anchor="end" fill="#9A978B" font-family="Consolas,monospace">¥275</text>
+            <rect x="400" y="134" width="10" height="10" rx="2" fill="#B0895A"/><text x="416" y="143" fill="#5F5D54">结构模块</text><text x="540" y="143" text-anchor="end" fill="#181713" font-weight="700">15%</text><text x="620" y="143" text-anchor="end" fill="#9A978B" font-family="Consolas,monospace">¥187</text>
+            <rect x="400" y="166" width="10" height="10" rx="2" fill="#4A4F55"/><text x="416" y="175" fill="#5F5D54">电源模块</text><text x="540" y="175" text-anchor="end" fill="#181713" font-weight="700">11%</text><text x="620" y="175" text-anchor="end" fill="#9A978B" font-family="Consolas,monospace">¥137</text>
+            <rect x="400" y="198" width="10" height="10" rx="2" fill="#C9C4B5"/><text x="416" y="207" fill="#5F5D54">线材模块</text><text x="540" y="207" text-anchor="end" fill="#181713" font-weight="700">6%</text><text x="620" y="207" text-anchor="end" fill="#9A978B" font-family="Consolas,monospace">¥75</text>
+            <rect x="400" y="230" width="10" height="10" rx="2" fill="#E4E0D2"/><text x="416" y="239" fill="#5F5D54">包材/其他</text><text x="540" y="239" text-anchor="end" fill="#181713" font-weight="700">5%</text><text x="620" y="239" text-anchor="end" fill="#9A978B" font-family="Consolas,monospace">¥62</text>
+          </g>
+        </svg>
+      </div>
+      <div class="note">数据口径：project_boms 快照 · 不含平台费率</div>
+    </div>
+
+    <!-- 模块价值四象限散点 -->
+    <div class="card">
+      <div class="card-h"><div class="t">模块价值矩阵 · 声量 × 成本</div><div class="s">气泡大小 = 好评率 · 用户原声 204 条提炼</div></div>
+      <div class="card-b">
+        <svg viewBox="0 0 640 330" width="100%" height="100%" style="max-height:320px">
+          <rect x="60" y="30" width="520" height="250" fill="#FBFAF6" stroke="#E6E4DC"/>
+          <!-- 象限分割线 -->
+          <line x1="330" y1="30" x2="330" y2="280" stroke="#D5D2C6" stroke-dasharray="4 4"/>
+          <line x1="60" y1="155" x2="580" y2="155" stroke="#D5D2C6" stroke-dasharray="4 4"/>
+          <!-- 象限标签 -->
+          <text x="330" y="120" text-anchor="middle" font-size="10.5" fill="#1F7A4C" font-weight="600">好又便宜 → 放大</text>
+          <text x="470" y="120" text-anchor="middle" font-size="10.5" fill="#A67C1F" font-weight="600">好但贵 → 降本</text>
+          <text x="470" y="255" text-anchor="middle" font-size="10.5" fill="#C0392B" font-weight="600">花得不值 → 减配</text>
+          <text x="330" y="255" text-anchor="middle" font-size="10.5" fill="#9A978B" font-weight="600">次要</text>
+          <!-- 坐标轴 -->
+          <text x="60" y="20" font-size="10.5" fill="#9A978B">声量（提及用户数）</text>
+          <text x="585" y="305" text-anchor="end" font-size="10.5" fill="#9A978B">成本 ¥</text>
+          <!-- 气泡 -->
+          <g>
+            <circle cx="175" cy="105" r="12" fill="#1F7A4C" fill-opacity=".18" stroke="#1F7A4C" stroke-width="2"/>
+            <text x="175" y="109" text-anchor="middle" font-size="10" fill="#1F7A4C" font-weight="700">电源</text>
+            <circle cx="420" cy="85" r="11" fill="#B0895A" fill-opacity=".18" stroke="#B0895A" stroke-width="2"/>
+            <text x="420" y="89" text-anchor="middle" font-size="10" fill="#8A6A3F" font-weight="700">面板</text>
+            <circle cx="300" cy="185" r="8" fill="#4A4F55" fill-opacity=".16" stroke="#4A4F55" stroke-width="2"/>
+            <text x="300" y="189" text-anchor="middle" font-size="9.5" fill="#4A4F55" font-weight="700">主控</text>
+            <circle cx="400" cy="225" r="7" fill="#C0392B" fill-opacity=".16" stroke="#C0392B" stroke-width="2"/>
+            <text x="400" y="229" text-anchor="middle" font-size="9.5" fill="#C0392B" font-weight="700">结构</text>
+            <circle cx="150" cy="225" r="6" fill="#9A978B" fill-opacity=".16" stroke="#9A978B" stroke-width="2"/>
+            <text x="150" y="229" text-anchor="middle" font-size="9.5" fill="#9A978B" font-weight="700">驱动</text>
+          </g>
+          <!-- 图例 -->
+          <g font-size="10.5">
+            <circle cx="62" cy="290" r="4" fill="#1F7A4C"/><text x="72" y="294" fill="#5F5D54">好又便宜</text>
+            <circle cx="150" cy="290" r="4" fill="#B0895A"/><text x="160" y="294" fill="#5F5D54">好但贵</text>
+            <circle cx="240" cy="290" r="4" fill="#C0392B"/><text x="250" y="294" fill="#5F5D54">花得不值</text>
+            <circle cx="335" cy="290" r="4" fill="#4A4F55"/><text x="345" y="294" fill="#5F5D54">一般</text>
+            <text x="500" y="294" fill="#9A978B">气泡越大 = 好评率越高</text>
+          </g>
+        </svg>
+      </div>
+      <div class="note">口径：模块声量 = 支撑卖点声量合计 · 成本 = 模块 BOM 成本</div>
+    </div>
+  </div>
+
+  <!-- 底部：降本潜力 + 成本趋势 -->
+  <div class="bottom">
+    <div class="card">
+      <div class="card-h"><div class="t">降本潜力 vs 风险敞口</div><div class="s">可执行机会合计 -¥76 · 风险敞口 +¥39</div></div>
+      <div class="impact">
+        <div class="imp">
+          <div class="lab"><span>降本机会</span><b class="mono">-¥76</b></div>
+          <div class="bar">
+            <i style="width:47%;background:#1F7A4C"></i><i style="width:26%;background:#2E9159"></i><i style="width:16%;background:#44A86B"></i><i style="width:11%;background:#63BC85"></i>
+          </div>
+          <div class="seg"><span><i class="dot" style="background:#1F7A4C"></i>电源换型 -¥36</span><span><i class="dot" style="background:#2E9159"></i>面板比价 -¥20</span><span><i class="dot" style="background:#44A86B"></i>驱动谈价 -¥12</span><span><i class="dot" style="background:#63BC85"></i>结构件 -¥8</span></div>
+        </div>
+        <div class="imp">
+          <div class="lab"><span>风险敞口</span><b class="mono" style="color:#C0392B">+¥39</b></div>
+          <div class="bar"><i style="width:62%;background:#C0392B"></i><i style="width:38%;background:#D96A5E"></i></div>
+          <div class="seg"><span><i class="dot" style="background:#C0392B"></i>面板涨价 +¥24</span><span><i class="dot" style="background:#D96A5E"></i>驱动板偏高 +¥15</span></div>
+        </div>
+      </div>
+      <div class="note">驱动板已列待办 · 面板比价建议本周内发起</div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><div class="t">整机 BOM 成本趋势</div><div class="s">近 6 个月 · 目标线 ¥1,200</div></div>
+      <div class="card-b" style="padding:14px 18px 6px">
+        <svg viewBox="0 0 560 190" width="100%" height="100%">
+          <defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1C1B17" stop-opacity=".18"/><stop offset="1" stop-color="#1C1B17" stop-opacity="0"/></linearGradient></defs>
+          <line x1="40" y1="120" x2="540" y2="120" stroke="#C0392B" stroke-dasharray="5 4" stroke-width="1.5"/>
+          <text x="40" y="112" font-size="10" fill="#C0392B">目标 ¥1,200</text>
+          <polygon points="40,148 140,140 240,132 340,124 440,118 540,110 540,190 40,190" fill="url(#ag)"/>
+          <polyline points="40,148 140,140 240,132 340,124 440,118 540,110" fill="none" stroke="#1C1B17" stroke-width="2.5"/>
+          <circle cx="540" cy="110" r="4" fill="#1C1B17"/>
+          <text x="540" y="102" text-anchor="middle" font-size="11" font-weight="700" fill="#181713" font-family="Consolas,monospace">¥1,248</text>
+          <g font-size="10" fill="#9A978B">
+            <text x="40" y="175" text-anchor="middle">3月</text><text x="140" y="175" text-anchor="middle">4月</text><text x="240" y="175" text-anchor="middle">5月</text><text x="340" y="175" text-anchor="middle">6月</text><text x="440" y="175" text-anchor="middle">7月</text><text x="540" y="175" text-anchor="middle">8月</text>
+          </g>
+        </svg>
+      </div>
+      <div class="note">近 3 个月累计 -¥72 · 距目标还差 ¥48</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
