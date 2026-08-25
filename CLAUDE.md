@@ -204,6 +204,18 @@
 - **UI**（DataReadiness.tsx，v2 视觉：骨色底+墨色+信号色）：就绪度卡片（N 项能力 · X 就绪 · Y 半就绪 · Z 缺数据 + 每项 状态色条/现状/影响/建议）+「让 AI 引导我」按钮 → 预填提问自动发给本地 AI 助手（让模型用 query_data_readiness 当面引导）。
 - **预填链路**：DataReadiness 写 localStorage(costhub-ai-prompt-pending, {prompt,auto:true}) + dispatch costhub-open-ai-prompt → App 监听 navigate('localAI') + 300ms 重发兜底（LocalAIAssistant 懒加载，与 openInsightsEntry 同款双保险）→ LAI 挂载/事件消费：setInput + sendMessageRef.current(prompt) 自动发送。
 
+
+## 三·补11、右侧 AI 协作窗（2026-08-18 用户：功能页右侧放 AI 互动窗口，不单独去页面；不预设功能，给模型配好全部 tools 自主调用）
+
+- **布局**：main-content 内嵌 AiPanel（右侧常驻）：默认 384px、**可拖拽调宽 300-560**（左边缘 6px handle，localStorage ai-panel-width）、**可折叠成 42px 竖条**（ai-panel-collapsed）——不跳页，功能页里直接跟大脑对话。
+- **引擎 = thinkEngine.runThinkLoop（不是 LAI 的 sendMessage）**：模型持有**全部 24 个工具清单**（buildThinkSystemPrompt 注入），[TOOL] 文本协议自主调用、多轮循环、自动回填 [RESULT]、单轮 ≤2 工具、json:false+num_predict 16384 不截断——"我让它干什么，模型自己调工具"。
+- **轨迹=执行记录卡**：onToolResult → 🔧 工具名+参数+结果摘要；onCloudResult → 🔐 云端卡；思考过程 details 折叠（N 字）；结论白卡。onAnswer/onThought 流式累积。
+- **不预设功能**：输入框只有占位符"直接说需求，模型自动调用工具…"，无聚焦下拉/快捷提问/功能列表（用户 2026-08-18 明确）。
+- **会话**：aiPanelChat.ts（从 LAI 提取：loadSessions/newSession/loadMessages/saveMsg/deleteSession，local_ai_sessions/messages 表不变）；头部 新对话/历史会话/折叠/使用指南 按钮。
+- **上下文联动**：App 传 activePage → PAGE_LABELS 页面名；页面内选中对象 dispatch costhub-ai-ctx {label} 覆盖显示（如"P271-M27"）。
+- **就绪度引导**：AiPanel 底部动态计数（getDataReadiness，不硬编码）+「让 AI 引导我」→ localStorage(costhub-ai-prompt-pending)+costhub-open-ai-prompt → AiPanel 常驻直接消费自动发送（App 不再导航监听）。
+- **移除**：导航「本地AI助手」、render case、App 的 costhub-open-ai-prompt 导航监听。LocalAIAssistant.tsx 保留文件不引用（GoalsCard 已挂驾驶舱 AutoThinkPanel 上方；DemoGenerator 待归位）。云端审批仍走 cloudConfirm 横幅（approveCloud=requestCloudConfirm）；runCloud=agentSearchLoop。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。

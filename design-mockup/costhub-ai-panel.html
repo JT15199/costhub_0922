@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>CostHub · 功能页 + 右侧 AI 互动窗（设计稿）</title>
+<style>
+
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1600px;height:1000px;overflow:hidden}
+:root{
+  --bg:#F4F3EE;--card:#FFFFFF;--line:#E6E4DC;--line2:#D5D2C6;
+  --ink:#181713;--ink2:#5F5D54;--ink3:#9A978B;
+  --risk:#C0392B;--risk-bg:#FBEFED;--good:#1F7A4C;--good-bg:#EDF6F0;
+  --warn:#A67C1F;--warn-bg:#FAF4E4;--amber:#B0895A;
+}
+body{font-family:"Segoe UI","Microsoft YaHei UI","PingFang SC",-apple-system,sans-serif;background:var(--bg);color:var(--ink);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.mono{font-family:"Cascadia Mono","SF Mono",Consolas,monospace;font-variant-numeric:tabular-nums}
+.app{width:1600px;height:1000px;display:flex}
+
+/* ===== 左侧导航 ===== */
+.nav{width:196px;flex-shrink:0;background:var(--card);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:16px 12px;gap:2px}
+.nav .logo{display:flex;align-items:center;gap:8px;padding:2px 8px 14px}
+.nav .logo .mark{width:26px;height:26px;border-radius:8px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
+.nav .logo b{font-size:14.5px;letter-spacing:-.01em}
+.nav .grp{font-size:10px;color:var(--ink3);letter-spacing:.08em;padding:12px 8px 4px;font-weight:700}
+.nav .item{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:7px;font-size:12.5px;color:var(--ink2);cursor:pointer}
+.nav .item:hover{background:var(--bg)}
+.nav .item.on{background:var(--ink);color:#fff;font-weight:600}
+.nav .item .ic{width:15px;text-align:center;font-size:12px;opacity:.85}
+.nav .sp{flex:1}
+.nav .foot{padding:10px 8px 2px;border-top:1px solid var(--line);font-size:11px;color:var(--ink3)}
+.nav .foot .row{display:flex;align-items:center;gap:6px;padding:3px 0}
+.nav .dot{width:7px;height:7px;border-radius:50%;background:var(--good);display:inline-block}
+
+/* ===== 中间功能区 ===== */
+.main{flex:1;min-width:0;display:flex;flex-direction:column;padding:20px 24px;gap:14px;overflow:hidden}
+.page{display:none;flex-direction:column;gap:14px;height:100%;min-height:0}
+.page.on{display:flex}
+.ph{display:flex;align-items:flex-end;gap:10px;flex-shrink:0}
+.ph .t{font-size:19px;font-weight:800;letter-spacing:-.02em}
+.ph .sub{font-size:11.5px;color:var(--ink3);margin-bottom:2px}
+.ph .ctx{display:flex;gap:6px;margin-left:auto}
+.ph .chip{font-size:11px;color:var(--ink2);background:var(--card);border:1px solid var(--line);border-radius:20px;padding:3px 10px}
+.ph .chip.sel{color:#fff;background:var(--ink);border-color:var(--ink)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 3px rgba(24,23,19,.04)}
+.btn{height:30px;padding:0 14px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--line2);background:var(--card);color:var(--ink)}
+.btn.solid{background:var(--ink);color:#fff;border-color:var(--ink)}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.kpi{padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.kpi .k{font-size:10px;color:var(--ink3);letter-spacing:.04em}
+.kpi .v{font-size:20px;font-weight:800;letter-spacing:-.02em}
+.kpi .d{font-size:10.5px;font-weight:600}
+.kpi .d.up{color:var(--good)}.kpi .d.down{color:var(--risk)}
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{font-size:10.5px;color:var(--ink3);text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);font-weight:600;letter-spacing:.03em}
+.tbl td{padding:7px 10px;border-bottom:1px solid var(--line);color:var(--ink2)}
+.tbl td b{color:var(--ink);font-weight:600}
+.tag{display:inline-block;font-size:10px;font-weight:700;border-radius:4px;padding:1px 6px;line-height:16px}
+.tag.good{background:var(--good-bg);color:var(--good)}
+.tag.risk{background:var(--risk-bg);color:var(--risk)}
+.tag.warn{background:var(--warn-bg);color:var(--warn)}
+.tag.amber{background:#F5EFE9;color:var(--amber)}
+.tag.gray{background:#F0EFEA;color:var(--ink3)}
+.matrix{padding:10px 14px}
+.matrix svg{width:100%;height:auto;display:block}
+.mlegend{display:flex;gap:12px;font-size:10.5px;color:var(--ink2);margin-top:6px;align-items:center;flex-wrap:wrap}
+.mlegend i{width:8px;height:8px;border-radius:4px;display:inline-block;margin-right:4px}
+
+
+/* ===== 右侧 AI 互动窗 ===== */
+.ai{width:384px;flex-shrink:0;background:var(--card);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.ai-top{padding:12px 16px 10px;border-bottom:1px solid var(--line);flex-shrink:0}
+.ai-model{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;color:var(--ink)}
+.ai-model .dot{width:7px;height:7px;border-radius:50%;background:var(--good);display:inline-block}
+.ai-hint{font-size:10px;color:var(--ink3);font-weight:400;border:1px solid var(--line);border-radius:10px;padding:0 7px;line-height:16px}
+.ai-ctx{margin-top:7px;font-size:11.5px;color:var(--ink3);background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:5px 10px}
+.ai-ctx b{color:var(--ink)}
+.ai-quick{display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px 4px;flex-shrink:0}
+.quick{font-size:11px;color:var(--ink2);background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:3px 10px;cursor:pointer}
+.quick:hover{border-color:var(--ink3);color:var(--ink)}
+.ai-scroll{flex:1;min-height:0;overflow:auto;padding:10px 14px;display:flex;flex-direction:column;gap:10px}
+.msg{display:flex;gap:8px;max-width:100%}
+.msg .who{font-size:10px;color:var(--ink3);flex-shrink:0;width:22px;padding-top:3px;text-align:center}
+.msg .bub{font-size:12px;line-height:1.65;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:7px 10px;color:var(--ink2)}
+.msg.u{flex-direction:row-reverse}
+.msg.u .bub{background:var(--ink);color:#fff;border-color:var(--ink)}
+.msg.a .bub{background:var(--card)}
+.msg.a .bub b{color:var(--ink)}
+.trace{background:var(--bg);border:1px dashed var(--line2);border-radius:8px;padding:7px 10px;font-size:11px;color:var(--ink2);margin-left:30px}
+.trace .trow{display:flex;gap:6px;align-items:baseline;line-height:1.8}
+.trace .tres{margin-left:auto;color:var(--ink3);font-size:10.5px}
+.trace .tres2{font-size:10px;color:var(--ink3);margin-top:3px;border-top:1px dashed var(--line2);padding-top:3px}
+.ai-input{padding:10px 14px;border-top:1px solid var(--line);display:flex;gap:7px;align-items:center;flex-shrink:0}
+.ai-input .sel{height:28px;border:1px solid var(--line2);border-radius:7px;font-size:11px;color:var(--ink2);padding:0 6px;background:var(--card);outline:none}
+.ai-input input{flex:1;height:28px;border:1px solid var(--line2);border-radius:7px;font-size:12px;padding:0 10px;outline:none;color:var(--ink)}
+.ai-input input:focus{border-color:var(--ink3)}
+.ai-input .send{width:30px;height:28px;border:none;border-radius:7px;background:var(--ink);color:#fff;font-size:13px;cursor:pointer}
+.ai-foot{padding:8px 16px;border-top:1px solid var(--line);display:flex;align-items:center;font-size:11px;color:var(--ink2);flex-shrink:0}
+
+</style>
+</head>
+
+<body>
+  <div class="app">
+    <!-- 左导航 -->
+    <div class="nav">
+      <div class="logo"><div class="mark">C</div><b>CostHub</b></div>
+      <div class="grp">驾驶舱</div>
+      <div class="item on" data-p="dash"><span class="ic">◧</span>工作台</div>
+      <div class="grp">项目中心</div>
+      <div class="item" data-p="voice"><span class="ic">◷</span>用户原声分析</div>
+      <div class="item" data-p="review"><span class="ic">⚖</span>审价</div>
+      <div class="grp">数据资产</div>
+      <div class="item"><span class="ic">▤</span>器件库</div>
+      <div class="item"><span class="ic">▦</span>模块库</div>
+      <div class="item"><span class="ic">☰</span>工作手账</div>
+      <div class="sp"></div>
+      <div class="foot">
+        <div class="row"><span class="dot"></span>本地模型 qwen3 就绪</div>
+        <div class="row" style="color:var(--ink3)">数据就绪度 5/8</div>
+      </div>
+    </div>
+
+    <!-- 中间功能区 -->
+    <div class="main">
+      <div class="page on" id="p-dash">
+        <div class="ph"><div><div class="t">工作台</div><div class="sub">成本驾驶舱 · 今天 09:41</div></div>
+          <div class="ctx"><span class="chip sel">全部项目</span><span class="chip">有目标的项目 2</span></div>
+        </div>
+        <div class="kpis">
+          <div class="card kpi"><div class="k">总项目</div><div class="v mono">12</div><div class="d up">▲ 2 个新增</div></div>
+          <div class="card kpi"><div class="k">器件数</div><div class="v mono">486</div><div class="d up">▲ 23</div></div>
+          <div class="card kpi"><div class="k">平均 BOM 成本</div><div class="v mono">¥612.4</div><div class="d down">▼ 3.2%</div></div>
+          <div class="card kpi"><div class="k">目标达成率</div><div class="v mono">67%</div><div class="d up">▲ 5%</div></div>
+          <div class="card kpi"><div class="k">待处理情报</div><div class="v mono">4</div><div class="d down">2 条价差超 8%</div></div>
+        </div>
+        <div style="display:flex;gap:14px;flex:1;min-height:0">
+          <div class="card" style="flex:1.2;padding:12px 14px;display:flex;flex-direction:column">
+            <div style="font-size:12.5px;font-weight:700;margin-bottom:8px">项目成本趋势 <span style="font-weight:400;color:var(--ink3);font-size:11px">BOM 合计 · 近 6 期快照</span></div>
+            <svg viewBox="0 0 520 220" style="flex:1"><polyline points="30,170 90,158 150,150 210,146 270,138 330,132 390,124 450,118 490,112" fill="none" stroke="#181713" stroke-width="2.5" stroke-linejoin="round"/><polyline points="30,170 90,158 150,150 210,146 270,138 330,132 390,124 450,118 490,112" fill="none" stroke="#C0392B" stroke-width="1" stroke-dasharray="4 4"/><line x1="30" y1="128" x2="490" y2="128" stroke="#C0392B" stroke-width="1" stroke-dasharray="3 5"/><text x="30" y="120" font-size="10" fill="#C0392B">目标线 ¥600</text><text x="30" y="190" font-size="10" fill="#9A978B">1月</text><text x="470" y="190" font-size="10" fill="#9A978B">6月</text></svg>
+          </div>
+          <div class="card" style="flex:1;padding:12px 14px">
+            <div style="font-size:12.5px;font-weight:700;margin-bottom:8px">目标预警</div>
+            <div style="font-size:11.5px;padding:7px 9px;background:var(--risk-bg);border-left:3px solid var(--risk);border-radius:6px;margin-bottom:7px;color:var(--ink2)"><b style="color:var(--ink)">M270</b> 当前 ¥732 &gt; 目标 ¥680 <span class="tag risk">超支 7.6%</span></div>
+            <div style="font-size:11.5px;padding:7px 9px;background:var(--warn-bg);border-left:3px solid var(--warn);border-radius:6px;margin-bottom:7px;color:var(--ink2)"><b style="color:var(--ink)">P271-M27</b> 驱动板 2 家报价价差 12% <span class="tag warn">待比价</span></div>
+            <div style="font-size:11.5px;padding:7px 9px;background:var(--good-bg);border-left:3px solid var(--good);border-radius:6px;color:var(--ink2)"><b style="color:var(--ink)">P271-L32</b> 已达目标 · 比目标低 ¥18 <span class="tag good">达成</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" id="p-voice">
+        <div class="ph"><div><div class="t">用户原声分析</div><div class="sub">原声 × 成本 = 下一代产品定义</div></div>
+          <div class="ctx"><span class="chip sel">产品 P271-M27</span><span class="chip">原声 86 条</span><span class="chip">⚙ 规格分类 5 个</span><button class="btn solid" style="height:26px">归纳原声</button></div>
+        </div>
+        <div class="card matrix">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+            <span style="font-size:12.5px;font-weight:700">模块价值矩阵</span>
+            <span style="font-size:11px;color:var(--ink3)">声量 × 成本 · 气泡大小=好评率</span>
+            <span style="margin-left:auto;display:flex;gap:4px"><button class="btn" style="height:24px;padding:0 10px;font-size:11px">表格</button><button class="btn solid" style="height:24px;padding:0 10px;font-size:11px">图表</button></span>
+          </div>
+          <svg viewBox="0 0 620 340">
+            <rect x="74" y="32" width="514" height="256" fill="#FBFAF6" stroke="#E6E4DC" rx="6"/>
+            <line x1="331" y1="32" x2="331" y2="288" stroke="#D5D2C6" stroke-dasharray="4 4"/>
+            <line x1="74" y1="160" x2="588" y2="160" stroke="#D5D2C6" stroke-dasharray="4 4"/>
+            <text x="202" y="48" text-anchor="middle" font-size="10.5" font-weight="600" fill="#1F7A4C">好又便宜 → 放大</text>
+            <text x="460" y="48" text-anchor="middle" font-size="10.5" font-weight="600" fill="#B0895A">好但贵 → 降本</text>
+            <text x="460" y="280" text-anchor="middle" font-size="10.5" font-weight="600" fill="#C0392B">花得不值 → 减配</text>
+            <text x="202" y="280" text-anchor="middle" font-size="10.5" font-weight="600" fill="#9A978B">次要</text>
+            <text x="74" y="20" font-size="10.5" fill="#9A978B">声量（提及用户数）</text>
+            <text x="588" y="318" text-anchor="end" font-size="10.5" fill="#9A978B">成本 ¥</text>
+            <circle cx="215" cy="92" r="14" fill="#1F7A4C" fill-opacity="0.18" stroke="#1F7A4C" stroke-width="2"/>
+            <text x="215" y="96" text-anchor="middle" font-size="9.5" font-weight="700" fill="#181713">电源</text>
+            <circle cx="438" cy="60" r="12" fill="#B0895A" fill-opacity="0.18" stroke="#B0895A" stroke-width="2"/>
+            <text x="438" y="64" text-anchor="middle" font-size="9.5" font-weight="700" fill="#181713">面板</text>
+            <circle cx="352" cy="196" r="10" fill="#C0392B" fill-opacity="0.18" stroke="#C0392B" stroke-width="2"/>
+            <text x="352" y="200" text-anchor="middle" font-size="9.5" font-weight="700" fill="#181713">结构</text>
+            <circle cx="140" cy="232" r="8" fill="#9A978B" fill-opacity="0.18" stroke="#9A978B" stroke-width="2"/>
+            <text x="140" y="236" text-anchor="middle" font-size="9.5" font-weight="700" fill="#181713">线材</text>
+            <circle cx="508" cy="228" r="7" fill="#9A978B" fill-opacity="0.18" stroke="#9A978B" stroke-width="2"/>
+            <text x="508" y="232" text-anchor="middle" font-size="9.5" font-weight="700" fill="#181713">包装</text>
+          </svg>
+          <div class="mlegend">
+            <span><i style="background:#1F7A4C"></i>好又便宜</span><span><i style="background:#B0895A"></i>好但贵</span><span><i style="background:#C0392B"></i>花得不值</span><span><i style="background:#9A978B"></i>次要</span>
+            <span style="margin-left:auto;color:var(--ink3)">气泡越大 = 好评率越高</span>
+          </div>
+        </div>
+        <div class="card" style="padding:6px 4px;flex:1;min-height:0;overflow:auto">
+          <table class="tbl">
+            <tr><th>模块</th><th>成本</th><th>声量</th><th>好评率</th><th>类型</th><th>支撑卖点</th></tr>
+            <tr><td><b>电源模块</b></td><td class="mono">¥96.5</td><td class="mono">58</td><td class="mono">86%</td><td><span class="tag good">好又便宜</span></td><td>快充、低功耗</td></tr>
+            <tr><td><b>显示面板</b></td><td class="mono">¥318.0</td><td class="mono">51</td><td class="mono">71%</td><td><span class="tag amber">好但贵</span></td><td>色彩、色域</td></tr>
+            <tr><td><b>结构件</b></td><td class="mono">¥58.2</td><td class="mono">12</td><td class="mono">33%</td><td><span class="tag risk">花得不值</span></td><td>做工（负面）</td></tr>
+            <tr><td><b>线材</b></td><td class="mono">¥18.4</td><td class="mono">5</td><td class="mono">60%</td><td><span class="tag gray">次要</span></td><td>—</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="page" id="p-review">
+        <div class="ph"><div><div class="t">审价</div><div class="sub">贴报价 → 逐项判定合理/偏高/虚高</div></div>
+          <div class="ctx"><span class="chip sel">供应商 B 报价单</span><span class="chip">对照参考价 32 条</span></div>
+        </div>
+        <div class="card" style="padding:12px 14px;display:flex;gap:14px;flex:1;min-height:0">
+          <div style="flex:1;display:flex;flex-direction:column">
+            <div style="font-size:12.5px;font-weight:700;margin-bottom:8px">报价文本 <span style="font-weight:400;color:var(--ink3);font-size:11px">27寸 电竞屏 · 供应商 B</span></div>
+            <div style="flex:1;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11.5px;line-height:1.9;color:var(--ink2);overflow:auto">
+              面板 27寸 QHD 165Hz（M270QAN）　¥610<br>
+              主控板 DP1.4 驱动板　¥185<br>
+              电源适配器 90W　¥42<br>
+              结构件 注塑后壳+支架　¥58<br>
+              线材 套件　¥18
+            </div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column">
+            <div style="font-size:12.5px;font-weight:700;margin-bottom:8px">判定结果 <span style="font-weight:400;color:var(--ink3);font-size:11px">已对照器件库参考价</span></div>
+            <table class="tbl">
+              <tr><th>器件</th><th>报价</th><th>参考区间</th><th>判定</th></tr>
+              <tr><td><b>面板 M270QAN</b></td><td class="mono">¥610</td><td class="mono">¥580–610</td><td><span class="tag good">合理</span></td></tr>
+              <tr><td><b>驱动板</b></td><td class="mono">¥185</td><td class="mono">¥140–160</td><td><span class="tag warn">偏高 16%</span></td></tr>
+              <tr><td><b>电源适配器</b></td><td class="mono">¥42</td><td class="mono">¥28–36</td><td><span class="tag risk">虚高</span></td></tr>
+              <tr><td><b>结构件</b></td><td class="mono">¥58</td><td class="mono">¥48–55</td><td><span class="tag warn">偏高</span></td></tr>
+            </table>
+            <div style="margin-top:auto;padding:9px 10px;background:var(--good-bg);border-left:3px solid var(--good);border-radius:6px;font-size:11.5px;color:var(--ink2)"><b style="color:var(--ink)">议价要点</b>：驱动板对标 C 供应商 ¥150；适配器市场价 ¥30 左右，可要求换 85W 规格降本</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右侧 AI 互动窗 -->
+    <div class="ai">
+      <div class="ai-top">
+        <div class="ai-model"><span class="dot"></span>本地模型 · qwen3 <span class="ai-hint">离线分析</span></div>
+        <div class="ai-ctx" id="aiCtx">当前：<b id="aiCtxB">工作台</b></div>
+      </div>
+      <div class="ai-quick" id="aiQuick"></div>
+      <div class="ai-scroll" id="aiChat">
+        <div class="msg u"><div class="who">我</div><div class="bub">整体成本健康吗？哪些项目要盯？</div></div>
+        <div class="trace">
+          <div class="trow"><span>🔧</span><b>query_projects</b><span class="tres">→ 12 项目</span></div>
+          <div class="trow"><span>🔧</span><b>query_target_status</b><span class="tres">→ 2 超支 · 1 达成</span></div>
+          <div class="tres2">执行记录 · 2 次调用</div>
+        </div>
+        <div class="msg a"><div class="who">模型</div><div class="bub">整体成本在往下走（近 6 期均值 ▼3.2%），但<b> M270 超支 7.6%</b>（¥732 vs 目标 ¥680），主要贵在驱动板（较同类高 12%）。建议：①先谈驱动板价差 ②P271-M27 有 2 条报价情报待处理。要我把这两个跟进记成待办吗？</div></div>
+        <div class="msg u"><div class="who">我</div><div class="bub">记成待办，关联项目 M270</div></div>
+        <div class="trace">
+          <div class="trow"><span>🔧</span><b>create_todo</b><span class="tres">→ 已创建 id 87</span></div>
+        </div>
+        <div class="msg a"><div class="who">模型</div><div class="bub">已记入工作手账：<span class="mono">「谈 M270 驱动板价差」</span>（项目 M270）。</div></div>
+      </div>
+      <div class="ai-input">
+        <select class="sel" id="aiSel"><option>聚焦：当前页面</option><option>审价</option><option>降本</option><option>对标</option><option>原声</option><option>行情</option></select>
+        <input id="aiIn" placeholder="问当前页面的事…（回车发送）">
+        <button class="send">➤</button>
+      </div>
+      <div class="ai-foot">
+        <span>数据就绪度 <b style="color:var(--warn)">3 项缺</b></span>
+        <span style="margin-left:auto;color:var(--ink3)">让 AI 引导我 →</span>
+      </div>
+    </div>
+  </div>
+
+<script>
+var PAGES = {
+  dash: { ctx:'工作台 · 全部项目', quick:['整体成本健康吗？','哪些项目超支要盯？','今天有什么要处理的？','我缺哪些数据？'] },
+  voice:{ ctx:'用户原声分析 · P271-M27', quick:['用户最在意什么？','哪些模块好又便宜？','结构件为什么差评多？','给下一代产品建议'] },
+  review:{ ctx:'审价 · 供应商 B 报价', quick:['审这份报价','驱动板为什么贵？','议价要点是什么？','对照器件库参考价'] }
+};
+function qs(el){return document.querySelector(el)}
+function renderQuick(keys){
+  var box=qs('#aiQuick'); box.innerHTML='';
+  keys.forEach(function(k){var c=document.createElement('div');c.className='quick';c.textContent=k;box.appendChild(c)});
+}
+function setPage(p){
+  document.querySelectorAll('.nav .item').forEach(function(i){i.classList.toggle('on', i.dataset.p===p)});
+  document.querySelectorAll('.page').forEach(function(x){x.classList.toggle('on', x.id==='p-'+p)});
+  var info=PAGES[p];
+  qs('#aiCtxB').textContent=info.ctx;
+  renderQuick(info.quick);
+}
+document.querySelectorAll('.nav .item[data-p]').forEach(function(i){
+  i.addEventListener('click',function(){setPage(i.dataset.p)});
+});
+setPage('dash');
+</script>
+</body>
+</html>

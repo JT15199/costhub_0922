@@ -17,6 +17,7 @@ import { runAutoAudit } from '../autoAudit';
 import AIStatusBar from '../components/AIStatusBar';
 import DailyBrief from '../components/DailyBrief';
 import AutoThinkPanel from '../components/AutoThinkPanel';
+import GoalsCard from '../components/GoalsCard';
 import KeyMaterialInsights from '../components/KeyMaterialInsights';
 
 interface DashboardProps {
@@ -304,6 +305,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
           {/* 🧠 自主分析结论（合并：AI 后台自发分析结果） */}
+          <GoalsCard />
           <AutoThinkPanel mode="inline" onNavigate={onNavigate} />
           {/* 📋 待处理事项（统一入口：AI 情报中心——报价差异/自主建议/巡检发现） */}
           <div style={{ border: '1px solid #E8ECF1', borderRadius: 10, padding: '8px 12px', background: '#FAFBFC', marginTop: 'auto' }}>

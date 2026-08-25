@@ -24,6 +24,7 @@ import { ThemeProvider } from './theme/ThemeContext';
 import { ThemeSwitcher } from './theme/ThemeSwitcher';
 import CloudConfirmBar from './components/CloudConfirmBar';
 import AIUsageGuide from './components/AIUsageGuide';
+import AiPanel from './components/AiPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 import {
   BarChartOutlined, ToolOutlined, AppstoreOutlined, ProjectOutlined,
@@ -538,7 +539,9 @@ export default function App() {
           </Dropdown>
         </div>
       </aside>
-      <main className="main-content" style={{ zoom: `${zoom}%` }}>
+      <main className="main-content" style={{ zoom: `${zoom}%`, display: 'flex', minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>{render()}</div>
+        <AiPanel activePage={active} />
         {render()}
       </main>
 
