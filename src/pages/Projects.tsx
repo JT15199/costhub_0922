@@ -3151,7 +3151,7 @@ export default function Projects() {
               <Button size="small" type={adviceShowDone ? 'default' : 'primary'} onClick={() => setAdviceShowDone(!adviceShowDone)}>
                 {adviceShowDone ? '显示全部' : '仅看待处理'}{(() => { const c = adviceList.filter((x: any) => x.status !== 'open').length; return c > 0 ? `（已处理 ${c}）` : ''; })()}
               </Button>
-              <span style={{ fontSize: 11.5, color: '#94A3B8' }}>处理入口与完整详情见「本地 AI 助手 → 自主建议」</span>
+              <span style={{ fontSize: 11.5, color: '#94A3B8' }}>处理入口与完整详情见驾驶舱「待处理事项」</span>
             </div>
             {(() => {
               const list = adviceShowDone ? adviceList : adviceList.filter((x: any) => x.status === 'open');

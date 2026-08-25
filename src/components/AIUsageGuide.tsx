@@ -49,7 +49,7 @@ export default function AIUsageGuide({ open, onClose, onOpenSettings }: Props) {
   }, [open]);
 
   const copyPrompt = (p: string) => {
-    try { navigator.clipboard.writeText(p); message.success('已复制提问，去「本地 AI 助手」对话里粘贴即可'); }
+    try { navigator.clipboard.writeText(p); message.success('已复制提问，去右侧「AI 协作窗」粘贴即可'); }
     catch { message.info(p); }
   };
 
@@ -75,7 +75,7 @@ export default function AIUsageGuide({ open, onClose, onOpenSettings }: Props) {
         </div>
 
         {/* 2. 怎么用（示例提问） */}
-        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>💬 怎么用（直接复制提问，到「本地 AI 助手」对话里粘贴，AI 会自动调用工具）</div>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>💬 怎么用（直接复制提问，到右侧「AI 协作窗」粘贴，AI 会自动调用工具）</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
           {EXAMPLES.map((e, i) => (
             <div key={i} className="sp-suggest-card" style={{ width: 'calc(50% - 4px)', minWidth: 300, padding: '8px 10px' }} onClick={() => copyPrompt(e.prompt)}>

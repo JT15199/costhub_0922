@@ -1,4 +1,4 @@
-// 本地 Ollama 流式调用（从 LocalAIAssistant 抽出，供本地 AI 助手与演示生成器共用）
+// 本地 Ollama 流式调用（供右侧 AI 协作窗与演示生成器共用）
 // 纯搬移，行为不变
 import { invoke } from '@tauri-apps/api/core';
 

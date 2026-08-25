@@ -13,7 +13,7 @@ const STATUS_TEXT: Record<string, { dot: string; color: string; text: string }> 
   error: { dot: '#EF4444', color: '#DC2626', text: '本地 AI 探测失败' },
 };
 
-export default function AIStatusBar({ onNavigate, compact }: { onNavigate?: (page: string) => void; compact?: boolean }) {
+export default function AIStatusBar({ onNavigate: _onNavigate, compact }: { onNavigate?: (page: string) => void; compact?: boolean }) {
   const [st, setSt] = useState<OllamaStatus | null>(null);
   const [task, setTask] = useState('');
   const [lastDone, setLastDone] = useState('');
@@ -44,7 +44,7 @@ export default function AIStatusBar({ onNavigate, compact }: { onNavigate?: (pag
   const s = st ? STATUS_TEXT[st.reason] : null;
   return (
     <div
-      onClick={() => onNavigate?.('localAI')}
+      onClick={() => window.dispatchEvent(new Event('costhub-ai-focus'))}
       style={{
         display: 'flex', alignItems: 'center', gap: 10,
         marginBottom: compact ? 0 : 14,
@@ -54,7 +54,7 @@ export default function AIStatusBar({ onNavigate, compact }: { onNavigate?: (pag
         border: compact ? 'none' : '1px solid var(--color-border)',
         cursor: 'pointer', flexWrap: 'wrap',
       }}
-      title={st?.connected ? `模型：${st.model} · ${st.baseUrl}` : '点击打开本地 AI 助手'}
+      title={st?.connected ? `模型：${st.model} · ${st.baseUrl}` : '点击聚焦右侧 AI 协作窗'}
     >
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: s?.color || '#6B7280' }}>
         <span

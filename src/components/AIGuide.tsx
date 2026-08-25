@@ -68,7 +68,7 @@ export default function AIGuide({ open, onClose, onOpenSettings }: Props) {
         desc='后台自动比对同物料跨项目报价，发现差异红点提醒；AI 疑似识别需本地模型'
         ready={!!localModel}
         readyText='本地模型已配置，自动扫描生效'
-        warnText='未配置本地模型——在「本地 AI 助手」页配置 Ollama 后自动生效'
+        warnText='未配置本地模型——在「系统设置 → 连接设置」配置 Ollama 后自动生效'
       />
       <Cap
         title='项目 AI 体检'
@@ -110,7 +110,7 @@ export default function AIGuide({ open, onClose, onOpenSettings }: Props) {
         desc='本地判断意图 → 脱敏审计 → 云端查实时行情 → 本地结合数据出建议；发送前自动拦截敏感信息（型号/金额/供应商），全程留痕可查，每日调用有阈值管控'
         ready={llmReady && !!localModel}
         readyText='云端 + 本地均已就绪（可在「本地 AI」设置调整预览/阈值）'
-        warnText={!llmReady ? '未配置云端模型——在「系统设置 → AI 服务」配置后可用' : '未配置本地模型——在「本地 AI 助手」页配置'}
+        warnText={!llmReady ? '未配置云端模型——在「系统设置 → AI 服务」配置后可用' : '未配置本地模型——在「系统设置 → 连接设置」配置'}
       />
       <Cap
         title='物料洞察树（升级）'

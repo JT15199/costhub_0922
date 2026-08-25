@@ -15,7 +15,6 @@ const Reports = lazy(() => import('./pages/Reports'));
 const Decomposition = lazy(() => import('./pages/Decomposition'));
 const SupplierManagement = lazy(() => import('./pages/SupplierManagement'));
 const Settings = lazy(() => import('./pages/Settings'));
-const LocalAIAssistant = lazy(() => import('./pages/LocalAIAssistant'));
 const UserVoice = lazy(() => import('./pages/UserVoice'));
 const QuoteReview = lazy(() => import('./pages/QuoteReview'));
 const WorkLog = lazy(() => import('./pages/WorkLog'));
@@ -59,7 +58,6 @@ const NAV_GROUPS: { title: string; items: typeof NAV }[] = [
     title: 'AI 趋势',
     items: [
       { key: 'decomposition',      label: '物料趋势洞察', icon: <PartitionOutlined />, iconBg: '#EEF2FF', iconColor: '#6366F1' },
-      { key: 'localAI',            label: '本地AI助手', icon: <RobotOutlined />,     iconBg: '#EEF2FF', iconColor: '#6366F1' },
       { key: 'userVoice',          label: '用户原声分析', icon: <MessageOutlined />, iconBg: '#FAF5FF', iconColor: '#8B5CF6' },
       { key: 'quoteReview',        label: 'AI 审价助手', icon: <AuditOutlined />,     iconBg: '#FFF7ED', iconColor: '#F97316' },
     ],
@@ -262,7 +260,7 @@ export default function App() {
     })();
   };
 
-  // AI 使用指南：任何页面可 dispatch costhub-open-ai-guide 打开（本地AI助手页/设置页按钮）
+  // AI 使用指南：任何页面可 dispatch costhub-open-ai-guide 打开（右侧 AI 协作窗/设置页按钮）
   useEffect(() => {
     const h = () => setAiGuideOpen(true);
     window.addEventListener('costhub-open-ai-guide', h);
@@ -305,7 +303,7 @@ export default function App() {
   }, []);
 
   const navigate = useCallback((key: string) => {
-    // 保持目标页面挂载（本地AI助手切走不卸载，切回不重连）
+    // 保持目标页面挂载（页面切走不卸载，切回不重连）
     setMountedPages(prev => {
       const next = new Set(prev);
       next.add(key);
@@ -326,16 +324,6 @@ export default function App() {
     setTimeout(() => window.dispatchEvent(new CustomEvent('costhub-open-insights')), 300);
   }, [navigate]);
 
-  // 数据就绪度引导：dispatch costhub-open-ai-prompt → 切到本地 AI 助手并预填提问（数据就绪度卡片「让 AI 引导我」）
-  // ⚠️ 与 openInsightsEntry 同理：LocalAIAssistant 是懒加载，先 navigate 挂载 + 延迟重发事件双保险；提问内容在 localStorage（costhub-ai-prompt-pending）由助手消费
-  useEffect(() => {
-    const h = () => {
-      navigate('localAI');
-      setTimeout(() => window.dispatchEvent(new CustomEvent('costhub-open-ai-prompt')), 300);
-    };
-    window.addEventListener('costhub-open-ai-prompt', h);
-    return () => window.removeEventListener('costhub-open-ai-prompt', h);
-  }, [navigate]);
 
   const setZoomLevel = (level: number) => {
     setZoom(level);
@@ -353,7 +341,6 @@ export default function App() {
       case 'reports': return <Reports />;
       case 'decomposition': return <Decomposition />;
       case 'supplierManagement': return <SupplierManagement />;
-      case 'localAI': return <LocalAIAssistant />;
       case 'userVoice': return <UserVoice />;
       case 'quoteReview': return <QuoteReview />;
       case 'workLog': return <WorkLog />;

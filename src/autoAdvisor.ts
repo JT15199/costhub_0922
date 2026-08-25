@@ -1,4 +1,4 @@
-// 自主分析引擎：后台规则发现成本机会点/风险点 → 本地 AI 润色建议 → 建议卡片（LocalAIAssistant 展示）
+// 自主分析引擎：后台规则发现成本机会点/风险点 → 本地 AI 润色建议 → 建议卡片（驾驶舱待处理事项展示）
 // 触发：App 级空闲轮询（与 runAutoCompare 同机制，见 App.tsx scheduleAppAdvisor）
 // 数据边界：只读本地库；AI 润色仅本地 Ollama（logLocalAICall 全程留痕）
 

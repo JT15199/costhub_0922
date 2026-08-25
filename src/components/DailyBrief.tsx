@@ -5,7 +5,7 @@ import { Button, Tag } from 'antd';
 import { SyncOutlined, RobotOutlined } from '@ant-design/icons';
 import { runDailyBrief, type BriefResult } from '../dailyBrief';
 
-export default function DailyBrief({ onNavigate, compact, inline }: { onNavigate?: (page: string) => void; compact?: boolean; inline?: boolean }) {
+export default function DailyBrief({ onNavigate: _onNavigate, compact, inline }: { onNavigate?: (page: string) => void; compact?: boolean; inline?: boolean }) {
   const [state, setState] = useState<'loading' | 'done'>('loading');
   const [res, setRes] = useState<BriefResult | null>(null);
   const [genAt, setGenAt] = useState('');
@@ -39,7 +39,7 @@ export default function DailyBrief({ onNavigate, compact, inline }: { onNavigate
         <RobotOutlined style={{ color: '#0A84FF', fontSize: 12, flexShrink: 0 }} />
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{text}</span>
         {state === 'done' && (
-          <a style={{ fontSize: 11, flexShrink: 0, color: '#0A84FF' }} onClick={(e) => { e.stopPropagation(); onNavigate?.('localAI'); }}>活动记录</a>
+          <a style={{ fontSize: 11, flexShrink: 0, color: '#0A84FF' }} onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new Event('costhub-ai-focus')); }}>活动记录</a>
         )}
       </span>
     );
@@ -72,7 +72,7 @@ export default function DailyBrief({ onNavigate, compact, inline }: { onNavigate
       {state === 'done' && (
         <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 6 }}>
           生成于 {genAt} · 全程本地处理，数据不出本机 ·
-          <a style={{ marginLeft: 4 }} onClick={(e) => { e.stopPropagation(); onNavigate?.('localAI'); }}>查看 AI 活动记录 →</a>
+          <a style={{ marginLeft: 4 }} onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new Event('costhub-ai-focus')); }}>查看 AI 活动记录 →</a>
         </div>
       )}
     </div>

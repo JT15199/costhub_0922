@@ -141,7 +141,7 @@ export default function DemoGenerator() {
   // ==================== 生成 ====================
   const generate = async () => {
     if (!material.trim()) { message.warning('请先粘贴素材（案例背景、做法、效果数据）'); return; }
-    if (!model) { message.warning('请先在「本地 AI 助手」中配置 Ollama 模型'); return; }
+    if (!model) { message.warning('请先在 系统设置 → 连接设置 配置 Ollama 模型'); return; }
     setGenerating(true); setStreamText(''); setErrorMsg(''); setLastFile('');
     const pickedHabits = habits.filter(h => picked.includes(h.key));
     const sysPrompt = `你是成本管理领域的演示文稿撰写专家。根据用户提供的素材与参考习惯，输出演示文稿的完整内容结构。只输出 JSON，不要任何解释或代码块围栏。
@@ -331,7 +331,7 @@ JSON 格式（必须严格符合）：
           </div>
           <div style={{ flex: '1 1 260px', minWidth: 240 }}>
             <div style={{ fontSize: 12, color: '#64748B', marginBottom: 6 }}>模型与状态</div>
-            <div style={{ fontSize: 12.5, marginBottom: 4 }}>模型：{model || <span style={{ color: '#CF0A2C' }}>未配置</span>} <span style={{ color: '#94A3B8' }}>（在「本地 AI 助手」页配置）</span></div>
+            <div style={{ fontSize: 12.5, marginBottom: 4 }}>模型：{model || <span style={{ color: '#CF0A2C' }}>未配置</span>} <span style={{ color: '#94A3B8' }}>（在 系统设置 → 连接设置 配置）</span></div>
             <div style={{ fontSize: 12.5 }}>地址：{ollamaUrl}</div>
           </div>
         </div>

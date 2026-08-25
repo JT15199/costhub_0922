@@ -21,7 +21,7 @@ interface LiveState {
   skipped?: string;
 }
 
-export default function AutoThinkPanel({ mode = 'summary', onNavigate }: { mode?: 'summary' | 'full' | 'inline'; onNavigate?: (page: string) => void }) {
+export default function AutoThinkPanel({ mode = 'summary', onNavigate: _onNavigate }: { mode?: 'summary' | 'full' | 'inline'; onNavigate?: (page: string) => void }) {
   const full = mode === 'full';
   const inline = mode === 'inline';
   const [logs, setLogs] = useState<ThinkLog[]>([]);
@@ -116,7 +116,7 @@ export default function AutoThinkPanel({ mode = 'summary', onNavigate }: { mode?
             {l.conclusion && <div style={{ fontSize: 11.5, color: '#6D28D9', lineHeight: 1.5, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical' }}>{l.conclusion}</div>}
           </div>
         ))}
-        {logs.length > 2 && <a style={{ fontSize: 11.5, color: '#0A84FF' }} onClick={() => onNavigate?.('localAI')}>查看全部 →</a>}
+        {logs.length > 2 && <a style={{ fontSize: 11.5, color: '#0A84FF' }} onClick={() => window.dispatchEvent(new Event('costhub-ai-focus'))}>查看全部 →</a>}
       </div>
     );
   }
@@ -126,7 +126,7 @@ export default function AutoThinkPanel({ mode = 'summary', onNavigate }: { mode?
       <div className="card-header">
         <h3><ExperimentOutlined style={{ color: '#7C3AED' }} /> AI 自主分析</h3>
         <span style={{ fontSize: 12, color: '#94A3B8' }}>
-          {full ? 'AI 后台自发分析你的数据（每 15 分钟一轮 + 数据变化后触发）——完整思考过程实时呈现' : 'AI 后台自发分析的关键结论（完整过程见「本地 AI 助手 → 🧠 自主分析」）'}
+          {full ? 'AI 后台自发分析你的数据（每 15 分钟一轮 + 数据变化后触发）——完整思考过程实时呈现' : 'AI 后台自发分析的关键结论（完整过程见驾驶舱「自主分析」）'}
           <Button size="small" style={{ marginLeft: 10 }} icon={<ThunderboltOutlined />} loading={busy} onClick={runNow}>现在分析一轮</Button>
         </span>
       </div>
@@ -139,7 +139,7 @@ export default function AutoThinkPanel({ mode = 'summary', onNavigate }: { mode?
       {/* 实时区：进行中的一轮（summary 只显示状态行，full 显示完整过程） */}
       {live && !full && (
         <div style={{ fontSize: 12, color: live.status === 'error' ? '#DC2626' : '#7C3AED', padding: '6px 2px', marginBottom: 8 }}>
-          {live.status === 'running' ? <span><Spin size="small" /> 🧠 AI 正在自主分析…（见「本地 AI 助手 → 🧠 自主分析」查看过程）</span>
+          {live.status === 'running' ? <span><Spin size="small" /> 🧠 AI 正在自主分析…（见驾驶舱「自主分析」查看过程）</span>
             : live.skipped ? '⏭ ' + live.skipped
             : live.status === 'error' ? '本轮分析失败：' + live.error
             : '✓ 本轮分析完成' + (live.answer ? '：' + cleanProtocolText(live.answer).slice(0, 120) + (cleanProtocolText(live.answer).length > 120 ? '…' : '') : '')}

@@ -22,7 +22,7 @@ export async function setSetting(key: string, value: string) {
 
 
 // ==================== 本地知识条目 / 习惯库（local_ai_context）====================
-// 演示生成的习惯库与本地 AI 助手共用：分类 category（'general' 默认 / 可自定义，如 演示结构/风格描述/素材模板）
+// 演示生成的习惯库与右侧 AI 协作窗共用：分类 category（'general' 默认 / 可自定义，如 演示结构/风格描述/素材模板）
 export async function loadContextEntries() {
   return (await getDb()).select<any[]>('SELECT * FROM local_ai_context ORDER BY updated_at DESC');
 }

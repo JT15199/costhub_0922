@@ -20,7 +20,7 @@ const NOTE_PIN: Record<string, string> = {
   '工具建设': '#00ACC1', '其他': '#757575',
 };
 
-// 通用流式调用（复用 src/ollama.ts 的 startOllamaStream，与本地 AI 助手/演示生成器共用）
+// 通用流式调用（复用 src/ollama.ts 的 startOllamaStream，与右侧 AI 协作窗/演示生成器共用）
 import { startOllamaStream } from '../ollama';
 async function startSummaryStream(
   baseUrl: string, model: string,

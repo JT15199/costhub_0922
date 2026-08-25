@@ -120,7 +120,7 @@ function parseAiGroups(text: string, ungrouped: any[]): any[] {
 export async function runAiIdentifyOnce(rows: any[], aliases: any[]): Promise<any[]> {
   const url = await getSetting('local_ai_base_url', 'http://localhost:11434');
   const model = await getSetting('local_ai_model', '');
-  if (!model) throw new Error('未配置本地模型——请先在「本地 AI 助手」页配置 Ollama 模型');
+  if (!model) throw new Error('未配置本地模型——请在 系统设置 → 连接设置 配置 Ollama 模型');
   const aliasSet = new Set<string>();
   aliases.filter((a: any) => a.source === 'user_confirmed').forEach((a: any) => aliasSet.add(`${normalizePartName(a.alias_name)}|${normalizePartName(a.alias_model)}`));
   const negSet = new Set(aliases.filter((a: any) => a.source === 'marked_different' && a.alias_name.startsWith('#NEG#')).map((a: any) => a.alias_name.slice(5)));

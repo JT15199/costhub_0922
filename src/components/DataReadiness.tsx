@@ -1,6 +1,6 @@
 // 数据就绪度（v2.3.19，2026-08-18 用户：引导客户如何使用——发现缺什么数据、缺了能做到什么样、建议是什么）
 // 扫描本地数据（模型/项目BOM/器件报价/原声/目标/竞品/规格），逐项 有/缺/半 + 现状 + 影响 + 建议
-// 设计：v2 视觉（骨色底+墨色+信号色，无 AI 味）；「让 AI 引导我」→ 预填提问给本地 AI 助手
+// 设计：v2 视觉（骨色底+墨色+信号色，无 AI 味）；「让 AI 引导我」→ 预填提问给右侧 AI 协作窗
 import { useEffect, useState } from 'react';
 import { Button } from 'antd';
 import { RobotOutlined } from '@ant-design/icons';

@@ -57,6 +57,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   const [ctxLabel, setCtxLabel] = useState(PAGE_LABELS[activePage || ''] || '当前页面');
   const [readiness, setReadiness] = useState<{ ok: number; partial: number; missing: number; total: number }>({ ok: 0, partial: 0, missing: 0, total: 0 });
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const followRef = useRef(true);
 
   // 上下文联动：页面切换 + 页面内选中对象（costhub-ai-ctx 事件，detail: { label }）
@@ -83,6 +84,18 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     consume();
     window.addEventListener('costhub-open-ai-prompt', consume);
     return () => window.removeEventListener('costhub-open-ai-prompt', consume);
+  }, []);
+
+  // 聚焦右侧协作窗（原「本地 AI 助手」页入口统一改指向这里）：折叠则展开，然后聚焦输入框
+  useEffect(() => {
+    const h = () => {
+      if (localStorage.getItem('ai-panel-collapsed') === '1') {
+        setCollapsed(false); localStorage.setItem('ai-panel-collapsed', '0');
+      }
+      setTimeout(() => inputRef.current?.focus(), 150);
+    };
+    window.addEventListener('costhub-ai-focus', h);
+    return () => window.removeEventListener('costhub-ai-focus', h);
   }, []);
 
   // 模型状态探测
@@ -336,6 +349,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       <div style={{ padding: '8px 10px', borderTop: '1px solid #E6E4DC', flexShrink: 0 }}>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', background: '#FFFFFF', border: '1px solid #D5D2C6', borderRadius: 9, padding: '3px 3px 3px 10px' }}>
           <input
+            ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }}
