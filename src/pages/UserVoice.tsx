@@ -160,9 +160,9 @@ export default function UserVoice() {
       <div className="page-title"><MessageOutlined /> 用户原声分析{product ? <span style={{ fontSize: 13, color: '#0A84FF', marginLeft: 12 }}>（{product}）</span> : null}</div>
       <Card size="small" style={{ marginBottom: 12 }}>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <AutoComplete size="middle" value={product} style={{ width: 200 }} placeholder="选择/输入产品"
-            options={products.map(p => ({ value: p }))} onChange={v => setProduct(String(v || '').trim())} allowClear
-            onBlur={() => setProduct(String(product).trim())} />
+          <AutoComplete size="middle" value={product} style={{ width: 200 }} placeholder="选择/输入产品（可输入新产品名）"
+            options={products.map(p => ({ value: p }))} onChange={v => setProduct(String(v || '').trim())}
+            onSelect={(v) => setProduct(String(v || '').trim())} allowClear />
           <Button type="primary" icon={<UploadOutlined />} loading={busy} onClick={() => { const input = document.createElement('input'); input.type = 'file'; input.accept = '.xlsx,.xls'; input.onchange = (ev: any) => { const f = ev.target.files?.[0]; if (f) handleFile(f); }; input.click(); }}>导入用户原声（Excel）</Button>
           <span style={{ fontSize: 12, color: '#94A3B8' }}>已导入 <b>{count}</b> 条原声</span>
           <Button icon={<PlayCircleOutlined />} type="primary" loading={busy} onClick={runAnalyze} disabled={running != null}>开始分析（自动分块）</Button>
