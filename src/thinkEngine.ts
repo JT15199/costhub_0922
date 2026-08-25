@@ -150,7 +150,10 @@ export interface ThinkLoopOptions {
   userContent: string;
   localTools: { id: string; desc: string; params: { key: string; type: string; required?: boolean; desc: string }[] }[];
   executeTool: (id: string, args: any) => Promise<{ ok: boolean; text: string }>;
-  approveCloud?: (call: any) => Promise<boolean>;
+  approveCloud?: (call: any) => Promise<boolean | 'pending'>; // true=放行 false=用户拒绝 'pending'=已入队等待确认（不是拒绝，不要误报）
+  abortRef?: { aborted: boolean }; // 2026-08-18 停止功能：外部置 true 立即停止（当前轮清理流式监听并结束，下一轮直接退出）
+  think?: boolean; // 2026-08-18 深度思考开关（默认 true）；false 时思考被关闭，更快
+  images?: string[]; // 2026-08-18 多模态：初始用户消息附带图片（base64 数组，Ollama images 字段，需 VL 模型）
   runCloud?: (call: any) => Promise<any>;
   onEvent?: ThinkEventHandlers;
   maxRounds?: number;
@@ -172,7 +175,7 @@ export function compressMessages(messages: any[], budgetChars = 9000): any[] {
 
 export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText: string; rounds: number; clouds: { call: any; ok: boolean; result: string }[] }> {
   const { startOllamaStream } = await import('./ollama');
-  let messages: any[] = [{ role: 'system', content: opts.systemPrompt }, { role: 'user', content: opts.userContent }];
+  let messages: any[] = [{ role: 'system', content: opts.systemPrompt }, { role: 'user', content: opts.userContent, ...(opts.images && opts.images.length ? { images: opts.images } : {}) }];
   opts.onEvent?.onPrompt?.('user', opts.userContent); // 轨迹：初始问题
   const maxRounds = opts.maxRounds || MAX_THINK_ROUNDS;
   const clouds: { call: any; ok: boolean; result: string }[] = [];
@@ -182,22 +185,32 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
   // 轮内去重：相同 工具+参数 只执行一次
   const callCache = new Map<string, string>();
   for (let round = 1; round <= maxRounds; round++) {
+    if (opts.abortRef?.aborted) break; // 用户已停止
     looped = round;
     opts.onEvent?.onRoundStart?.(round);
     let buffer = ''; // 本轮模型输出全文（思考+正文，含可能的调用标记）
+    // ⚠️ 2026-08-18 停止功能：abortRef.aborted → 清理当前轮流式监听并立即结束本轮（150ms 轮询检测，不打断等不到 onDone 挂死）
+    let streamCleanup: (() => void) | null = null;
+    const stopStream = () => { try { streamCleanup?.(); } catch { } streamCleanup = null; };
     await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const done = () => { if (!settled) { settled = true; clearInterval(iv); stopStream(); resolve(); } };
+      const fail = (e: any) => { if (!settled) { settled = true; clearInterval(iv); stopStream(); reject(e); } };
+      const iv = setInterval(() => { if (opts.abortRef?.aborted) done(); }, 150);
       startOllamaStream(
         opts.baseUrl, opts.model, messages,
         (t) => { buffer += t; opts.onEvent?.onAnswer?.(t); },
         (t) => { buffer += t; opts.onEvent?.onThought?.(t); },
-        () => resolve(),
-        (e) => reject(new Error(e)),
+        () => done(),
+        (e) => fail(new Error(e)),
         // ⚠️ json:false 必须（默认 format:'json' 会强制只输出 JSON，思考/正文被吞 → 无内容）；num_predict 16384 不截断长思考（用户 2026-08-18：所有本地 AI 不要截断）
-        { endpoint: 'native', think: true, json: false, num_predict: 16384 },
-      ).catch(() => { /* 错误走 onError */ });
+        { endpoint: 'native', think: opts.think !== false, json: false, num_predict: 16384 },
+      ).then(c => { streamCleanup = c; }).catch(() => { /* 错误走 onError */ });
     });
     const clean = cleanProtocolText(buffer);
     lastClean = clean;
+    // 用户停止：把已输出的内容当结论，不再调工具/继续
+    if (opts.abortRef?.aborted) { finalText = clean || '(已停止)'; break; }
     const calls = parseProtocolCalls(buffer);
     if (calls.length === 0) { finalText = clean; break; }
     // ⚠️ 单路高质量：每轮只执行前 2 个调用（其余下轮继续），避免一轮并行多工具浅尝
@@ -211,8 +224,20 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
         continue;
       }
       if (call.kind === 'cloud') {
-        const ok = opts.approveCloud ? await opts.approveCloud(call.args) : true;
+        const verdict = opts.approveCloud ? await opts.approveCloud(call.args) : true;
+        let ok: boolean;
         let result: string;
+        // ⚠️ 2026-08-18 修复：审批返回 'pending'（已入队等待确认）≠ 用户拒绝——不得误报"用户拒绝了"，要明确告知去横幅确认
+        if (verdict === 'pending') {
+          ok = false;
+          result = '云端行情申请已加入待确认队列（屏幕底部「🔐 等待云端发送确认」横幅）。请用户到横幅中确认发送；确认后请用户重新提问本任务即可获取行情。你可以先基于本地数据继续分析，不要声称"用户拒绝"。';
+          callCache.set('cloud|' + JSON.stringify(call.args || {}), result);
+          clouds.push({ call: call.args, ok: false, result });
+          opts.onEvent?.onCloudResult?.(call.args, false, result);
+          toolResults.push({ role: 'user', content: '[RESULT]\n' + result });
+          continue;
+        }
+        ok = !!verdict;
         if (ok && opts.runCloud) {
           try {
             const r = await opts.runCloud(call.args);

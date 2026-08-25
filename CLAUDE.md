@@ -215,6 +215,14 @@
 - **上下文联动**：App 传 activePage → PAGE_LABELS 页面名；页面内选中对象 dispatch costhub-ai-ctx {label} 覆盖显示（如"P271-M27"）。
 - **就绪度引导**：AiPanel 底部动态计数（getDataReadiness，不硬编码）+「让 AI 引导我」→ localStorage(costhub-ai-prompt-pending)+costhub-open-ai-prompt → AiPanel 常驻直接消费自动发送（App 不再导航监听）。
 - **移除**：导航「本地AI助手」、render case、App 的 costhub-open-ai-prompt 导航监听。LocalAIAssistant.tsx 已 git rm 彻底删除；GoalsCard 挂驾驶舱 AutoThinkPanel 上方；DemoGenerator 待归位（文件保留无入口）。云端审批仍走 cloudConfirm 横幅（approveCloud=requestCloudConfirm）；runCloud=agentSearchLoop。
+- **增强（2026-08-18 用户反馈轮）**：
+  · **停止生成**：runThinkLoop 加 abortRef（外部置 aborted=true → 150ms 轮询清理当前轮流式监听并结束，已输出内容当结论）；AiPanel 流式时输入区按钮变红色停止钮。
+  · **模型选择**：头部紧凑下拉（/api/tags 拉列表，切换即存 local_ai_model）；detectOllama 同步当前模型。
+  · **深度思考开关**：头部 Switch（localStorage ai-panel-deepthink 默认开）；runThinkLoop 加 think 选项（false 时 startOllamaStream think:false 更快）。
+  · **附件**：输入区 📎 支持 Excel（XLSX 读表文本拼进提问）与图片（base64 走 Ollama images 字段，需 VL 模型如 qwen3-vl）；runThinkLoop 加 images 选项（初始 user message 带 images）。
+  · **头部压缩**：去掉「离线分析」框，模型名合并为下拉，上下文行压缩——表头不再占空间。
+  · **审批三态**：runThinkLoop 的 approveCloud 返回 boolean|'pending'——''pending''=已入队等待确认（不误报"用户拒绝"，明确告知去底部横幅确认后重新提问）；AiPanel 用 getPendingConfirms 区分"入队"vs"本会话已跳过"。
+  · **工具优先**：AiPanel systemPrompt 追加【任务执行】——查已有洞察用 query_price_insights、查行情用 insight_material_trend（走审批）、禁凭空"搜索/综合"，工具结果回填后基于真实数据回答（用户：让AI洞察却没用工具）。
 
 ## 六、工作流约定
 

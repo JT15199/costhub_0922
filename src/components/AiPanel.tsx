@@ -2,12 +2,14 @@
 // 设计：不预设功能——模型持有全部工具清单（文本协议 [TOOL]），对话里自主调用；右侧窗常驻、可折叠、可拖拽调宽
 // 引擎：thinkEngine.runThinkLoop（多轮工具循环 + 轨迹事件）；轨迹=执行记录卡（🔧 工具 / 🔐 云端）
 import { useEffect, useRef, useState } from 'react';
-import { Button, Dropdown, Tooltip, message } from 'antd';
+import { Button, Dropdown, Tooltip, message, Select, Switch } from 'antd';
+import * as XLSX from 'xlsx';
 import {
   PlusOutlined, HistoryOutlined, SendOutlined,
-  RightOutlined, LeftOutlined, QuestionCircleOutlined, ReloadOutlined,
+  RightOutlined, LeftOutlined, QuestionCircleOutlined, ReloadOutlined, StopOutlined,
+  PaperClipOutlined, DeleteOutlined,
 } from '@ant-design/icons';
-import { getSetting, saveAIRequestLog } from '../db';
+import { getSetting, setSetting, saveAIRequestLog } from '../db';
 import { listTools, executeTool } from '../aiTools';
 import { runThinkLoop, buildThinkSystemPrompt } from '../thinkEngine';
 import { detectOllama } from '../aiStatus';
@@ -55,9 +57,15 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   const [streaming, setStreaming] = useState(false);
   const [modelInfo, setModelInfo] = useState<{ ready: boolean; model: string }>({ ready: false, model: '' });
   const [ctxLabel, setCtxLabel] = useState(PAGE_LABELS[activePage || ''] || '当前页面');
+  // 2026-08-18：模型选择 / 深度思考 / 附件（图片+Excel）
+  const [models, setModels] = useState<string[]>([]);
+  const [model, setModel] = useState('');
+  const [deepThink, setDeepThink] = useState(() => localStorage.getItem('ai-panel-deepthink') !== '0');
+  const [attachments, setAttachments] = useState<{ kind: 'excel' | 'image'; name: string; data: string }[]>([]);
   const [readiness, setReadiness] = useState<{ ok: number; partial: number; missing: number; total: number }>({ ok: 0, partial: 0, missing: 0, total: 0 });
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef({ aborted: false });
   const followRef = useRef(true);
 
   // 上下文联动：页面切换 + 页面内选中对象（costhub-ai-ctx 事件，detail: { label }）
@@ -98,11 +106,26 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     return () => window.removeEventListener('costhub-ai-focus', h);
   }, []);
 
+  // 模型列表（/api/tags，供头部下拉选择）
+  useEffect(() => {
+    (async () => {
+      try {
+        const base = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
+        const { invoke } = await import('@tauri-apps/api/core');
+        const r = await invoke<{ success: boolean; body: string }>('http_get', { request: { url: base + '/api/tags', headers: {}, body: null } });
+        if (r?.success) {
+          const data = JSON.parse(r.body || '{}');
+          setModels((data.models || []).map((m: any) => String(m.name || '')));
+        }
+      } catch { /* 拉取失败不影响 */ }
+    })();
+  }, []);
+
   // 模型状态探测
   useEffect(() => {
     let alive = true;
     const check = async () => {
-      try { const st = await detectOllama(); if (alive) setModelInfo({ ready: st.connected, model: st.connected ? st.model : '' }); } catch { }
+      try { const st = await detectOllama(); if (alive) { setModelInfo({ ready: st.connected, model: st.connected ? st.model : '' }); setModel(st.connected ? st.model : ''); } } catch { }
     };
     check();
     const iv = setInterval(check, 30000);
@@ -140,13 +163,25 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   // ===== 发送：模型自主调用工具（runThinkLoop） =====
   const send = async (raw: string) => {
     const text = (raw || '').trim();
-    if (!text || streaming) return;
+    if ((!text && attachments.length === 0) || streaming) return;
+    // 2026-08-18 附件：Excel 表格文本拼进提问；图片 base64 走多模态（images）
+    let userContent = text;
+    const images: string[] = [];
+    if (attachments.length) {
+      const excelParts = attachments.filter(a => a.kind === 'excel');
+      if (excelParts.length) {
+        userContent += (text ? '\n\n' : '') + excelParts.map(a => '【附件：' + a.name + '】\n' + a.data).join('\n\n') + '\n\n请基于以上附件内容一起分析。';
+      }
+      attachments.filter(a => a.kind === 'image').forEach(a => images.push(a.data));
+      setAttachments([]);
+    }
+    abortRef.current.aborted = false;
     if (!modelInfo.ready) { message.warning('本地模型未连接（设置 → 连接设置 → 配置 Ollama 模型并启动）'); return; }
     let sid = sessionId;
-    if (!sid) { sid = await newSession(text.slice(0, 20)); setSessionId(sid); setSessions(await loadSessions()); }
+    if (!sid) { sid = await newSession((userContent || '附件').slice(0, 20)); setSessionId(sid); setSessions(await loadSessions()); }
     const currentSid = sid;
-    setMessages(prev => [...prev, { role: 'user', content: text }]);
-    await saveMsg(currentSid, 'user', text);
+    setMessages(prev => [...prev, { role: 'user', content: userContent }]);
+    await saveMsg(currentSid, 'user', userContent);
     setInput('');
     setStreaming(true);
     setMessages(prev => [...prev, { role: 'assistant', content: '', reasoning: '', steps: [] }]);
@@ -158,9 +193,15 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     );
     let prefCtx = '';
     try { prefCtx = await import('../aiLearning').then(m => m.buildPreferenceContext()); } catch { prefCtx = ''; }
-    const sys = buildThinkSystemPrompt(toolList, prefCtx);
+    const sys = buildThinkSystemPrompt(toolList, prefCtx) + '\n\n【任务执行】用户让你做任何查询/分析/洞察时，必须先用工具获取真实数据再回答：\n' +
+      '· 查已有物料洞察/趋势结论 → query_price_insights\n' +
+      '· 查最新行情趋势（需云端，走审批横幅） → insight_material_trend\n' +
+      '· 查项目/器件/供应商/竞品/原声/目标 → 对应 query_* 工具\n' +
+      '· 计算核验 → calc\n' +
+      '禁止不调工具凭空"搜索/综合"或编造数据；工具结果在 [RESULT] 返回后基于真实数据回答。数据不足就明确说缺什么。';
     const baseUrl = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
-    const model = await getSetting('local_ai_model', '');
+    // 用 state model（头部下拉选择已同步 setSetting；detectOllama 同步）
+    if (!(model || modelInfo.model)) { message.warning('未选择模型（头部下拉选择）'); setStreaming(false); return; }
 
     const appendStep = (st: Step) => {
       setMessages(prev => {
@@ -174,17 +215,24 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     let finalText = '';
     try {
       const res = await runThinkLoop({
-        baseUrl, model, systemPrompt: sys, userContent: text,
+        baseUrl, model, systemPrompt: sys, userContent,
+        think: deepThink,
+        images,
         localTools: tools.map(x => ({ id: x.id, desc: x.desc, params: x.params })),
         executeTool: async (id, args) => { try { return await executeTool(id, args); } catch (e: any) { return { ok: false, text: String(e?.message || e) }; } },
         approveCloud: async (call) => {
-          const { requestCloudConfirm } = await import('../cloudConfirm');
-          return requestCloudConfirm({ material: String(call.material_name || ''), category: String(call.category || '') });
+          const { requestCloudConfirm, getPendingConfirms } = await import('../cloudConfirm');
+          const material = String(call.material_name || '');
+          const ok = await requestCloudConfirm({ material, category: String(call.category || '') });
+          if (ok) return true;
+          // false 分两种情况：①刚入队/已在队列=等待确认（'pending'，不能误报"用户拒绝"）②本会话已跳过=真拒绝
+          return getPendingConfirms().some(p => p.material === material) ? 'pending' : false;
         },
         runCloud: async (call) => {
           const { agentSearchLoop } = await import('../trendService');
           return agentSearchLoop(String(call.material_name || ''), String(call.category || ''), 'price-trend');
         },
+        abortRef: abortRef.current,
         onEvent: {
           onRoundStart: () => setMessages(prev => {
             const arr = [...prev]; const last = arr[arr.length - 1];
@@ -234,6 +282,39 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     } catch { /* 忽略 */ }
   };
 
+  // ===== 附件选择（2026-08-18 用户：对话框要能添加图片和 excel 等文件） =====
+  const pickAttachment = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.xls,image/*';
+    input.onchange = async (ev: any) => {
+      const file = ev.target?.files?.[0];
+      if (!file) return;
+      try {
+        if (/\.(xlsx|xls)$/i.test(file.name)) {
+          const buf = await file.arrayBuffer();
+          const wb = XLSX.read(buf);
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, { defval: '', header: 1 }) as any[][];
+          const text = rows.slice(0, 120).map((r: any[]) => (r || []).map(String).join('\t')).join('\n');
+          setAttachments(prev => [...prev, { kind: 'excel', name: file.name, data: text }]);
+          message.success('已附加表格：' + file.name);
+        } else {
+          const reader = new FileReader();
+          reader.onload = () => { setAttachments(prev => [...prev, { kind: 'image', name: file.name, data: String(reader.result || '') }]); message.success('已附加图片：' + file.name + '（需支持视觉的模型，如 qwen3-vl）'); };
+          reader.readAsDataURL(file);
+        }
+      } catch (e: any) { message.error('附件读取失败：' + String(e?.message || e)); }
+    };
+    input.click();
+  };
+
+  // ===== 停止生成（2026-08-18 用户：模型没有停止功能） =====
+  const stopGen = () => {
+    abortRef.current.aborted = true;
+    message.info('已请求停止，模型输出会尽快结束');
+  };
+
   // sendRef：稳定引用（预填自动发送用，避免闭包捕获旧 send）
   const sendRef = useRef<((raw: string) => void) | null>(null);
   useEffect(() => { sendRef.current = send; });
@@ -263,39 +344,40 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         style={{ position: 'absolute', left: -3, top: 0, bottom: 0, width: 6, cursor: 'col-resize', zIndex: 5 }}
       />
 
-      {/* 头部 */}
-      <div style={{ padding: '10px 12px 8px', borderBottom: '1px solid #E6E4DC', flexShrink: 0 }}>
+      {/* 头部（紧凑：模型选择 + 深度思考 + 操作按钮） */}
+      <div style={{ padding: '8px 10px 6px', borderBottom: '1px solid #E6E4DC', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 7, height: 7, borderRadius: 4, background: modelInfo.ready ? '#1F7A4C' : '#C0392B', display: 'inline-block' }} />
-          <span style={{ fontSize: 12, fontWeight: 700, color: '#181713' }}>
-            {modelInfo.ready ? modelInfo.model : '本地模型未连接'}
-          </span>
-          <span style={{ fontSize: 10, color: '#9A978B', border: '1px solid #E6E4DC', borderRadius: 9, padding: '0 6px', lineHeight: 16 }}>离线分析</span>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
-            <Tooltip title="AI 使用指南">
-              <Button type="text" size="small" icon={<QuestionCircleOutlined />} style={{ color: '#9A978B' }} onClick={() => window.dispatchEvent(new Event('costhub-open-ai-guide'))} />
-            </Tooltip>
-            <Tooltip title="新对话">
-              <Button type="text" size="small" icon={<PlusOutlined />} style={{ color: '#5F5D54' }} onClick={newChat} />
-            </Tooltip>
-            <Dropdown
-              menu={{ items: sessions.map(s => ({ key: String(s.id), label: s.title || ('会话 #' + s.id), onClick: () => switchSession(s.id) })) }}
-              placement="bottomRight"
-            >
-              <Tooltip title="历史会话">
-                <Button type="text" size="small" icon={<HistoryOutlined />} style={{ color: '#5F5D54' }} />
-              </Tooltip>
+          <span style={{ width: 6, height: 6, borderRadius: 3, background: modelInfo.ready ? '#1F7A4C' : '#C0392B', flexShrink: 0 }} />
+          <Select
+            size="small" variant="borderless" showSearch
+            style={{ width: 136, flexShrink: 0 }}
+            value={model || undefined}
+            placeholder={modelInfo.ready ? '选择模型' : '未连接'}
+            options={models.map(m => ({ value: m, label: m }))}
+            onChange={(v: string) => { setModel(v); setSetting('local_ai_model', v).catch(() => {}); setModelInfo(prev => ({ ...prev, model: v, ready: true })); }}
+            popupMatchSelectWidth={false}
+            title={modelInfo.ready ? '本地模型（Ollama）' : '本地模型未连接'}
+          />
+          <Tooltip title="深度思考：打开则模型先思考再回答（更深入，较慢）">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: deepThink ? '#181713' : '#9A978B', cursor: 'pointer', flexShrink: 0, userSelect: 'none' }}
+              onClick={() => { const v = !deepThink; setDeepThink(v); localStorage.setItem('ai-panel-deepthink', v ? '1' : '0'); }}>
+              <Switch size="small" checked={deepThink} style={{ background: deepThink ? '#181713' : '#B8B5AA' }} />
+              深度思考
+            </span>
+          </Tooltip>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 1 }}>
+            <Tooltip title="AI 使用指南"><Button type="text" size="small" icon={<QuestionCircleOutlined />} style={{ color: '#9A978B' }} onClick={() => window.dispatchEvent(new Event('costhub-open-ai-guide'))} /></Tooltip>
+            <Tooltip title="新对话"><Button type="text" size="small" icon={<PlusOutlined />} style={{ color: '#5F5D54' }} onClick={newChat} /></Tooltip>
+            <Dropdown menu={{ items: sessions.map(s => ({ key: String(s.id), label: s.title || ('会话 #' + s.id), onClick: () => switchSession(s.id) })) }} placement="bottomRight">
+              <Tooltip title="历史会话"><Button type="text" size="small" icon={<HistoryOutlined />} style={{ color: '#5F5D54' }} /></Tooltip>
             </Dropdown>
-            <Tooltip title="折叠">
-              <Button type="text" size="small" icon={<RightOutlined />} style={{ color: '#5F5D54' }} onClick={toggleCollapse} />
-            </Tooltip>
+            <Tooltip title="折叠"><Button type="text" size="small" icon={<RightOutlined />} style={{ color: '#5F5D54' }} onClick={toggleCollapse} /></Tooltip>
           </div>
         </div>
-        <div style={{ marginTop: 7, fontSize: 11.5, color: '#5F5D54', background: '#FFFFFF', border: '1px solid #E6E4DC', borderRadius: 7, padding: '4px 9px', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ color: '#9A978B' }}>当前：</span><b style={{ color: '#181713', fontWeight: 600 }}>{ctxLabel}</b>
+        <div style={{ marginTop: 4, fontSize: 11, color: '#5F5D54', background: '#FFFFFF', border: '1px solid #E6E4DC', borderRadius: 6, padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ color: '#9A978B' }}>当前</span><b style={{ color: '#181713', fontWeight: 600 }}>{ctxLabel}</b>
         </div>
       </div>
-
       {/* 对话区 */}
       <div ref={scrollRef} onScroll={onScroll} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {messages.length === 0 && !streaming ? (
@@ -347,7 +429,21 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
 
       {/* 输入区 */}
       <div style={{ padding: '8px 10px', borderTop: '1px solid #E6E4DC', flexShrink: 0 }}>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', background: '#FFFFFF', border: '1px solid #D5D2C6', borderRadius: 9, padding: '3px 3px 3px 10px' }}>
+        {attachments.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 5 }}>
+            {attachments.map((a, ai) => (
+              <span key={ai} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#FBFAF6', border: '1px solid #E6E4DC', borderRadius: 5, padding: '2px 7px', fontSize: 10.5, color: '#5F5D54' }}>
+                <span>{a.kind === 'image' ? '🖼' : '📄'}</span>
+                <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+                <Button type="text" size="small" icon={<DeleteOutlined />} style={{ fontSize: 10, width: 16, height: 16, padding: 0, color: '#9A978B' }} onClick={() => setAttachments(prev => prev.filter((_, i) => i !== ai))} />
+              </span>
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', background: '#FFFFFF', border: '1px solid #D5D2C6', borderRadius: 9, padding: '3px 3px 3px 6px' }}>
+          <Tooltip title="附加文件（Excel / 图片）">
+            <Button type="text" size="small" icon={<PaperClipOutlined />} style={{ color: '#9A978B', flexShrink: 0 }} onClick={pickAttachment} />
+          </Tooltip>
           <input
             ref={inputRef}
             value={input}
@@ -357,11 +453,19 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
             disabled={streaming}
             style={{ flex: 1, border: 'none', outline: 'none', fontSize: 12.5, background: 'transparent', color: '#181713', padding: '6px 0' }}
           />
-          <Button
-            type="primary" size="small" icon={<SendOutlined />}
-            onClick={() => send(input)} loading={streaming}
-            style={{ background: '#181713', borderColor: '#181713', borderRadius: 7 }}
-          />
+          {streaming ? (
+            <Button
+              size="small" icon={<StopOutlined />}
+              onClick={stopGen}
+              style={{ background: '#C0392B', borderColor: '#C0392B', color: '#fff', borderRadius: 7 }}
+            />
+          ) : (
+            <Button
+              type="primary" size="small" icon={<SendOutlined />}
+              onClick={() => send(input)}
+              style={{ background: '#181713', borderColor: '#181713', borderRadius: 7 }}
+            />
+          )}
         </div>
         <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', fontSize: 10.5, color: '#9A978B' }}>
           <span>数据就绪度</span>
