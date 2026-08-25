@@ -329,7 +329,25 @@ const tools: AiTool[] = [
       }
       const { agentSearchLoop } = await import('./trendService');
       const r = await agentSearchLoop(a.material_name, a.category || '', 'price-trend');
-      return '「' + a.material_name + '」行情：趋势 ' + (r.trend_direction || '信号不明确') + '，置信度 ' + (r.confidence_level || '中') + (r.magnitude_min != null ? '，幅度 ' + r.magnitude_min + '%~' + (r.magnitude_max ?? '') + '%' : '') + '\n摘要：' + (r.summary || '') + (r.suggested_action ? '\n建议：' + r.suggested_action : '');
+      // 2026-08-18 数据一致性：洞察结果同步写入 trend_snapshots（匹配物料洞察列表），Decomposition 卡片自动更新
+      let synced = false;
+      try {
+        const { getDb, saveTrendSnapshot } = await import('./db');
+        const db = await getDb();
+        const items = await db.select<any[]>('SELECT * FROM trend_items WHERE query_category LIKE ? ORDER BY id DESC LIMIT 1', ['%' + a.material_name + '%']);
+        if (items.length) {
+          await saveTrendSnapshot({
+            trend_item_id: items[0].id, source_type: 'ai_panel',
+            direction: r.trend_direction || '', confidence_level: r.confidence_level || '',
+            summary: r.summary || '', suggested_action: r.suggested_action || '',
+            skill_used: 'insight_material_trend', magnitude_min: r.magnitude_min, magnitude_max: r.magnitude_max,
+          });
+          await db.execute("UPDATE trend_items SET last_queried_at=datetime('now','localtime') WHERE id=?", [items[0].id]);
+          synced = true;
+          try { window.dispatchEvent(new CustomEvent('costhub-trend-updated')); } catch { /* 非浏览器忽略 */ }
+        }
+      } catch (e) { console.error('同步洞察列表失败:', e); }
+      return '「' + a.material_name + '」行情：趋势 ' + (r.trend_direction || '信号不明确') + '，置信度 ' + (r.confidence_level || '中') + (r.magnitude_min != null ? '，幅度 ' + r.magnitude_min + '%~' + (r.magnitude_max ?? '') + '%' : '') + '\n摘要：' + (r.summary || '') + (r.suggested_action ? '\n建议：' + r.suggested_action : '') + (synced ? '\n✅ 已同步更新洞察列表（物料趋势洞察页卡片已更新）' : '\n（该物料不在洞察列表 trend_items 中，未保存卡片；可去物料趋势洞察页添加后再次洞察）');
     },
   },
   {

@@ -543,6 +543,13 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
     loadQuickItems();
   }, [loadTree, loadWatchedParts, loadQuickItems]);
 
+  // 右侧 AI 协作窗洞察完成 → 实时刷新卡片（insight_material_trend 写库后 dispatch costhub-trend-updated）
+  useEffect(() => {
+    const h = () => { loadTree(); loadQuickItems(); };
+    window.addEventListener('costhub-trend-updated', h);
+    return () => window.removeEventListener('costhub-trend-updated', h);
+  }, [loadTree, loadQuickItems]);
+
   // 页面激活时重新加载（器件库标记/取消关注、项目管理改动后切过来要同步）
   useEffect(() => {
     const handler = (e: Event) => {
