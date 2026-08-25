@@ -213,18 +213,26 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     let prefCtx = '';
     try { prefCtx = await import('../aiLearning').then(m => m.buildPreferenceContext()); } catch { prefCtx = ''; }
     const sys = buildThinkSystemPrompt(toolList, prefCtx) + '\n\n【任务执行】用户让你做任何查询/分析/洞察时，必须先用工具获取真实数据再回答：\n' +
-      '· 查已有物料洞察/趋势结论 → query_price_insights\n' +
-      '· 查物料是否洞察过/最近洞察结论 → query_material_insight（如 Scaler IC）\n' +
-      '· 查最新行情趋势（需云端，走审批横幅） → insight_material_trend\n' +
+      '· 更新/查询某物料的最新行情洞察（如"更新 Scaler IC 行情"）→ 必须两步都做完，缺一不可：\n' +
+      '   ① query_material_insight({"material_name":"物料名"}) 查历史结论\n' +
+      '   ② insight_material_trend({"material_name":"物料名","category":"品类"}) 查最新行情（云端，需底部横幅审批；审批确认后会自动续跑）\n' +
+      '   注意：即使①已有历史结论，也必须做②——"更新"就是要最新行情，不能只复述历史后说"请提供更多数据"就结束。\n' +
+      '· 保持物料一致：用户指定什么物料就用什么（如 Scaler IC），严禁擅自换成其他物料（如液晶面板）。\n' +
       '· 查项目/器件/供应商/竞品/原声/目标 → 对应 query_* 工具\n' +
       '· 计算核验 → calc\n' +
-      '禁止不调工具凭空"搜索/综合"或编造数据；工具结果在 [RESULT] 返回后基于真实数据回答。数据不足就明确说缺什么。';
+      '【严禁】行情/洞察类任务调用 query_project_bom / query_project_cost / query_part_suppliers / query_project_health / compare_subcategory_cost 等与物料行情无关的工具。\n' +
+      '【禁止自言自语】不要输出"让我先查看…""现在我需要…"这类计划性独白——需要数据就直接输出 [TOOL] 调用标记，否则直接给结论。\n' +
+      '【数据铁律】所有价格/百分比/份额/趋势数字必须来自工具 [RESULT] 返回的真实数据；禁止编造（如"$100-$150"）；工具没查到就明确说"未查到该物料行情数据"；输出前自检每个数字都能在工具结果里找到。';
     const baseUrl = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
     // 用 state model（头部下拉选择已同步 setSetting；detectOllama 同步）
     if (!(model || modelInfo.model)) { message.warning('未选择模型（头部下拉选择）'); setStreaming(false); return; }
 
     // 数字防幻觉证据收集（工具/云端结果原文，供 verifyConclusionNumbers 校验结论文本）
     const evidenceParts: string[] = [];
+
+    // 物料上下文保护：从提问提取目标物料（"更新X的行情"→X），防止模型跑题到其他物料（用户：Scaler IC 被换成液晶面板）
+    const hintMatch = userContent.match(/(?:更新|查|看|洞察|分析)(?:一下)?([^\s，。,.、]{1,24}?)(?:的|的行情|的洞察|的走势|行情|趋势|洞察|价格)/);
+    const targetMaterial = hintMatch ? hintMatch[1].trim() : '';
 
     const appendStep = (st: Step) => {
       setMessages(prev => {
@@ -246,6 +254,13 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           const res = await executeTool(id, args);
           if (!res.ok && res.text.includes('等待云端发送确认')) pendingRetryRef.current = { prompt: userContent };
           evidenceParts.push(res.text || '');
+          // 物料一致性：用户指定了物料，模型却查别的 → 拦截提示（用户：Scaler IC 被换成液晶面板）
+          if (targetMaterial && (id === 'query_material_insight' || id === 'insight_material_trend')) {
+            const used = String(args?.material_name || '');
+            if (used && used !== targetMaterial && !used.includes(targetMaterial) && !targetMaterial.includes(used)) {
+              return { ...res, text: '[提示] 用户指定的物料是「' + targetMaterial + '」，但你查询的是「' + used + '」。请用「' + targetMaterial + '」重新调用 ' + id + ' 工具，不要换成其他物料。' };
+            }
+          }
           // 行情任务软拦截：无关工具调用给提示，引导改用行情工具（用户：更新 Scaler IC 行情却查了 M270 项目）
           if (isTrendTask(userContent) && IRRELEVANT_FOR_TREND.includes(id)) {
             return { ...res, text: res.text + '\n\n[提示] 当前是行情/洞察任务，你调用了与物料行情无关的工具。请改用 query_material_insight 查历史洞察、insight_material_trend 查最新行情（需审批），不要再查项目/器件数据。' };
