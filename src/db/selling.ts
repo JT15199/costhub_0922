@@ -33,6 +33,16 @@ async function ensureSellingTables() {
       voice_dimension_id INTEGER NOT NULL
     )`);
   } catch { }
+  // 每项目「规格分类」模板（用户 2026-08-18：具体特性有针对不同项目的大概规格分类，AI 分析往上面靠）
+  try {
+    await d.execute(`CREATE TABLE IF NOT EXISTS project_spec_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      spec_name TEXT NOT NULL,
+      spec_value TEXT DEFAULT '',
+      sort_order INTEGER DEFAULT 0
+    )`);
+  } catch { }
   try { await d.execute("ALTER TABLE selling_points ADD COLUMN positive INTEGER DEFAULT 0"); } catch { }
   try { await d.execute("ALTER TABLE selling_points ADD COLUMN negative INTEGER DEFAULT 0"); } catch { }
   ensured = true;
@@ -52,6 +62,21 @@ export async function addSellingPoint(projectId: number, product: string, name: 
 export async function updateSellingPoint(id: number, name: string, description = '') {
   await ensureSellingTables();
   await (await getDb()).execute('UPDATE selling_points SET name=?, description=? WHERE id=?', [name, description, id]);
+}
+export async function getProjectSpecTemplates(projectId: number) {
+  await ensureSellingTables();
+  return (await getDb()).select<any[]>('SELECT * FROM project_spec_templates WHERE project_id = ? ORDER BY sort_order, id', [projectId]);
+}
+export async function saveProjectSpecTemplate(projectId: number, specName: string, specValue = '', id?: number) {
+  await ensureSellingTables();
+  const d = await getDb();
+  if (id) { await d.execute('UPDATE project_spec_templates SET spec_name=?, spec_value=? WHERE id=?', [specName, specValue, id]); return id; }
+  const r = await d.execute('INSERT INTO project_spec_templates (project_id, spec_name, spec_value) VALUES (?,?,?)', [projectId, specName, specValue]);
+  return Number(r.lastInsertId) || 0;
+}
+export async function deleteProjectSpecTemplate(id: number) {
+  await ensureSellingTables();
+  await (await getDb()).execute('DELETE FROM project_spec_templates WHERE id=?', [id]);
 }
 export async function setSellingPointVoice(id: number, positive: number, negative: number) {
   await ensureSellingTables();

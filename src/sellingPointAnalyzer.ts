@@ -238,9 +238,16 @@ export function parseAiSuggest(text: string): { name: string; description: strin
 
 // ===== AI 智能分析（统一流程，2026-08-18）：按品类+档位+BOM 模块，自动给出卖点及对应模块 =====
 // 上一代已上市无法改变，其原声×成本 = 下一代产品定义指导；卖点先由 AI 给，用户再修改
-export function buildAiUnifiedPrompt(project: { tier?: string; category?: string }, modules: string[]): { system: string; user: string } {
-  const system = '你是产品经理。下面是一个产品的品类/档位和 BOM 模块清单。请识别出这个产品最有价值的卖点（用户会为之买单的差异化特性），并为每个卖点关联对应的 BOM 模块：一个卖点可关联多个模块，一个模块也可被多个卖点关联（同一个模块可能支撑不同特性）。只输出 JSON：{"selling_points":[{"name":"卖点名（不超过8字）","description":"一句话说明","modules":["模块名"]}]}，不要任何其他文字。';
-  const user = '产品品类：' + (project?.category || '未指定') + '；档位：' + (project?.tier || '未指定') + '\nBOM 模块：' + (modules.join('、') || '无') + '\n\n请给出 5-8 个卖点及对应模块。';
+export function buildAiUnifiedPrompt(project: { tier?: string; category?: string }, modules: string[], specs?: { name: string; value: string }[]): { system: string; user: string } {
+  const hasSpecs = !!specs && specs.length > 0;
+  const specLine = hasSpecs
+    ? '\n\n规格分类（请严格按这些分类生成卖点——不新增、不改名；description 里填该项目对应的大概规格值）：\n' + specs!.map((s, i) => (i + 1) + '. ' + s.name + (s.value ? '（参考规格：' + s.value + '）' : '')).join('\n')
+    : '';
+  const system = '你是产品经理。下面是一个产品的品类/档位和 BOM 模块清单。' + (hasSpecs
+    ? '用户已给出本项目的「规格分类」，请严格按这些分类生成卖点（不新增、不改名），description 里给出该档位的大概规格值。'
+    : '请识别出这个产品最有价值的卖点（用户会为之买单的差异化特性）。') +
+    '为每个卖点关联对应的 BOM 模块：一个卖点可关联多个模块，一个模块也可被多个卖点关联（同一个模块可能支撑不同特性）。只输出 JSON：{"selling_points":[{"name":"卖点名（不超过8字）","description":"一句话说明","modules":["模块名"]}]}，不要任何其他文字。';
+  const user = '产品品类：' + (project?.category || '未指定') + '；档位：' + (project?.tier || '未指定') + '\nBOM 模块：' + (modules.join('、') || '无') + specLine + '\n\n请给出卖点及对应模块。';
   return { system, user };
 }
 

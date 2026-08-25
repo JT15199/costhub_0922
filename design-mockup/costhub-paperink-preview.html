@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>CostHub · 纸墨风格预览（驾驶舱 + AI 助手 + 轨迹时间线）</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { width:1600px; height:1000px; overflow:hidden; }
+  :root{
+    --paper:#F2F1EB; --card:#FFFFFF; --line:#E3E1D6; --line-strong:#CDCABD;
+    --ink:#211F19; --ink2:#5A584E; --ink3:#8F8D81;
+    --good:#1E7A4D; --bad:#BC3E2B; --warn:#A9761C; --info:#33628C;
+    --hover:#FAF9F4; --sel:#F4F2EA;
+  }
+  body{ font-family:"Segoe UI","Microsoft YaHei UI","PingFang SC",sans-serif; background:var(--paper); color:var(--ink); font-size:13px; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .mono{ font-family:"Cascadia Mono",Consolas,monospace; font-feature-settings:"tnum"; }
+  .app{ display:flex; width:1600px; height:1000px; }
+  .side{ width:212px; background:var(--card); border-right:1px solid var(--line); display:flex; flex-direction:column; flex-shrink:0; }
+  .brand{ display:flex; align-items:center; gap:10px; padding:18px 18px 14px; }
+  .brand-mark{ width:26px; height:26px; background:var(--ink); border-radius:5px; color:#fff; display:flex; align-items:center; justify-content:center; font-family:Consolas,monospace; font-size:14px; font-weight:700; }
+  .brand-name{ font-size:14px; font-weight:700; letter-spacing:.04em; }
+  .brand-sub{ font-size:10px; color:var(--ink3); margin-top:1px; }
+  .nav{ flex:1; overflow:hidden; padding:4px 10px 10px; }
+  .nav-group{ margin-top:12px; }
+  .nav-group-title{ font-size:10px; color:var(--ink3); letter-spacing:.14em; font-weight:600; padding:0 8px 5px; }
+  .nav-item{ display:flex; align-items:center; gap:9px; padding:6px 8px; border-radius:5px; color:var(--ink2); cursor:pointer; position:relative; user-select:none; }
+  .nav-item:hover{ background:var(--hover); color:var(--ink); }
+  .nav-item.active{ background:var(--sel); color:var(--ink); font-weight:600; }
+  .nav-item.active::before{ content:""; position:absolute; left:-10px; top:7px; bottom:7px; width:2.5px; background:var(--ink); border-radius:0 2px 2px 0; }
+  .nav-item svg{ width:15px; height:15px; flex-shrink:0; opacity:.75; }
+  .nav-item.active svg{ opacity:1; }
+  .nav-badge{ margin-left:auto; min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:var(--ink); color:#fff; font-size:10px; font-weight:600; display:flex; align-items:center; justify-content:center; font-family:Consolas,monospace; }
+  .side-foot{ border-top:1px solid var(--line); padding:10px 18px 12px; }
+  .foot-row{ display:flex; align-items:center; justify-content:space-between; }
+  .avatar{ width:22px; height:22px; border-radius:4px; background:#E7E4D9; color:var(--ink2); font-size:10px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+  .foot-name{ font-size:11.5px; color:var(--ink2); }
+  .main{ flex:1; display:flex; flex-direction:column; min-width:0; }
+  .topbar{ height:54px; border-bottom:1px solid var(--line); display:flex; align-items:center; padding:0 22px; gap:16px; background:rgba(255,255,255,.4); }
+  .page-title{ font-size:17px; font-weight:700; letter-spacing:.01em; }
+  .page-sub{ font-size:11.5px; color:var(--ink3); margin-top:1px; }
+  .topbar-spacer{ flex:1; }
+  .searchbox{ display:flex; align-items:center; gap:7px; width:230px; height:30px; border:1px solid var(--line-strong); border-radius:5px; background:var(--card); padding:0 9px; color:var(--ink3); }
+  .searchbox .ph{ font-size:12px; flex:1; }
+  kbd{ font-family:Consolas,monospace; font-size:10px; color:var(--ink3); border:1px solid var(--line-strong); border-bottom-width:2px; border-radius:3px; padding:0 4px; background:var(--paper); }
+  .model-pill{ display:flex; align-items:center; gap:6px; height:30px; padding:0 11px; border:1px solid var(--line-strong); border-radius:15px; background:var(--card); font-size:11.5px; color:var(--ink2); }
+  .dot{ width:7px; height:7px; border-radius:50%; background:var(--good); }
+  .iconbtn{ width:30px; height:30px; border-radius:5px; display:flex; align-items:center; justify-content:center; color:var(--ink2); position:relative; border:1px solid transparent; cursor:pointer; }
+  .iconbtn:hover{ background:var(--card); border-color:var(--line-strong); }
+  .iconbtn svg{ width:15px; height:15px; }
+  .iconbtn .ping{ position:absolute; top:6px; right:7px; width:6px; height:6px; border-radius:50%; background:var(--bad); border:1.5px solid var(--paper); }
+  svg{ fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+  .content{ flex:1; padding:16px 22px 12px; display:flex; flex-direction:column; gap:12px; overflow:hidden; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:6px; display:flex; flex-direction:column; min-height:0; }
+  .card-h{ display:flex; align-items:center; gap:8px; padding:9px 16px 8px; border-bottom:1px solid var(--line); font-size:12.5px; font-weight:600; }
+  .card-h .hint{ font-size:10.5px; color:var(--ink3); font-weight:400; margin-left:auto; }
+  .list{ padding:4px 0; overflow:hidden; }
+  .li{ display:flex; align-items:baseline; gap:8px; padding:7px 16px; font-size:12px; }
+  .li:hover{ background:var(--hover); }
+  .li-title{ font-weight:600; }
+  .li-desc{ color:var(--ink2); font-size:11.5px; }
+  .li-amt{ margin-left:auto; font-size:12px; flex-shrink:0; font-weight:600; }
+  .stats{ display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
+  .stat{ background:var(--card); border:1px solid var(--line); border-radius:6px; padding:12px 14px; }
+  .stat .k{ font-size:11px; color:var(--ink3); }
+  .stat .v{ font-size:22px; font-weight:700; font-family:Consolas,monospace; margin-top:2px; }
+  .stat .s{ font-size:10.5px; color:var(--ink2); margin-top:2px; }
+  .grid-top{ display:grid; grid-template-columns:minmax(0,1fr) 384px; gap:12px; flex:1; min-height:0; }
+  .src-tag{ font-size:10px; color:var(--ink3); border:1px solid var(--line); padding:0 4px; border-radius:3px; margin-right:6px; }
+  .trend-word{ font-size:11px; font-weight:600; }
+  .trend-word.up{ color:var(--bad); } .trend-word.down{ color:var(--good); } .trend-word.flat{ color:var(--ink3); }
+  .ai-concl{ padding:10px 16px 12px; font-size:12px; line-height:1.7; }
+  .ai-concl b{ color:var(--ink); }
+  .ai-concl .hl{ color:var(--good); font-weight:600; }
+  .ai-concl .hl-bad{ color:var(--bad); font-weight:600; }
+  .feed{ padding:4px 0; }
+  .feed-it{ display:flex; gap:12px; padding:7px 16px; }
+  .feed-it:hover{ background:var(--hover); }
+  .feed-time{ width:64px; flex-shrink:0; font-size:11px; color:var(--ink3); padding-top:1px; font-family:Consolas,monospace; }
+  .feed-body{ flex:1; border-bottom:1px dashed var(--line); padding-bottom:7px; }
+  .feed-it:last-child .feed-body{ border-bottom:none; }
+  .feed-title{ font-size:12.5px; }
+  .feed-sub{ font-size:11.5px; color:var(--ink2); margin-top:1px; }
+  .feed-amt{ float:right; font-size:12px; margin-left:8px; font-weight:600; }
+  .stackbar{ display:flex; height:22px; border-radius:4px; overflow:hidden; margin:12px 16px 10px; border:1px solid var(--line-strong); }
+  .stackbar > i{ display:block; height:100%; }
+  .legend{ display:grid; grid-template-columns:1fr 1fr; column-gap:22px; row-gap:2px; padding:2px 16px 12px; }
+  .lg{ display:flex; align-items:center; gap:8px; padding:4.5px 0; border-bottom:1px dashed var(--line); font-size:12px; }
+  .lg:nth-last-child(-n+2){ border-bottom:none; }
+  .sw{ width:10px; height:10px; border-radius:2.5px; flex-shrink:0; }
+  .lg-name{ color:var(--ink2); }
+  .lg-pct{ margin-left:auto; font-weight:600; }
+  .lg-amt{ color:var(--ink3); font-size:11.5px; width:74px; text-align:right; }
+  .ai-shell{ display:flex; flex:1; min-height:0; background:var(--card); border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+  .ai-side{ width:180px; border-right:1px solid var(--line); display:flex; flex-direction:column; background:var(--paper); }
+  .ai-side .row{ display:flex; gap:6px; padding:10px 12px 8px; }
+  .ai-seg{ flex:1; text-align:center; padding:5px 0; border-radius:5px; font-size:11.5px; color:var(--ink2); cursor:pointer; border:1px solid var(--line); background:var(--card); }
+  .ai-seg.active{ background:var(--ink); color:#fff; border-color:var(--ink); font-weight:600; }
+  .ai-sess{ flex:1; overflow:auto; padding:4px 8px; }
+  .ai-sess .it{ padding:7px 9px; border-radius:5px; font-size:12px; color:var(--ink2); cursor:pointer; margin-bottom:2px; }
+  .ai-sess .it:hover{ background:var(--hover); }
+  .ai-sess .it.active{ background:var(--sel); color:var(--ink); font-weight:600; }
+  .ai-chat{ flex:1; display:flex; flex-direction:column; min-width:0; }
+  .ai-msgs{ flex:1; overflow:auto; padding:16px 22px; display:flex; flex-direction:column; gap:14px; }
+  .msg{ max-width:72%; padding:10px 14px; border-radius:8px; font-size:12.5px; line-height:1.7; }
+  .msg.user{ align-self:flex-end; background:var(--ink); color:#fff; }
+  .msg.ai{ align-self:flex-start; background:var(--paper); border:1px solid var(--line); }
+  .msg.ai .who{ font-size:10.5px; color:var(--ink3); margin-bottom:4px; }
+  .trace{ position:relative; padding:4px 0 4px 20px; margin-top:8px; }
+  .trace::before{ content:""; position:absolute; left:6px; top:12px; bottom:12px; width:2px; background:var(--line-strong); }
+  .t-step{ position:relative; margin-bottom:7px; }
+  .t-step .node{ position:absolute; left:-20px; top:9px; width:9px; height:9px; border-radius:50%; border:2px solid var(--card); }
+  .t-card{ border:1px solid var(--line-strong); border-radius:6px; padding:6px 10px; background:var(--card); font-size:11.5px; line-height:1.6; }
+  .t-card .t-head{ display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600; }
+  .t-card .t-meta{ color:var(--ink3); font-size:10.5px; font-weight:400; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .t-card .t-body{ color:var(--ink2); margin-top:2px; white-space:pre-wrap; }
+  .t-step.prompt .node{ background:var(--info); } .t-step.prompt .t-card{ border-color:var(--info); } .t-step.prompt .t-head{ color:var(--info); }
+  .t-step.tool .node{ background:var(--ink); } .t-step.tool .t-card{ border-color:var(--line-strong); } .t-step.tool .t-head{ color:var(--ink); }
+  .t-step.cloud .node{ background:var(--warn); } .t-step.cloud .t-card{ border-color:var(--warn); } .t-step.cloud .t-head{ color:var(--warn); }
+  .t-step.conclusion .node{ background:var(--good); } .t-step.conclusion .t-card{ border-color:var(--good); } .t-step.conclusion .t-head{ color:var(--good); }
+  .ai-input{ border-top:1px solid var(--line); padding:12px 18px 14px; }
+  .fn-row{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .fn-row .mode{ width:26px; height:22px; display:flex; align-items:center; justify-content:center; border-radius:4px; color:var(--ink3); border:1px solid var(--line); font-size:11px; cursor:pointer; background:var(--card); }
+  .fn-row .mode.active{ color:#fff; background:var(--ink); border-color:var(--ink); }
+  .fn{ height:26px; padding:0 9px; border:1px solid var(--line-strong); border-radius:4px; font-size:11.5px; color:var(--ink2); background:var(--card); display:flex; align-items:center; gap:8px; cursor:pointer; }
+  .fn-chip{ display:inline-flex; align-items:center; gap:4px; font-size:10.5px; padding:1px 7px; border-radius:8px; border:1px solid var(--line-strong); color:var(--ink2); background:var(--card); }
+  .box{ display:flex; align-items:flex-end; gap:10px; }
+  .box .ta{ flex:1; border:1px solid var(--line-strong); border-radius:6px; background:var(--card); padding:9px 12px; font-size:12.5px; color:var(--ink3); min-height:44px; line-height:1.6; }
+  .btn{ height:34px; padding:0 18px; border-radius:5px; font-size:12.5px; font-weight:600; cursor:pointer; border:1px solid var(--ink); background:var(--ink); color:#fff; }
+  .btn:hover{ background:#000; }
+  .ai-hint{ font-size:10.5px; color:var(--ink3); margin-top:6px; }
+  .hidden{ display:none !important; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <div class="brand-mark">C</div>
+      <div><div class="brand-name">CostHub</div><div class="brand-sub">成本管理 · v2.3.19</div></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-group">
+        <div class="nav-group-title">项目中心</div>
+        <div class="nav-item active" data-view="dashboard"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>驾驶舱</div>
+        <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg>项目管理</div>
+        <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M20 12l-4-4m0 8l4-4-4 4M4 12l4-4m0 8l-4-4 4 4"/><path d="M3 12h4m10 0h4"/></svg>竞品管理</div>
+        <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M4 19V9m5 10V5m6 14v-6m5 6V3"/></svg>对比分析</div>
+        <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>成本报告</div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">数据资产</div>
+        <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M12 3v10l7 4"/><circle cx="12" cy="12" r="9"/></svg>器件库</div>
+        <div class="nav-item"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg>模块库</div>
+        <div class="nav-item"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c1-4 3-6 6-6s5 2 6 6"/><circle cx="18" cy="9" r="2.5"/><path d="M15 20c.5-3 1.5-4.5 3-4.5 1.5 0 2.5 1.5 3 4.5"/></svg>供应商管理</div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">AI 趋势</div>
+        <div class="nav-item" data-view="ai"><svg viewBox="0 0 24 24"><path d="M12 3a5 5 0 0 1 5 5c0 1-.4 2-1 2.7V16a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-5.3A4.5 4.5 0 0 1 12 3z"/><path d="M9 19h6M10 22h4"/></svg>本地 AI 助手<span class="nav-badge">3</span></div>
+        <div class="nav-item"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h6"/></svg>用户原声分析</div>
+        <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M12 2l2.4 6.4L21 9l-5 4 2 7-6-4.5L6 20l2-7-5-4 6.6-.6z"/></svg>AI 审价助手</div>
+        <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M4 19V9m5 10V5m6 14v-6m5 6V3"/></svg>物料趋势洞察</div>
+      </div>
+    </nav>
+    <div class="side-foot">
+      <div class="foot-row">
+        <div style="display:flex;align-items:center;gap:8px"><div class="avatar">陈</div><div class="foot-name">成本经理</div></div>
+        <span style="font-size:10.5px;color:var(--ink3)">🔒 仅本机</span>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div><div class="page-title" id="ptitle">驾驶舱</div><div class="page-sub" id="psub">今日概览 · 项目与成本关键信号</div></div>
+      <div class="topbar-spacer"></div>
+      <div class="searchbox"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg><span class="ph">搜索器件 / 项目 / 竞品</span><kbd>Ctrl K</kbd></div>
+      <div class="model-pill"><span class="dot"></span>本地模型 qwythos-9b 在线</div>
+      <div class="iconbtn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6l2.1 2.1M18.4 5.6l-2.1 2.1m-8.6 8.6l-2.1 2.1"/></svg><span class="ping"></span></div>
+      <div class="iconbtn" title="AI 使用指南"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.9.4-1 .9-1 1.7"/><circle cx="12" cy="17" r="0.5"/></svg></div>
+      <div class="iconbtn"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></div>
+    </div>
+
+    <div class="content">
+      <section id="view-dashboard" style="display:flex;flex-direction:column;gap:12px;flex:1;min-height:0">
+        <div class="stats">
+          <div class="stat"><div class="k">在研项目</div><div class="v">6</div><div class="s">2 个超目标</div></div>
+          <div class="stat"><div class="k">器件总数</div><div class="v">348</div><div class="s">本月 +12</div></div>
+          <div class="stat"><div class="k">平均 BOM 成本</div><div class="v mono">¥1,248</div><div class="s">较上月 -3.2%</div></div>
+          <div class="stat"><div class="k">待处理情报</div><div class="v">7</div><div class="s" style="color:var(--bad)">3 条价差明显</div></div>
+          <div class="stat"><div class="k">AI 建议待办</div><div class="v">4</div><div class="s">本周新增 2</div></div>
+        </div>
+        <div class="grid-top">
+          <div class="card">
+            <div class="card-h">关键物料洞察<span class="hint">点击直达 · 行情/降本方向</span></div>
+            <div class="list">
+              <div class="li"><span class="src-tag">面板</span><span class="li-title">27寸 液晶面板</span><span class="trend-word up">↑ 5%</span><span class="li-amt mono">¥510</span></div>
+              <div class="li"><span class="src-tag">主控</span><span class="li-title">主控板 MNT-MAIN</span><span class="trend-word flat">→ 平稳</span><span class="li-amt mono">¥185</span></div>
+              <div class="li"><span class="src-tag">电源</span><span class="li-title">24V 3A 适配器</span><span class="trend-word down">↓ 8%</span><span class="li-amt mono">¥42</span></div>
+              <div class="li"><span class="src-tag">结构</span><span class="li-title">27寸外壳套件</span><span class="trend-word flat">→ 平稳</span><span class="li-amt mono">¥95</span></div>
+              <div class="li"><span class="src-tag">驱动</span><span class="li-title">驱动板组件</span><span class="trend-word up">↑ 2%</span><span class="li-amt mono">¥76</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-h">AI 分析 · 结论</div>
+            <div class="ai-concl">
+              <b>今日要点：</b>M270 整机 BOM <b>¥1,248</b>，较上版 <b>-¥36</b>。<br>
+              风险：<span class="hl-bad">面板 ¥510</span> 占 41% 且近月涨价 5%，<span class="hl-bad">驱动板报价偏高 ¥15</span>（相对系统同类均值）。<br>
+              机会：<span class="hl">电源适配器降 8%</span>、<span class="hl">结构件有 ¥8 下探空间</span>。<br>
+              <span style="color:var(--ink3);font-size:11px">建议先谈驱动板（1 家供应商，议价筹码有限）→ 记入待办。</span>
+            </div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) 384px;gap:12px;height:250px">
+          <div class="card">
+            <div class="card-h">最近成本变动</div>
+            <div class="feed">
+              <div class="feed-it"><div class="feed-time">08-24 09:12</div><div class="feed-body"><span class="feed-amt mono" style="color:var(--good)">-¥36</span><div class="feed-title">M270 电源适配器换型</div><div class="feed-sub">24V 3A → 高效版，供应商 A，原因：改型降价</div></div></div>
+              <div class="feed-it"><div class="feed-time">08-23 16:40</div><div class="feed-body"><span class="feed-amt mono" style="color:var(--bad)">+¥24</span><div class="feed-title">M271 液晶面板调价</div><div class="feed-sub">供应商 B 报价上调，原因：面板行情上涨</div></div></div>
+              <div class="feed-it"><div class="feed-time">08-23 10:05</div><div class="feed-body"><span class="feed-amt mono">+0</span><div class="feed-title">M272 快照（手动）</div><div class="feed-sub">设计定型，BOM 锁定</div></div></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-h">M270 模块成本构成</div>
+            <div class="stackbar"><i style="width:41%;background:var(--ink)"></i><i style="width:22%;background:#8A8578"></i><i style="width:15%;background:var(--info)"></i><i style="width:11%;background:var(--warn)"></i><i style="width:6%;background:#C9C4B6"></i><i style="width:5%;background:#E0DCCF"></i></div>
+            <div class="legend">
+              <div class="lg"><span class="sw" style="background:var(--ink)"></span><span class="lg-name">面板模块</span><span class="lg-pct">41%</span><span class="lg-amt mono">¥512</span></div>
+              <div class="lg"><span class="sw" style="background:#8A8578"></span><span class="lg-name">主控模块</span><span class="lg-pct">22%</span><span class="lg-amt mono">¥275</span></div>
+              <div class="lg"><span class="sw" style="background:var(--info)"></span><span class="lg-name">结构模块</span><span class="lg-pct">15%</span><span class="lg-amt mono">¥187</span></div>
+              <div class="lg"><span class="sw" style="background:var(--warn)"></span><span class="lg-name">电源模块</span><span class="lg-pct">11%</span><span class="lg-amt mono">¥137</span></div>
+              <div class="lg"><span class="sw" style="background:#C9C4B6"></span><span class="lg-name">线材模块</span><span class="lg-pct">6%</span><span class="lg-amt mono">¥75</span></div>
+              <div class="lg"><span class="sw" style="background:#E0DCCF"></span><span class="lg-name">包材/其他</span><span class="lg-pct">5%</span><span class="lg-amt mono">¥62</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-ai" class="hidden" style="flex:1;min-height:0">
+        <div class="ai-shell">
+          <div class="ai-side">
+            <div class="row">
+              <div class="ai-seg active">对话</div>
+              <div class="ai-seg">建议</div>
+              <div class="ai-seg">分析</div>
+            </div>
+            <div style="padding:0 12px 6px"><button style="width:100%;height:28px;border:1px solid var(--line-strong);border-radius:5px;background:var(--card);font-size:12px;color:var(--ink);cursor:pointer">+ 新对话</button></div>
+            <div class="ai-sess">
+              <div class="it active">M270 为什么贵、怎么降本</div>
+              <div class="it">审这份供应商报价</div>
+              <div class="it">竞品 A vs M270 BOM 对标</div>
+              <div class="it">查显示器原声关注点</div>
+              <div class="it">液晶面板行情洞察</div>
+            </div>
+            <div style="padding:8px 12px;border-top:1px solid var(--line);font-size:10.5px;color:var(--ink3)">🔒 数据只在本机处理<br>全部 AI 调用可审查</div>
+          </div>
+          <div class="ai-chat">
+            <div class="ai-msgs">
+              <div class="msg user">分析 M270 为什么贵、哪里能降本</div>
+              <div class="msg ai">
+                <div class="who">🤖 Agent · 已调用 4 次工具 · 结论如下</div>
+                <b>M270 整机 BOM ¥1,248</b>，贵在 <b>面板（41%）</b>与 <b>主控（22%）</b>。三个降本机会：<br>
+                ① <span style="color:var(--good);font-weight:600">面板 ¥512</span>：近月涨价 5%，建议 <span style="color:var(--good);font-weight:600">二次比价 / 换高效版</span>，目标 -¥20；<br>
+                ② <span style="color:var(--bad);font-weight:600">驱动板 ¥76</span>：仅 1 家供应商、报价高于系统同类均值 ¥15，<span style="color:var(--bad);font-weight:600">重点谈价</span>，目标 -¥12；<br>
+                ③ 电源适配器已降 8%（-¥36），结构件有 <span style="color:var(--good);font-weight:600">-¥8 下探空间</span>。<br>
+                合计目标降本 <b>约 -¥40</b>（-3.2%）。建议先把「谈驱动板价」记成待办。
+                <div class="trace">
+                  <div class="t-step prompt"><div class="node"></div><div class="t-card"><div class="t-head">📤 发送给模型<span class="t-meta">初始问题</span></div><div class="t-body">分析 M270 为什么贵、哪里能降本</div></div></div>
+                  <div class="t-step tool"><div class="node"></div><div class="t-card"><div class="t-head">🔧 调用工具 query_project_cost<span class="t-meta">{"project_code":"M270"}</span></div><div class="t-body">项目 M270 BOM 总成本 ¥1,248&#10;面板模块：¥512（41%）/ 主控：¥275（22%）/ 结构：¥187 / 电源：¥137…</div></div></div>
+                  <div class="t-step prompt"><div class="node"></div><div class="t-card"><div class="t-head">📤 结果回填后继续<span class="t-meta">[RESULT] + 继续分析</span></div><div class="t-body">[RESULT] … 请继续：如需更多数据再调用工具，否则给出结论。</div></div></div>
+                  <div class="t-step tool"><div class="node"></div><div class="t-card"><div class="t-head">🔧 调用工具 query_part_suppliers<span class="t-meta">{"part_name":"驱动板"}</span></div><div class="t-body">器件「驱动板组件」：仅 1 家供应商（供应商C ¥76），成本高于系统同类均值 ¥61（+24%）→ 议价机会</div></div></div>
+                  <div class="t-step prompt"><div class="node"></div><div class="t-card"><div class="t-head">📤 结果回填后继续<span class="t-meta">[RESULT] + 继续分析</span></div><div class="t-body">[RESULT] … 请继续：如需更多数据再调用工具，否则给出结论。</div></div></div>
+                  <div class="t-step tool"><div class="node"></div><div class="t-card"><div class="t-head">🔧 调用工具 query_target_status<span class="t-meta">{"project_code":"M270"}</span></div><div class="t-body">M270 目标成本 ¥1,200，实际 ¥1,248，超支 ¥48（达成率 96%）→ 需降本压回目标线</div></div></div>
+                  <div class="t-step conclusion"><div class="node"></div><div class="t-card"><div class="t-head">📌 结论</div><div class="t-body">贵在面板+主控；驱动板单一供应商价高是重点；合计可降 -¥40。</div></div></div>
+                </div>
+              </div>
+            </div>
+            <div class="ai-input">
+              <div class="fn-row">
+                <div class="mode active">💬</div>
+                <div class="mode">🤖</div>
+                <div class="mode">🧠</div>
+                <span style="width:1px;height:14px;background:var(--line-strong)"></span>
+                <div class="fn">选择功能（可选）<span>▾</span></div>
+                <span class="fn-chip">🔍 原声</span><span class="fn-chip">💰 审价</span><span class="fn-chip">📊 对标</span>
+              </div>
+              <div class="box">
+                <div class="ta">输入问题，或选功能直接干（Shift+Enter 换行 · Enter 发送）</div>
+                <button class="btn">发送</button>
+              </div>
+              <div class="ai-hint">Shift+Enter 换行 · Enter 发送 · Agent 只读执行，计划与结果可审查 · <span style="color:var(--info)">轨迹卡片可点开全文</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+<script>
+  var items = document.querySelectorAll('.nav-item[data-view]');
+  items.forEach(function(el){
+    el.addEventListener('click', function(){
+      items.forEach(function(x){ x.classList.remove('active'); });
+      el.classList.add('active');
+      document.getElementById('view-dashboard').classList.toggle('hidden', el.getAttribute('data-view') !== 'dashboard');
+      document.getElementById('view-ai').classList.toggle('hidden', el.getAttribute('data-view') !== 'ai');
+      document.getElementById('ptitle').textContent = el.getAttribute('data-view') === 'ai' ? '本地 AI 助手' : '驾驶舱';
+      document.getElementById('psub').textContent = el.getAttribute('data-view') === 'ai' ? '对话 · Agent · 轨迹可审查' : '今日概览 · 项目与成本关键信号';
+    });
+  });
+</script>
+</body>
+</html>

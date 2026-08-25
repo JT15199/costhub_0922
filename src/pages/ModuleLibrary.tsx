@@ -354,8 +354,12 @@ export default function ModuleLibrary() {
                 return allSelected ? '取消全选' : `全选 (${allIds.length})`;
               })()}
             </Button>
-            {/* 批量删除选中模块 */}
+            {/* 批量删除选中模块 + 选中合计（用户 2026-08-18：选中模块要有累加数字，方便知道加起来多少钱） */}
             {checkedModIds.size > 0 && (
+              <>
+              <span style={{ fontSize: 12.5, color: '#CF0A2C', fontWeight: 600, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                已选 {checkedModIds.size} 个模块 · 合计 ¥{filteredGroups.flatMap((g: any) => g.projects.filter((p: any) => checkedModIds.has(p.module_id))).reduce((s: number, p: any) => s + (Number(p.cost) || 0), 0).toFixed(0)}
+              </span>
               <Popconfirm
                 title={`删除选中的 ${checkedModIds.size} 个模块？`}
                 onConfirm={async () => {
@@ -369,6 +373,7 @@ export default function ModuleLibrary() {
               >
                 <Button size="small" danger icon={<DeleteOutlined />}>删除选中 ({checkedModIds.size})</Button>
               </Popconfirm>
+              </>
             )}
           </Space>
           <Space>

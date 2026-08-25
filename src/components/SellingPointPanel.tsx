@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, Select, Button, Table, Tag, Input, message, Empty, Popconfirm, Space, Modal, Tooltip } from 'antd';
 import { PlusOutlined, ThunderboltOutlined, RobotOutlined, DeleteOutlined, EditOutlined, LinkOutlined, SyncOutlined } from '@ant-design/icons';
-import { getProjects, getProjectBOMs, getAllVoiceItems, getSellingPoints, addSellingPoint, updateSellingPoint, deleteSellingPoint, setSellingPointModules, getSellingPointMaps, setSellingPointVoice, getSetting } from '../db';
+import { getProjects, getProjectBOMs, getAllVoiceItems, getSellingPoints, addSellingPoint, updateSellingPoint, deleteSellingPoint, setSellingPointModules, getSellingPointMaps, setSellingPointVoice, getProjectSpecTemplates, saveProjectSpecTemplate, deleteProjectSpecTemplate, getSetting } from '../db';
 import { startOllamaStream, logLocalAICall } from '../ollama';
 import { chunkVoiceItems } from '../voiceAnalyer';
 import { computeSellingPointRows, computeModuleValueRows, buildAiUnifiedPrompt, parseAiUnified, buildAiAggregatePrompt, parseAiAggregate, buildSellingPointAnalysisPrompt, type SellingPointRow, type ModuleValueRow } from '../sellingPointAnalyzer';
@@ -29,6 +29,8 @@ export default function SellingPointPanel({ product }: { product: string }) {
   const [busy, setBusy] = useState(false);
   const [voiceCount, setVoiceCount] = useState(0);
   const [status, setStatus] = useState('');
+  const [specs, setSpecs] = useState<any[]>([]);
+  const [specModal, setSpecModal] = useState<null | { id?: number; name: string; value: string }>(null);
   const analyzedRef = useRef<number | null>(null);
 
   useEffect(() => { (async () => { try { setProjects(await getProjects('', '', '')); } catch { } })(); }, []);
@@ -49,7 +51,7 @@ export default function SellingPointPanel({ product }: { product: string }) {
     setBusy(true);
     setStatus('AI 正在分析卖点与对应模块…');
     try {
-      const { system, user } = buildAiUnifiedPrompt({ tier: proj.tier, category: proj.category }, modOptions);
+      const { system, user } = buildAiUnifiedPrompt({ tier: proj.tier, category: proj.category }, modOptions, specs.map((s: any) => ({ name: s.spec_name, value: s.spec_value })));
       let full = '';
       await new Promise<void>((resolve, reject) => {
         startOllamaStream(base, model, [{ role: 'system', content: system }, { role: 'user', content: user }],
@@ -93,6 +95,7 @@ export default function SellingPointPanel({ product }: { product: string }) {
         boms.forEach((b: any) => { const m = b.module_name || '未归类'; mods.add(m); costs[m] = (costs[m] || 0) + (Number(b.part_cost) || 0) * (Number(b.quantity) || 1); });
         const modList = [...mods];
         setModuleOptions(modList); setModuleCosts(costs);
+        try { setSpecs(await getProjectSpecTemplates(projectId)); } catch { setSpecs([]); }
         if (sps.length === 0 && analyzedRef.current !== projectId && modList.length > 0) {
           analyzedRef.current = projectId;
           runUnifiedAnalyze(modList);
@@ -123,6 +126,20 @@ export default function SellingPointPanel({ product }: { product: string }) {
   const removeSellingPoint = async (id: number) => {
     await deleteSellingPoint(id);
     if (projectId) await refreshMaps(projectId);
+  };
+
+  const saveSpec = async () => {
+    if (!specModal || !projectId) return;
+    const name = specModal.name.trim();
+    if (!name) { message.warning('规格分类名不能为空'); return; }
+    await saveProjectSpecTemplate(projectId, name, specModal.value, specModal.id);
+    setSpecModal(null);
+    try { setSpecs(await getProjectSpecTemplates(projectId)); } catch { }
+  };
+  const removeSpec = async (id: number) => {
+    await deleteProjectSpecTemplate(id);
+    setSpecModal(null);
+    try { setSpecs(await getProjectSpecTemplates(projectId!)); } catch { }
   };
 
   const runAggregate = async () => {
@@ -211,6 +228,19 @@ export default function SellingPointPanel({ product }: { product: string }) {
       </div>
       {status && <div style={{ fontSize: 11.5, color: '#0A84FF', marginBottom: 8 }}>⏳ {status}</div>}
 
+      {projectId && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: '#64748B' }}>⚙ 规格分类（AI 分析靠齐目标）：</span>
+          {specs.length === 0 && <span style={{ fontSize: 10.5, color: '#94A3B8' }}>还没有——加几个（如 分辨率/刷新率/色域），AI 智能分析会严格按这些分类生成卖点，原声也归到这些类</span>}
+          {specs.map((s: any) => (
+            <Tag key={s.id} color="geekblue" style={{ margin: 0, cursor: 'pointer', fontSize: 11 }} onClick={() => setSpecModal({ id: s.id, name: s.spec_name, value: s.spec_value })}>
+              {s.spec_name}{s.spec_value ? '：' + s.spec_value : ''}
+            </Tag>
+          ))}
+          <Button size="small" type="text" icon={<PlusOutlined />} onClick={() => setSpecModal({ name: '', value: '' })}>加规格</Button>
+        </div>
+      )}
+
       {!projectId ? (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选一个上代产品项目，AI 会自动分析它的卖点和对应模块" style={{ margin: '12px 0' }} />
       ) : (
@@ -295,6 +325,20 @@ export default function SellingPointPanel({ product }: { product: string }) {
               <div style={{ fontSize: 12, marginBottom: 4 }}>关联 BOM 模块（成本来源，可多选；同模块被多个卖点引用时按声量加权分摊）</div>
               <Select mode="multiple" style={{ width: '100%' }} value={editing.modules} options={moduleOptions.map(m => ({ value: m, label: m }))} onChange={(v: string[]) => setEditing({ ...editing, modules: v })} placeholder="选择模块" />
             </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={!!specModal} title="规格分类（每项目）" onCancel={() => setSpecModal(null)} width={420}
+        footer={[
+          <Button key="d" danger style={{ float: 'left' }} disabled={!specModal?.id} onClick={() => specModal?.id && removeSpec(specModal.id)}>删除</Button>,
+          <Button key="c" onClick={() => setSpecModal(null)}>取消</Button>,
+          <Button key="o" type="primary" onClick={saveSpec}>保存</Button>,
+        ]}>
+        {specModal && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div><div style={{ fontSize: 12, marginBottom: 4 }}>规格分类名（如 分辨率 / 刷新率 / 色域）</div><Input value={specModal.name} onChange={e => setSpecModal({ ...specModal, name: e.target.value })} placeholder="如 分辨率" /></div>
+            <div><div style={{ fontSize: 12, marginBottom: 4 }}>该项目的参考规格值（可选，如 2K 2560×1440）</div><Input value={specModal.value} onChange={e => setSpecModal({ ...specModal, value: e.target.value })} placeholder="如 2K 2560×1440" /></div>
           </div>
         )}
       </Modal>
