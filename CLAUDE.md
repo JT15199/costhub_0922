@@ -58,7 +58,7 @@
 
 - **ai_goals 表**（db/goals.ts）：text/status(active|paused|done)/progress/linked_project；运行时兜底建表。
 - **autoThink 集成**：buildThinkOverview 顶部注入【用户目标】（active 前 3 条+最近推进）；sysPrompt 优先围绕目标；每轮结论前 200 字 appendGoalProgress 回写进度（保留最近 5 段）。
-- **GoalsCard**（本地 AI 助手「自主分析」视图顶部）：下达/完成/暂停/恢复/删除 + 进度展示；驾驶舱不显示（inline 紧凑）。
+- **GoalsCard**（驾驶舱「自主分析」区顶部，2026-08-18 由本地 AI 助手页收敛）：下达/完成/暂停/恢复/删除 + 进度展示。
 
 ## 三·补2、阶段 ②③④（2026-08-18 harness 化，安全约束内）
 
@@ -154,7 +154,7 @@
 
 ## 三·补7补、用户原声分析已留痕（2026-08-18 用户：分析也要有本地AI日志）
 
-- UserVoice 每次本地模型提炼调用后 logLocalAICall({request_type:'voice_analyze'}) 留痕 ai_request_logs（本地，不涉外发）；LocalAIAssistant AI_TYPE_NAMES + Settings typeMap 加 voice_analyze→'用户原声分析' 映射。
+- UserVoice 每次本地模型提炼调用后 logLocalAICall({request_type:'voice_analyze'}) 留痕 ai_request_logs（本地，不涉外发）；Settings typeMap 加 voice_analyze→'用户原声分析' 映射。
 
 ## 三·补7、用户原声分析（2026-08-18 用户：上一代产品原声 Excel 丢进去自主分析，自动分块汇总找最有价值特性）
 
@@ -178,7 +178,7 @@
 - **方向**：新能力一律注册为 aiTools.ts 里的「工具」（id/中文名/给模型的描述/参数/execute 返回文本），本地模型（大脑）在 对话/Agent/自主分析 里用文本协议自主调用并推理——不再为每个功能单独做页面。
 - **新工具（第 14-17 个）**：quote_review AI 审价（贴报价逐项判合理/偏高/虚高+合理价+议价要点，嵌套本地模型调用）/ query_project_module_value 模块级价值分析（成本/声量/好评/好又便宜·好但贵·做得差·花得不值，需先做卖点分析+归纳）/ query_project_health 项目深度体检数据（BOM 成本结构/目标/快照，供大脑写"为什么贵/怎么降"）/ query_competitor_bom 竞品 BOM+售价对标数据。
 - **校验**：aiTools.test.ts 强制 每工具唯一 id/中文名/描述>10字/参数 key 唯一/TOOL_ICONS 全覆盖——加工具必须同步补图标。
-- **已有 harness 骨架**：aiTools 注册表（13 查询/分析工具）+ thinkEngine 文本协议（[TOOL] 标记）+ runThinkLoop 多轮循环 + Agent 轨迹回馈（AutoThinkPanel/LocalAIAssistant 实时显示 思考/工具/云端/结论）+ MAX_TOOLS_PER_ROUND=2 单路深挖。
+- **已有 harness 骨架**：aiTools 注册表（13 查询/分析工具）+ thinkEngine 文本协议（[TOOL] 标记）+ runThinkLoop 多轮循环 + Agent 轨迹回馈（AutoThinkPanel/AiPanel 实时显示 思考/工具/云端/结论）+ MAX_TOOLS_PER_ROUND=2 单路深挖。
 - **QuoteReview 页面保留**为快捷入口（非主要方式）；大方向是工具优先。
 - **工具地图（参考 DSH 工具分类，2026-08-18 用户：要思考全面不能用到时没有）**：
   - 数据查询（已有）：query_projects / query_project_bom / query_project_cost / query_part_suppliers / query_supplier_trend / query_target_status / query_cost_snapshots / query_price_insights / query_advisor_insights / query_worklog / query_todos / compare_subcategory_cost / query_voice_dims（原声维度）/ query_project_module_value（模块价值）/ query_project_health（体检数据）/ query_competitor_bom（竞品对标）。
@@ -202,19 +202,19 @@
 - **纯函数**（src/dataReadiness.ts）：getDataReadiness()（扫库）→ ReadinessItem[]；readinessToText(items)（→文本，ok 用「现在能」、partial/missing 用「缺了会」前缀）；+5 测试（dataReadiness.test.ts）。
 - **AI 工具**：query_data_readiness（第 24 个，无参数，图标 SafetyCertificateOutlined）——大脑在 对话/Agent 里答"我缺什么数据/现在能做哪些分析"时调用，返回逐项就绪度文本。
 - **UI**（DataReadiness.tsx，v2 视觉：骨色底+墨色+信号色）：就绪度卡片（N 项能力 · X 就绪 · Y 半就绪 · Z 缺数据 + 每项 状态色条/现状/影响/建议）+「让 AI 引导我」按钮 → 预填提问自动发给本地 AI 助手（让模型用 query_data_readiness 当面引导）。
-- **预填链路**：DataReadiness 写 localStorage(costhub-ai-prompt-pending, {prompt,auto:true}) + dispatch costhub-open-ai-prompt → App 监听 navigate('localAI') + 300ms 重发兜底（LocalAIAssistant 懒加载，与 openInsightsEntry 同款双保险）→ LAI 挂载/事件消费：setInput + sendMessageRef.current(prompt) 自动发送。
+- **预填链路**：DataReadiness 写 localStorage(costhub-ai-prompt-pending, {prompt,auto:true}) + dispatch costhub-open-ai-prompt → AiPanel 常驻直接消费（setInput + sendRef 自动发送），无导航。
 
 
 ## 三·补11、右侧 AI 协作窗（2026-08-18 用户：功能页右侧放 AI 互动窗口，不单独去页面；不预设功能，给模型配好全部 tools 自主调用）
 
-- **布局**：main-content 内嵌 AiPanel（右侧常驻）：默认 384px、**可拖拽调宽 300-560**（左边缘 6px handle，localStorage ai-panel-width）、**可折叠成 42px 竖条**（ai-panel-collapsed）——不跳页，功能页里直接跟大脑对话。
+- **布局**：AiPanel 作为 #root 第三个 flex 子项（与 sidebar/main 平级，统一最右，height:100vh 撑满独立滚动）：默认 384px、**可拖拽调宽 300-560**（左边缘 6px handle，localStorage ai-panel-width）、**可折叠成 42px 竖条**（ai-panel-collapsed）——不跳页，功能页里直接跟大脑对话。
 - **引擎 = thinkEngine.runThinkLoop（不是 LAI 的 sendMessage）**：模型持有**全部 24 个工具清单**（buildThinkSystemPrompt 注入），[TOOL] 文本协议自主调用、多轮循环、自动回填 [RESULT]、单轮 ≤2 工具、json:false+num_predict 16384 不截断——"我让它干什么，模型自己调工具"。
 - **轨迹=执行记录卡**：onToolResult → 🔧 工具名+参数+结果摘要；onCloudResult → 🔐 云端卡；思考过程 details 折叠（N 字）；结论白卡。onAnswer/onThought 流式累积。
 - **不预设功能**：输入框只有占位符"直接说需求，模型自动调用工具…"，无聚焦下拉/快捷提问/功能列表（用户 2026-08-18 明确）。
 - **会话**：aiPanelChat.ts（从 LAI 提取：loadSessions/newSession/loadMessages/saveMsg/deleteSession，local_ai_sessions/messages 表不变）；头部 新对话/历史会话/折叠/使用指南 按钮。
 - **上下文联动**：App 传 activePage → PAGE_LABELS 页面名；页面内选中对象 dispatch costhub-ai-ctx {label} 覆盖显示（如"P271-M27"）。
 - **就绪度引导**：AiPanel 底部动态计数（getDataReadiness，不硬编码）+「让 AI 引导我」→ localStorage(costhub-ai-prompt-pending)+costhub-open-ai-prompt → AiPanel 常驻直接消费自动发送（App 不再导航监听）。
-- **移除**：导航「本地AI助手」、render case、App 的 costhub-open-ai-prompt 导航监听。LocalAIAssistant.tsx 保留文件不引用（GoalsCard 已挂驾驶舱 AutoThinkPanel 上方；DemoGenerator 待归位）。云端审批仍走 cloudConfirm 横幅（approveCloud=requestCloudConfirm）；runCloud=agentSearchLoop。
+- **移除**：导航「本地AI助手」、render case、App 的 costhub-open-ai-prompt 导航监听。LocalAIAssistant.tsx 已 git rm 彻底删除；GoalsCard 挂驾驶舱 AutoThinkPanel 上方；DemoGenerator 待归位（文件保留无入口）。云端审批仍走 cloudConfirm 横幅（approveCloud=requestCloudConfirm）；runCloud=agentSearchLoop。
 
 ## 六、工作流约定
 
