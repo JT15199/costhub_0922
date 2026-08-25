@@ -5,7 +5,7 @@ import { UploadOutlined, PlayCircleOutlined, DeleteOutlined, MessageOutlined } f
 import * as XLSX from 'xlsx';
 import { startOllamaStream, logLocalAICall } from '../ollama';
 import { getSetting } from '../db';
-import { addVoiceItem, clearVoiceItems, getAllVoiceItems, getVoiceDimensions, getVoiceProducts, startVoiceRun, updateVoiceRunProgress, finishVoiceRun, getRunningVoiceRun, replaceVoiceDimensions } from '../db';
+import { addVoiceItem, clearVoiceItems, getAllVoiceItems, getVoiceDimensions, getVoiceProducts, getProjects, startVoiceRun, updateVoiceRunProgress, finishVoiceRun, getRunningVoiceRun, replaceVoiceDimensions } from '../db';
 import { chunkVoiceItems, mergeDimensions, parseDimensions, type BlockDimension } from '../voiceAnalyer';
 import { detectOllama } from '../aiStatus';
 import SellingPointPanel from '../components/SellingPointPanel';
@@ -37,10 +37,12 @@ export default function UserVoice() {
   const [busy, setBusy] = useState(false);
   const [product, setProduct] = useState('');
   const [products, setProducts] = useState<string[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
   const [sample, setSample] = useState<string[]>([]);
 
   const load = async () => { const items = await getAllVoiceItems(product); setCount(items.length); setSample(items.slice(0, 5).map((i: any) => String(i.content || '').slice(0, 60))); setDims(await getVoiceDimensions(product)); setProducts((await getVoiceProducts()).map((p: any) => p.product)); const rr = await getRunningVoiceRun(product); if (rr) { try { await finishVoiceRun(rr.id, 'error', '上次分析被中断，已自动结束'); } catch { } setRunning(null); setLog(prev => [...prev, '⚠️ 检测到上次「' + (product || '未选产品') + '」的分析被中断（未完成），已自动结束，可重新开始']); } };
   useEffect(() => { load(); }, [product]);
+  useEffect(() => { (async () => { try { setProjects(await getProjects('', '', '')); } catch { } })(); }, []);
 
   const handleFile = (file: File) => {
     const reader = new FileReader();
@@ -160,8 +162,12 @@ export default function UserVoice() {
       <div className="page-title"><MessageOutlined /> 用户原声分析{product ? <span style={{ fontSize: 13, color: '#0A84FF', marginLeft: 12 }}>（{product}）</span> : null}</div>
       <Card size="small" style={{ marginBottom: 12 }}>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <AutoComplete size="middle" value={product} style={{ width: 200 }} placeholder="选择/输入产品（可输入新产品名）"
-            options={products.map(p => ({ value: p }))} onChange={v => setProduct(String(v || '').trim())}
+          <AutoComplete size="middle" value={product} style={{ width: 220 }} placeholder="选择项目/输入产品名"
+            options={(() => {
+              const projOpts = projects.filter((p: any) => !p.is_deleted && p.code).map((p: any) => ({ value: p.code, label: (p.code || '') + ' ' + (p.name || '') }));
+              const otherOpts = products.filter(p => !projOpts.some(o => o.value === p)).map(p => ({ value: p }));
+              return [...projOpts, ...otherOpts];
+            })()} onChange={v => setProduct(String(v || '').trim())}
             onSelect={(v) => setProduct(String(v || '').trim())} allowClear />
           <Button type="primary" icon={<UploadOutlined />} loading={busy} onClick={() => { const input = document.createElement('input'); input.type = 'file'; input.accept = '.xlsx,.xls'; input.onchange = (ev: any) => { const f = ev.target.files?.[0]; if (f) handleFile(f); }; input.click(); }}>导入用户原声（Excel）</Button>
           <span style={{ fontSize: 12, color: '#94A3B8' }}>已导入 <b>{count}</b> 条原声</span>
@@ -174,7 +180,7 @@ export default function UserVoice() {
             {sample.map((s, i) => <div key={i} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>· {s}</div>)}
           </div>
         )}
-        <div style={{ marginTop: 8, fontSize: 11.5, color: '#94A3B8', lineHeight: 1.6 }}>导入上一代产品的用户评价/口碑 Excel，本地模型自动分块（每块约 3000 字）逐块提炼用户最在意的特性维度，全部完成后自动汇总为「最有价值特性」权重榜——作为价值工程/新品特性的客观依据。</div>
+        <div style={{ marginTop: 8, fontSize: 11.5, color: '#94A3B8', lineHeight: 1.6 }}>导入上一代产品的用户评价/口碑 Excel，本地模型自动分块（每块约 3000 字）逐块提炼用户最在意的特性维度，全部完成后自动汇总为「最有价值特性」权重榜——作为价值工程/新品特性的客观依据。<b style={{ color: '#0A84FF' }}>选「项目」后原声归到该项目代号，与下方卖点价值分析（原声×模块成本）直接关联。</b></div>
         {running && (
           <div style={{ marginTop: 10, background: '#F5FAFF', border: '1px solid #BFDBFE', borderRadius: 10, padding: '10px 12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
