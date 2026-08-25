@@ -173,6 +173,11 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           return agentSearchLoop(String(call.material_name || ''), String(call.category || ''), 'price-trend');
         },
         onEvent: {
+          onRoundStart: () => setMessages(prev => {
+            const arr = [...prev]; const last = arr[arr.length - 1];
+            if (last && last.role === 'assistant') arr[arr.length - 1] = { ...last, content: '', reasoning: '' };
+            return arr;
+          }),
           onThought: (t) => setMessages(prev => {
             const arr = [...prev]; const last = arr[arr.length - 1];
             if (!last || last.role !== 'assistant') return prev;
@@ -198,6 +203,12 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         return arr;
       });
     }
+    // 完成后用干净结论覆盖（onAnswer 累积的多轮文本含 [TOOL] 标记与中间轮重复，finalText 才是 cleanProtocolText 后的结论）
+    setMessages(prev => {
+      const arr = [...prev]; const last = arr[arr.length - 1];
+      if (last && last.role === 'assistant') arr[arr.length - 1] = { ...last, content: finalText };
+      return arr;
+    });
     setStreaming(false);
     try { await saveMsg(currentSid, 'assistant', finalText || '(无内容)'); } catch { }
     setSessions(await loadSessions().catch(() => sessions));
@@ -217,7 +228,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   // ===== 渲染：折叠态 =====
   if (collapsed) {
     return (
-      <div style={{ width: 42, flexShrink: 0, background: '#F4F3EE', borderLeft: '1px solid #E6E4DC', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0' }}>
+      <div style={{ width: 42, height: '100vh', flexShrink: 0, background: '#F4F3EE', borderLeft: '1px solid #E6E4DC', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0', overflow: 'hidden' }}>
         <Tooltip title="展开 AI 协作窗">
           <Button type="text" icon={<LeftOutlined />} onClick={toggleCollapse} style={{ color: '#181713' }} />
         </Tooltip>
@@ -232,10 +243,10 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
 
   // ===== 渲染：展开态 =====
   return (
-    <div style={{ width, flexShrink: 0, background: '#F4F3EE', borderLeft: '1px solid #E6E4DC', display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
+    <div style={{ width, height: '100vh', flexShrink: 0, background: '#F4F3EE', borderLeft: '1px solid #E6E4DC', display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative', overflow: 'hidden' }}>
       {/* 拖拽调整宽度 */}
       <div
-        onMouseDown={e => { dragRef.current = { startX: e.clientX, startW: widthRef.current }; document.body.style.cursor = 'col-resize'; }}
+        onMouseDown={e => { e.preventDefault(); dragRef.current = { startX: e.clientX, startW: widthRef.current }; document.body.style.cursor = 'col-resize'; }}
         style={{ position: 'absolute', left: -3, top: 0, bottom: 0, width: 6, cursor: 'col-resize', zIndex: 5 }}
       />
 

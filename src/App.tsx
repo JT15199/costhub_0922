@@ -539,11 +539,10 @@ export default function App() {
           </Dropdown>
         </div>
       </aside>
-      <main className="main-content" style={{ zoom: `${zoom}%`, display: 'flex', minWidth: 0 }}>
-        <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>{render()}</div>
-        <AiPanel activePage={active} />
+      <main className="main-content" style={{ zoom: `${zoom}%` }}>
         {render()}
       </main>
+      <AiPanel activePage={active} />
 
       {/* 系统设置弹窗 */}
       <Modal
