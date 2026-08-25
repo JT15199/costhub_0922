@@ -168,7 +168,7 @@ export default function UserVoice() {
               const otherOpts = products.filter(p => !projOpts.some(o => o.value === p)).map(p => ({ value: p }));
               return [...projOpts, ...otherOpts];
             })()} onChange={v => setProduct(String(v || '').trim())}
-            onSelect={(v) => setProduct(String(v || '').trim())} allowClear />
+            onSelect={(v) => { const val = String(v || '').trim(); setProduct(val); window.dispatchEvent(new CustomEvent('costhub-ai-ctx', { detail: { label: '用户原声分析 · ' + (val || '未选产品') } })); }} allowClear />
           <Button type="primary" icon={<UploadOutlined />} loading={busy} onClick={() => { const input = document.createElement('input'); input.type = 'file'; input.accept = '.xlsx,.xls'; input.onchange = (ev: any) => { const f = ev.target.files?.[0]; if (f) handleFile(f); }; input.click(); }}>导入用户原声（Excel）</Button>
           <span style={{ fontSize: 12, color: '#94A3B8' }}>已导入 <b>{count}</b> 条原声</span>
           <Button icon={<PlayCircleOutlined />} type="primary" loading={busy} onClick={runAnalyze} disabled={running != null}>开始分析（自动分块）</Button>
