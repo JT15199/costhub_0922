@@ -235,6 +235,14 @@
 - **联动**：AiPanel 系统提示【写回结论】+【数据工程】（read_excel/附件读文件→解析 JSON 数组→调导入工具→如实汇报统计）；写库后广播事件（costhub-project-bom-updated / supplier-updated / competitor-updated / voice-updated / project-analysis-updated / selling-updated / quote-review-updated / trend-updated）。
 - **页面呈现（克制，不复杂）**：5 页面补 app-page-active 刷新监听（Projects/PartsLibrary/UserVoice/Competitors/SupplierManagement——写库后切回即见）；展示卡=驾驶舱分析结论/卖点面板结论/审价历史，无弹窗无复杂表单。
 
+
+## 三·补13、AI 报告与 Excel 生成（2026-08-18 用户：AI 能生成 PPT 报告/HTML 报告/处理 Excel；页面不要复杂；工具完善+正确引导）
+
+- **aiReport.ts**（纯函数+3 测试）：buildHtmlReportBase64（v2 视觉 HTML 报告：骨色底+卡片+转义防注入）/ buildPptxBase64（pptxgenjs 16:9 墨蓝+金）/ buildWorkbookBase64（XLSX 多工作表）。
+- **工具**（共 33 个）：generate_report（title+slides JSON[{heading,points}]→HTML/PPTX→invoke save_export_file 存 exe 同目录 exports/）/ write_excel（file_name+sheets JSON[{name,rows}]→xlsx→exports/）。
+- **引导**：AiPanel 提示【报告与文件】——生成报告/演示用 generate_report（3-6 节每节要点）、整理表格用 write_excel（首行表头）、读 Excel 用 read_excel、附件用 📎；生成后如实汇报文件名/格式/位置。
+- **双路径**：手动（页面功能）+ AI（右侧窗驱动全部工具）；页面不新增不复杂，展示=洞察卡片/卖点结论卡/驾驶舱分析卡/审价历史/导出目录。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。

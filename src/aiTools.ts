@@ -57,6 +57,8 @@ export const TOOL_ICONS: Record<string, React.ComponentType> = {
   import_supplier_quote: ShopOutlined,
   import_competitor_bom: ShopOutlined,
   import_voice_items: MessageOutlined,
+  generate_report: BookOutlined,
+  write_excel: FileExcelOutlined,
 };
 export function toolIcon(id: string): React.ComponentType {
   return TOOL_ICONS[id] || FolderOutlined;
@@ -728,6 +730,55 @@ const tools: AiTool[] = [
       const st = await importVoiceItems(String(a.product || '').trim(), contents);
       try { window.dispatchEvent(new CustomEvent('costhub-voice-updated')); } catch { }
       return '原声导入产品「' + a.product + '」：共 ' + st.total + ' 条，新增 ' + st.added + ' 条、跳过重复 ' + st.dup + ' 条（用户原声分析页可见）。';
+    },
+  },
+  {
+    id: 'generate_report',
+    name: '生成报告（HTML/PPTX）',
+    desc: '把分析结论生成一份报告（HTML 网页报告 或 PPTX 演示），保存到应用导出目录 exports/。参数 title 必填（报告标题），slides 必填（JSON 数组 [{heading:小节标题, points:[要点数组]}]——把结论组织成 3-6 节，每节 2-5 个要点），format 可选（html/pptx，默认 html），subtitle 可选。用于"生成一份XX报告/演示"。',
+    params: [
+      { key: 'title', type: 'string', required: true, desc: '报告标题' },
+      { key: 'slides', type: 'string', required: true, desc: 'JSON 数组 [{heading,points}]' },
+      { key: 'format', type: 'string', desc: 'html/pptx，默认 html' },
+      { key: 'subtitle', type: 'string', desc: '副标题，可空' },
+    ],
+    execute: async (a) => {
+      const title = String(a.title || '').trim();
+      if (!title) return '报告标题不能为空';
+      let slides: any[];
+      try { slides = JSON.parse(String(a.slides || '[]')); } catch { return 'slides 不是合法 JSON 数组'; }
+      if (!Array.isArray(slides) || slides.length === 0) return 'slides 为空（至少一节）';
+      const format = String(a.format || '').toLowerCase() === 'pptx' ? 'pptx' : 'html';
+      const subtitle = String(a.subtitle || '');
+      const { buildHtmlReportBase64, buildPptxBase64 } = await import('./aiReport');
+      const b64 = format === 'html' ? buildHtmlReportBase64(title, slides, subtitle) : await buildPptxBase64(title, slides, subtitle);
+      const safe = title.replace(/[\\/:*?"<>|]/g, '_');
+      const name = '报告-' + safe + '-' + new Date().toISOString().slice(0, 10) + '.' + format;
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('save_export_file', { fileName: name, base64Data: b64 });
+      return '✅ 已生成报告：' + name + '（' + format + ' 格式，' + slides.length + ' 节，保存在应用导出目录 exports/，可在导出目录查看/打开）';
+    },
+  },
+  {
+    id: 'write_excel',
+    name: '生成 Excel 表格',
+    desc: '把结构化数据生成 Excel 文件（.xlsx）保存到应用导出目录 exports/。参数 file_name 必填（文件名，可含或不含 .xlsx），sheets 必填（JSON 数组 [{name:工作表名, rows:[[单元格值...]...]}]，第一行通常为表头）。用于"把分析结果导出成 Excel 表格/清单"。',
+    params: [
+      { key: 'file_name', type: 'string', required: true, desc: '文件名' },
+      { key: 'sheets', type: 'string', required: true, desc: 'JSON 数组 [{name,rows}]' },
+    ],
+    execute: async (a) => {
+      let sheets: any[];
+      try { sheets = JSON.parse(String(a.sheets || '[]')); } catch { return 'sheets 不是合法 JSON 数组'; }
+      if (!Array.isArray(sheets) || sheets.length === 0) return 'sheets 为空';
+      const { buildWorkbookBase64 } = await import('./aiReport');
+      const b64 = buildWorkbookBase64(sheets);
+      const raw = String(a.file_name || '').trim().replace(/[\\/:*?"<>|]/g, '_') || ('导出-' + new Date().toISOString().slice(0, 10));
+      const name = raw.toLowerCase().endsWith('.xlsx') ? raw : raw + '.xlsx';
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('save_export_file', { fileName: name, base64Data: b64 });
+      const rowsTotal = sheets.reduce((s: number, sh: any) => s + ((sh.rows || []).length - 1), 0);
+      return '✅ 已生成 Excel：' + name + '（' + sheets.length + ' 个工作表，' + Math.max(0, rowsTotal) + ' 行数据，保存在导出目录 exports/）';
     },
   },
 ];

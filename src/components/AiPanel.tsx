@@ -231,7 +231,12 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       '① 先 read_excel 或读取附件获取文件内容，理解表结构（识别 器件名/型号/数量/单价 列，不要猜列名）\n' +
       '② 解析成结构化 JSON 数组后调对应导入工具：BOM→import_bom_to_project（自动归类模块）、供应商报价→import_supplier_quote、竞品 BOM→import_competitor_bom、原声→import_voice_items\n' +
       '③ 数据校验：数量/单价必须是数字；缺失必填字段的条目跳过并报告；导入工具返回统计后如实汇报（新建几个器件/复用几个/跳过几个）\n' +
-      '④ 用户没给目标项目/产品时先问清楚，不要擅自指定。';
+      '④ 用户没给目标项目/产品时先问清楚，不要擅自指定。\n' +
+      '【报告与文件】用户要生成报告/演示/表格时：\n' +
+      '· 生成报告/演示（HTML 网页报告或 PPTX）→ 分析完成把结论组织成 3-6 节（每节 heading+points）→ generate_report（保存到导出目录 exports/）\n' +
+      '· 把数据整理成 Excel → write_excel（每表 rows 二维数组，第一行表头，数值用数字类型）\n' +
+      '· 读用户提供的 Excel → read_excel；附件文件 → 输入区 📎\n' +
+      '· 生成后如实汇报文件名/格式/保存位置，不编造内容。';
     const baseUrl = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
     // 用 state model（头部下拉选择已同步 setSetting；detectOllama 同步）
     if (!(model || modelInfo.model)) { message.warning('未选择模型（头部下拉选择）'); setStreaming(false); return; }
