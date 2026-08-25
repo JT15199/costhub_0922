@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Card, Button, Input, Table, Tag, message, Empty, Tooltip } from 'antd';
 import { AuditOutlined, ThunderboltOutlined } from '@ant-design/icons';
-import { getParts, getAllPartSuppliers, getSetting } from '../db';
+import { getParts, getAllPartSuppliers, getSetting, getQuoteReviewLogs } from '../db';
 import { startOllamaStream, logLocalAICall } from '../ollama';
 import { buildQuoteReviewPrompt, parseQuoteReview, type QuoteReviewItem } from '../quoteReview';
 
@@ -25,11 +25,18 @@ export default function QuoteReview() {
   const [refCount, setRefCount] = useState(0);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [logs, setLogs] = useState<any[]>([]);
 
   const loadRefCount = async () => {
     try { const parts = await getParts(); setRefCount(parts.length); } catch { }
   };
   useEffect(() => { loadRefCount(); }, []);
+  useEffect(() => { getQuoteReviewLogs(8).then(setLogs).catch(() => {}); }, []);
+  useEffect(() => {
+    const h = () => { getQuoteReviewLogs(8).then(setLogs).catch(() => {}); };
+    window.addEventListener('costhub-quote-review-updated', h);
+    return () => window.removeEventListener('costhub-quote-review-updated', h);
+  }, []);
 
   const runReview = async () => {
     const q = quote.trim();
@@ -113,6 +120,18 @@ export default function QuoteReview() {
 
       {result.length === 0 && !err && !busy && (
         <Card size="small"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="粘贴报价后点「AI 审价」，结果在这里逐项列出" /></Card>
+      )}
+
+      {/* 历史审价记录（quote_review 工具/AI 审价后自动落库） */}
+      {logs.length > 0 && (
+        <Card size="small" title={<span><AuditOutlined style={{ marginRight: 6 }} />历史审价记录</span>} styles={{ body: { padding: '8px 12px', maxHeight: 240, overflowY: 'auto' } }}>
+          {logs.map((l: any) => (
+            <div key={l.id} style={{ fontSize: 11.5, color: '#475569', lineHeight: 1.55, marginBottom: 6, borderBottom: '1px solid #F1F5F9', paddingBottom: 6 }}>
+              <div style={{ color: '#94A3B8', fontSize: 10 }}>{String(l.created_at || '').slice(5, 16)}</div>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{l.verdict_summary}</div>
+            </div>
+          ))}
+        </Card>
       )}
     </div>
   );

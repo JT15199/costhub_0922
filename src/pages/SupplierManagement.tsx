@@ -76,6 +76,13 @@ export default function SupplierManagement() {
     loadData();
   }, [supplierType]);
 
+  // AI 数据工程联动：切回页面自动刷新（供应商报价写库后可见）
+  useEffect(() => {
+    const h = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.page === 'supplierManagement') { loadData(); } };
+    window.addEventListener('app-page-active', h);
+    return () => window.removeEventListener('app-page-active', h);
+  }, []);
+
   const loadData = async () => {
     setLoading(true);
     try {

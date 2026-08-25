@@ -176,7 +176,7 @@ export async function deletePartSupplier(id: number) {
 
 
 // 更新器件的加权成本
-async function updatePartWeightedCost(partId: number) {
+export async function updatePartWeightedCost(partId: number) {
   const d = await getDb();
   const suppliers = await d.select<any[]>(
     'SELECT price, share_ratio FROM part_suppliers WHERE part_id = ? AND is_active = 1',

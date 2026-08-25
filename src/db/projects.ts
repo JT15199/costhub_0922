@@ -739,3 +739,43 @@ export async function saveProjectSupplierPriceHistory(data: any) {
   );
   return r.lastInsertId;
 }
+
+// ===== AI 分析结论写回（2026-08-18 用户：AI 分析后结论记录到已有功能） =====
+let analysisEnsured = false;
+async function ensureAnalysisTables() {
+  if (analysisEnsured) return;
+  const d = await getDb();
+  try { await d.execute(`CREATE TABLE IF NOT EXISTS project_analysis_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    project_code TEXT DEFAULT '',
+    conclusion TEXT NOT NULL,
+    source TEXT DEFAULT 'ai_analysis',
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  )`); } catch { }
+  try { await d.execute(`CREATE TABLE IF NOT EXISTS quote_review_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    quote_input TEXT DEFAULT '',
+    verdict_summary TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now','localtime'))
+  )`); } catch { }
+  analysisEnsured = true;
+}
+export async function saveProjectAnalysis(projectId: number, projectCode: string, conclusion: string) {
+  await ensureAnalysisTables();
+  const r = await (await getDb()).execute('INSERT INTO project_analysis_logs (project_id, project_code, conclusion) VALUES (?,?,?)', [projectId, projectCode || '', conclusion || '']);
+  return Number(r.lastInsertId) || 0;
+}
+export async function getProjectAnalysis(limit = 8): Promise<any[]> {
+  await ensureAnalysisTables();
+  return (await getDb()).select<any[]>('SELECT * FROM project_analysis_logs ORDER BY id DESC LIMIT ?', [limit]);
+}
+export async function saveQuoteReviewLog(quoteInput: string, verdictSummary: string) {
+  await ensureAnalysisTables();
+  const r = await (await getDb()).execute('INSERT INTO quote_review_logs (quote_input, verdict_summary) VALUES (?,?)', [String(quoteInput || '').slice(0, 2000), String(verdictSummary || '').slice(0, 4000)]);
+  return Number(r.lastInsertId) || 0;
+}
+export async function getQuoteReviewLogs(limit = 10): Promise<any[]> {
+  await ensureAnalysisTables();
+  return (await getDb()).select<any[]>('SELECT * FROM quote_review_logs ORDER BY id DESC LIMIT ?', [limit]);
+}

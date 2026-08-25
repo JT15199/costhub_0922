@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, Select, Button, Table, Tag, Input, message, Empty, Popconfirm, Space, Modal, Tooltip } from 'antd';
 import { PlusOutlined, ThunderboltOutlined, RobotOutlined, DeleteOutlined, EditOutlined, LinkOutlined, SyncOutlined } from '@ant-design/icons';
-import { getProjects, getProjectBOMs, getAllVoiceItems, getSellingPoints, addSellingPoint, updateSellingPoint, deleteSellingPoint, setSellingPointModules, getSellingPointMaps, setSellingPointVoice, getProjectSpecTemplates, saveProjectSpecTemplate, deleteProjectSpecTemplate, getSetting } from '../db';
+import { getProjects, getProjectBOMs, getAllVoiceItems, getSellingPoints, addSellingPoint, updateSellingPoint, deleteSellingPoint, setSellingPointModules, getSellingPointMaps, setSellingPointVoice, getProjectSpecTemplates, saveProjectSpecTemplate, deleteProjectSpecTemplate, getSetting, getSellingAnalysis } from '../db';
 import { startOllamaStream, logLocalAICall } from '../ollama';
 import { chunkVoiceItems } from '../voiceAnalyer';
 import { computeSellingPointRows, computeModuleValueRows, buildAiUnifiedPrompt, parseAiUnified, buildAiAggregatePrompt, parseAiAggregate, buildSellingPointAnalysisPrompt, type SellingPointRow, type ModuleValueRow } from '../sellingPointAnalyzer';
@@ -33,10 +33,22 @@ export default function SellingPointPanel({ product }: { product: string }) {
   const [specs, setSpecs] = useState<any[]>([]);
   const [specModal, setSpecModal] = useState<null | { id?: number; name: string; value: string }>(null);
   const [viewMode, setViewMode] = useState<'table' | 'chart'>('chart');
+  const [savedAnalysis, setSavedAnalysis] = useState<any[]>([]);
   const analyzedRef = useRef<number | null>(null);
 
   useEffect(() => { (async () => { try { setProjects(await getProjects('', '', '')); } catch { } })(); }, []);
   useEffect(() => { (async () => { try { setVoiceCount((await getAllVoiceItems(product)).length); } catch { setVoiceCount(0); } })(); }, [product]);
+
+  // AI 写回的分析结论（save_selling_analysis 工具落库后展示）
+  useEffect(() => {
+    if (!projectId) { setSavedAnalysis([]); return; }
+    getSellingAnalysis(projectId).then(setSavedAnalysis).catch(() => {});
+  }, [projectId]);
+  useEffect(() => {
+    const h = () => { if (projectId) getSellingAnalysis(projectId).then(setSavedAnalysis).catch(() => {}); };
+    window.addEventListener('costhub-selling-updated', h);
+    return () => window.removeEventListener('costhub-selling-updated', h);
+  }, [projectId]);
 
   const refreshMaps = async (pid: number) => {
     setSellingPoints(await getSellingPoints(pid));
@@ -266,6 +278,18 @@ export default function SellingPointPanel({ product }: { product: string }) {
                   { title: '支撑卖点', key: 'sps', render: (_: any, r: ModuleValueRow) => <span style={{ fontSize: 11, color: '#64748B' }}>{r.sellingPoints.join('、') || '—'}</span> },
                 ]} />)}
               {viewMode === 'chart' && <ModuleValueMatrix rows={moduleRows} />}
+            </div>
+          )}
+
+          {/* 最近 AI 分析结论（save_selling_analysis 写回） */}
+          {savedAnalysis.length > 0 && (
+            <div style={{ marginTop: 10, background: '#F4F3EE', border: '1px solid #E6E4DC', borderRadius: 9, padding: '9px 12px' }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: '#181713', marginBottom: 5 }}>🧠 最近 AI 分析结论 <span style={{ fontWeight: 400, color: '#9A978B', fontSize: 10 }}>（AI 对话里分析后自动记录，不覆盖你编辑的卖点）</span></div>
+              {savedAnalysis.map((a: any, i: number) => (
+                <div key={a.id} style={{ fontSize: 11.5, color: '#5F5D54', lineHeight: 1.65, marginBottom: i < savedAnalysis.length - 1 ? 6 : 0, whiteSpace: 'pre-wrap' }}>
+                  <span style={{ color: '#9A978B', fontSize: 10, fontVariantNumeric: 'tabular-nums' }}>{String(a.created_at || '').slice(5, 16)}</span> {a.conclusion}
+                </div>
+              ))}
             </div>
           )}
 

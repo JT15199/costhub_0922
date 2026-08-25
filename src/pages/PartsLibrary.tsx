@@ -50,6 +50,12 @@ export default function PartsLibrary() {
     setLoading(false);
   }, [search, typeFilter, mainCat]);
   useEffect(() => { load(); }, [load]);
+  // AI 数据工程联动：切回页面自动刷新（BOM/报价/原声等写库后可见）
+  useEffect(() => {
+    const h = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.page === 'parts') { load; } };
+    window.addEventListener('app-page-active', h);
+    return () => window.removeEventListener('app-page-active', h);
+  }, [load]);
 
   // ====== 项目筛选：选某项目只显示该项目 BOM 里使用的器件 ======
   const [projectFilter, setProjectFilter] = useState('');

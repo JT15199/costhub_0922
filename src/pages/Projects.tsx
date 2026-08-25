@@ -88,6 +88,12 @@ export default function Projects() {
 
   const loadProjects = async () => { setLoading(true); try { setProjects(await getProjects('', typeFilter, categoryFilter)); } catch (e) { console.error(e); } setLoading(false); };
   useEffect(() => { loadProjects(); }, [typeFilter, categoryFilter]);
+  // AI 数据工程联动：切回页面自动刷新（BOM/报价/原声等写库后可见）
+  useEffect(() => {
+    const h = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.page === 'projects') { loadProjects; } };
+    window.addEventListener('app-page-active', h);
+    return () => window.removeEventListener('app-page-active', h);
+  }, [loadProjects]);
   // ====== 项目状态点（目标超支/报价情报/成本异动 → 列表圆点，点击选中项目） ======
   const [projectStatuses, setProjectStatuses] = useState<Record<number, any>>({});
   useEffect(() => {

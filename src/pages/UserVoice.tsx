@@ -42,6 +42,12 @@ export default function UserVoice() {
 
   const load = async () => { const items = await getAllVoiceItems(product); setCount(items.length); setSample(items.slice(0, 5).map((i: any) => String(i.content || '').slice(0, 60))); setDims(await getVoiceDimensions(product)); setProducts((await getVoiceProducts()).map((p: any) => p.product)); const rr = await getRunningVoiceRun(product); if (rr) { try { await finishVoiceRun(rr.id, 'error', '上次分析被中断，已自动结束'); } catch { } setRunning(null); setLog(prev => [...prev, '⚠️ 检测到上次「' + (product || '未选产品') + '」的分析被中断（未完成），已自动结束，可重新开始']); } };
   useEffect(() => { load(); }, [product]);
+  // AI 数据工程联动：切回页面自动刷新（BOM/报价/原声等写库后可见）
+  useEffect(() => {
+    const h = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.page === 'userVoice') { load; } };
+    window.addEventListener('app-page-active', h);
+    return () => window.removeEventListener('app-page-active', h);
+  }, [load]);
   useEffect(() => { (async () => { try { setProjects(await getProjects('', '', '')); } catch { } })(); }, []);
 
   const handleFile = (file: File) => {

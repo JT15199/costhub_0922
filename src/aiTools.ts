@@ -51,6 +51,12 @@ export const TOOL_ICONS: Record<string, React.ComponentType> = {
   query_voice_dims: MessageOutlined,
   query_data_readiness: SafetyCertificateOutlined,
   query_material_insight: HistoryOutlined,
+  save_selling_analysis: CheckSquareOutlined,
+  save_project_analysis: BulbOutlined,
+  import_bom_to_project: FileExcelOutlined,
+  import_supplier_quote: ShopOutlined,
+  import_competitor_bom: ShopOutlined,
+  import_voice_items: MessageOutlined,
 };
 export function toolIcon(id: string): React.ComponentType {
   return TOOL_ICONS[id] || FolderOutlined;
@@ -379,7 +385,14 @@ const tools: AiTool[] = [
       await logLocalAICall({ request_type: 'quote_review', system_prompt: system, user_prompt: user, response_summary: full.slice(0, 200), success: true, model_name: model });
       const items = parseQuoteReview(full);
       if (items.length === 0) return '审价未识别出结果（模型输出：' + full.slice(0, 120) + '）';
-      return items.map(i => '[' + i.index + '] ' + i.item + '：' + i.verdict + (i.fair_price ? '，合理价 ' + i.fair_price : '') + (i.reason ? '（' + i.reason + '）' : '') + (i.negotiate ? '；议价：' + i.negotiate : '')).join('\n');
+      // 2026-08-18 写回：审价结论落库（AI 审价助手历史可见），不覆盖任何用户数据
+      try {
+        const { saveQuoteReviewLog } = await import('./db');
+        const summary = items.map(i => i.item + '：' + i.verdict + (i.fair_price ? '，合理价 ' + i.fair_price : '')).join('；');
+        await saveQuoteReviewLog(String(a.quote || ''), summary);
+        try { window.dispatchEvent(new CustomEvent('costhub-quote-review-updated')); } catch { }
+      } catch (e) { console.error('审价记录保存失败:', e); }
+      return items.map(i => '[' + i.index + '] ' + i.item + '：' + i.verdict + (i.fair_price ? '，合理价 ' + i.fair_price : '') + (i.reason ? '（' + i.reason + '）' : '') + (i.negotiate ? '；议价：' + i.negotiate : '')).join('\n') + '\n✅ 审价记录已保存（AI 审价助手历史可见）';
     },
   },
   {
@@ -576,6 +589,145 @@ const tools: AiTool[] = [
         lines.push('「' + it.query_category + '」（' + src + '）最近洞察 ' + String(s.query_time || '').slice(0, 16) + '：趋势 ' + (s.direction || '-') + '，置信度 ' + (s.confidence_level || '-') + (s.summary ? '。摘要：' + String(s.summary || '').slice(0, 150) : ''));
       }
       return lines.join('\n');
+    },
+  },
+  {
+    id: 'save_selling_analysis',
+    name: '保存卖点价值分析结论',
+    desc: '把 AI 对某项目卖点/模块价值的分析结论写回系统（卖点价值分析面板显示「最近 AI 分析结论」）。参数 project_code 必填（项目代号），conclusion 必填（分析结论要点，如哪个卖点值得保留/哪个模块该降本减配）。只记录 AI 结论，不覆盖用户编辑的卖点数据。',
+    params: [
+      { key: 'project_code', type: 'string', required: true, desc: '项目代号' },
+      { key: 'conclusion', type: 'string', required: true, desc: '分析结论要点' },
+    ],
+    execute: async (a) => {
+      const { getProjects } = await import('./db');
+      const projs = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
+      const p = projs.find((x: any) => x.code === a.project_code);
+      if (!p) return '未找到项目代号：' + a.project_code;
+      const conclusion = String(a.conclusion || '').trim();
+      if (!conclusion) return '结论内容不能为空';
+      const { saveSellingAnalysis } = await import('./db/selling');
+      const id = await saveSellingAnalysis(p.id, p.code || '', conclusion);
+      try { window.dispatchEvent(new CustomEvent('costhub-selling-updated')); } catch { /* 非浏览器忽略 */ }
+      return '已保存项目 ' + a.project_code + ' 的卖点价值分析结论（id ' + id + '），卖点价值分析面板已更新「最近 AI 分析结论」。';
+    },
+  },
+  {
+    id: 'save_project_analysis',
+    name: '保存项目分析结论',
+    desc: '把 AI 对某项目的分析结论（降本建议/体检结论/价值判断等）写回系统，驾驶舱「最近 AI 分析结论」展示。参数 project_code 必填（项目代号），conclusion 必填（结论要点）。只记录 AI 结论，不修改项目数据。',
+    params: [
+      { key: 'project_code', type: 'string', required: true, desc: '项目代号' },
+      { key: 'conclusion', type: 'string', required: true, desc: '分析结论要点' },
+    ],
+    execute: async (a) => {
+      const { getProjects } = await import('./db');
+      const projs = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
+      const p = projs.find((x: any) => x.code === a.project_code);
+      if (!p) return '未找到项目代号：' + a.project_code;
+      const conclusion = String(a.conclusion || '').trim();
+      if (!conclusion) return '结论内容不能为空';
+      const { saveProjectAnalysis } = await import('./db');
+      await saveProjectAnalysis(p.id, p.code || '', conclusion);
+      try { window.dispatchEvent(new CustomEvent('costhub-project-analysis-updated')); } catch { }
+      return '已保存项目 ' + a.project_code + ' 的分析结论，驾驶舱「最近 AI 分析结论」已更新。';
+    },
+  },
+  {
+    id: 'import_bom_to_project',
+    name: 'BOM 拆解入库',
+    desc: '把一份原始 BOM（器件清单）拆解后自动录入某项目：器件按名称+型号去重入器件库（复用已有），按模块归类（内置规则自动归：面板/电源/驱动板/结构件等），写入项目 BOM。参数 project_code 必填（目标项目代号），items 必填（JSON 数组字符串，每项 {name:器件名, model?:型号, quantity?:数量, cost?:单价, module?:模块名(可空自动归类), mainCat?:大类, sub?:子类}）。用于"丢一份BOM帮我录入"。',
+    params: [
+      { key: 'project_code', type: 'string', required: true, desc: '目标项目代号' },
+      { key: 'items', type: 'string', required: true, desc: 'JSON 数组字符串' },
+    ],
+    execute: async (a) => {
+      const { getProjects } = await import('./db');
+      const projs = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
+      const p = projs.find((x: any) => x.code === a.project_code);
+      if (!p) return '未找到项目代号：' + a.project_code;
+      let items: any[];
+      try { items = JSON.parse(String(a.items || '[]')); } catch { return 'items 不是合法 JSON 数组（请用 JSON 数组字符串传条目）'; }
+      if (!Array.isArray(items) || items.length === 0) return 'items 为空';
+      const { classifyByModule } = await import('./moduleRules');
+      const norm = items.map((it: any) => {
+        const cls = classifyByModule(String(it.name || ''));
+        return {
+          name: String(it.name || '').trim(), model: String(it.model || '').trim(),
+          quantity: Number(it.quantity) || 1, cost: Number(it.cost) || 0,
+          module: String(it.module || '').trim() || cls?.module || '',
+          mainCat: String(it.mainCat || '').trim() || cls?.mainCat || '硬件类',
+          sub: String(it.sub || '').trim() || cls?.sub || '',
+        };
+      }).filter((x: any) => x.name);
+      const { importProjectBom } = await import('./db');
+      const st = await importProjectBom(p.id, norm);
+      try { window.dispatchEvent(new CustomEvent('costhub-project-bom-updated')); } catch { }
+      const modLine = Object.entries(st.byModule).map(([m, c]) => m + '×' + c).join('、');
+      return '已导入项目 ' + a.project_code + '：共 ' + st.total + ' 项，新建器件 ' + st.created + ' 个、复用已有 ' + st.reused + ' 个、跳过重复/无效 ' + st.skipped + ' 项。模块分布：' + (modLine || '无') + '。项目 BOM 已更新（项目管理页可见）。';
+    },
+  },
+  {
+    id: 'import_supplier_quote',
+    name: '供应商报价入库',
+    desc: '把供应商报价表录入供应商管理：按器件名+型号匹配已有器件，写入该器件的供应商报价（价格/份额）。参数 rows 必填（JSON 数组字符串，每项 {name:器件名, model?:型号, supplier:供应商名, price:报价, share?:份额%}）。未匹配到器件的会列出，提示先入器件库。',
+    params: [{ key: 'rows', type: 'string', required: true, desc: 'JSON 数组字符串' }],
+    execute: async (a) => {
+      let rows: any[];
+      try { rows = JSON.parse(String(a.rows || '[]')); } catch { return 'rows 不是合法 JSON 数组'; }
+      if (!Array.isArray(rows) || rows.length === 0) return 'rows 为空';
+      const { importSupplierQuotes } = await import('./db');
+      const st = await importSupplierQuotes(rows);
+      try { window.dispatchEvent(new CustomEvent('costhub-supplier-updated')); } catch { }
+      return '供应商报价入库：共 ' + st.total + ' 条，匹配器件 ' + st.matched + ' 个、写入 ' + st.added + ' 条报价' + (st.unmatched > 0 ? '，未匹配器件 ' + st.unmatched + ' 个：' + st.unmatchedNames.slice(0, 10).join('、') + '（需先入器件库）' : '') + '。';
+    },
+  },
+  {
+    id: 'import_competitor_bom',
+    name: '竞品 BOM 入库',
+    desc: '把竞品 BOM（拆解估算清单）录入竞品管理：按品牌+型号定位竞品，写入 BOM 估算明细（器件/估算成本/数量/模块）。参数 brand 必填、model 必填（定位竞品），rows 必填（JSON 数组，每项 {name, model?, cost, quantity?, module?}）。',
+    params: [
+      { key: 'brand', type: 'string', required: true, desc: '竞品品牌' },
+      { key: 'model', type: 'string', required: true, desc: '竞品型号' },
+      { key: 'rows', type: 'string', required: true, desc: 'JSON 数组字符串' },
+    ],
+    execute: async (a) => {
+      const { getCompetitors } = await import('./db');
+      const comps = await getCompetitors();
+      const c = comps.find((x: any) => String(x.brand || '').includes(String(a.brand || '')) && String(x.model || '').includes(String(a.model || '')));
+      if (!c) return '未找到竞品：' + a.brand + ' ' + a.model + '（可在竞品管理页先录入）';
+      let rows: any[];
+      try { rows = JSON.parse(String(a.rows || '[]')); } catch { return 'rows 不是合法 JSON 数组'; }
+      if (!Array.isArray(rows) || rows.length === 0) return 'rows 为空';
+      const { classifyByModule } = await import('./moduleRules');
+      const norm = rows.map((it: any) => {
+        const cls = classifyByModule(String(it.name || ''));
+        return { name: String(it.name || '').trim(), model: String(it.model || '').trim(), cost: Number(it.cost) || 0, quantity: Number(it.quantity) || 1, module: String(it.module || '').trim() || cls?.module || '' };
+      }).filter((x: any) => x.name);
+      const { importCompetitorBom } = await import('./db');
+      const st = await importCompetitorBom(c.id, norm);
+      try { window.dispatchEvent(new CustomEvent('costhub-competitor-updated')); } catch { }
+      return '竞品 ' + c.brand + ' ' + c.model + ' BOM 入库完成：共 ' + st.total + ' 项，写入 ' + st.added + ' 项（竞品管理页可见）。';
+    },
+  },
+  {
+    id: 'import_voice_items',
+    name: '原声批量导入',
+    desc: '把用户原声（评价/评论/反馈文本）批量导入指定产品（用户原声分析页数据源，供 AI 提炼维度/卖点分析）。参数 product 必填（产品名/项目代号），items 必填（JSON 数组字符串，元素为文本或 {content/text}）。重复内容自动跳过。',
+    params: [
+      { key: 'product', type: 'string', required: true, desc: '产品名/项目代号' },
+      { key: 'items', type: 'string', required: true, desc: 'JSON 数组字符串' },
+    ],
+    execute: async (a) => {
+      let arr: any[];
+      try { arr = JSON.parse(String(a.items || '[]')); } catch { return 'items 不是合法 JSON 数组'; }
+      if (!Array.isArray(arr) || arr.length === 0) return 'items 为空';
+      const contents = arr.map((x: any) => String(typeof x === 'string' ? x : (x?.content ?? x?.text ?? '')).trim()).filter(Boolean);
+      if (contents.length === 0) return '没有有效原声内容';
+      const { importVoiceItems } = await import('./db');
+      const st = await importVoiceItems(String(a.product || '').trim(), contents);
+      try { window.dispatchEvent(new CustomEvent('costhub-voice-updated')); } catch { }
+      return '原声导入产品「' + a.product + '」：共 ' + st.total + ' 条，新增 ' + st.added + ' 条、跳过重复 ' + st.dup + ' 条（用户原声分析页可见）。';
     },
   },
 ];

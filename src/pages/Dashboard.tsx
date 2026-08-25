@@ -3,7 +3,7 @@ import { Spin, Tag, Button, message } from 'antd';
 import { BarChartOutlined, ShopOutlined, AimOutlined, BulbOutlined, AlertOutlined, RobotOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
-import { getDashboardStats, getProjects, getProjectBOMs, getCompetitors, getCompetitorBOMs, getTargets, getProjectCostSnapshots, getInsights, getSetting } from '../db';
+import { getDashboardStats, getProjects, getProjectBOMs, getCompetitors, getCompetitorBOMs, getTargets, getProjectCostSnapshots, getInsights, getSetting, getProjectAnalysis } from '../db';
 import { getCategoryColor } from '../constants';
 import { EmojiIcon } from '../iconMap';
 import DataTable from '../components/DataTable';
@@ -53,6 +53,14 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [recentPriceChanges, setRecentPriceChanges] = useState<any[]>([]);
   // 自主建议（autoAdvisor）
   const [advisorInsights, setAdvisorInsights] = useState<any[]>([]);
+  // 最近 AI 分析结论（save_project_analysis 写回，驾驶舱展示）
+  const [recentAnalysis, setRecentAnalysis] = useState<any[]>([]);
+  useEffect(() => { getProjectAnalysis(8).then(setRecentAnalysis).catch(() => {}); }, []);
+  useEffect(() => {
+    const h = () => { getProjectAnalysis(8).then(setRecentAnalysis).catch(() => {}); };
+    window.addEventListener('costhub-project-analysis-updated', h);
+    return () => window.removeEventListener('costhub-project-analysis-updated', h);
+  }, []);
   // 云端用量（今日请求/阈值）
   const [cloudUsage, setCloudUsage] = useState<{ count: number; tokens: number }>({ count: 0, tokens: 0 });
   const [cloudLimit, setCloudLimit] = useState(50);
@@ -304,6 +312,24 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           </span>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
+          {/* 🧠 最近 AI 分析结论（AI 协作窗分析后写回） */}
+          {recentAnalysis.length > 0 && (
+            <div style={{ border: '1px solid #E8ECF1', borderRadius: 10, padding: '8px 12px', background: '#F4F3EE' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                <BulbOutlined style={{ color: '#D97706' }} />
+                <b style={{ fontSize: 13 }}>🧠 最近 AI 分析结论</b>
+                <span style={{ flex: 1 }} />
+                <span style={{ fontSize: 10.5, color: '#94A3B8' }}>AI 协作窗分析后自动记录</span>
+              </div>
+              {recentAnalysis.slice(0, 3).map((a: any) => (
+                <div key={a.id} style={{ fontSize: 11.5, color: '#475569', lineHeight: 1.6, marginBottom: 5, whiteSpace: 'pre-wrap' }}>
+                  <b style={{ color: '#181713' }}>{a.project_code || '项目'}</b>
+                  <span style={{ color: '#94A3B8', margin: '0 6px', fontSize: 10 }}>{String(a.created_at || '').slice(5, 16)}</span>
+                  {a.conclusion}
+                </div>
+              ))}
+            </div>
+          )}
           {/* 🧠 自主分析结论（合并：AI 后台自发分析结果） */}
           <GoalsCard />
           <AutoThinkPanel mode="inline" onNavigate={onNavigate} />

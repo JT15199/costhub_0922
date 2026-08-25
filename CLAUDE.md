@@ -227,6 +227,14 @@
   · **审批确认自动续跑**：AiPanel 记 pendingRetryRef（approveCloud 返回 'pending' 或工具结果含"等待云端发送确认"时）→ CloudConfirmBar 确认触发 costhub-insight-request → AiPanel 自动重发上一条提问 → 二次审批放行（confirmedKeys）→ 云端真正调用（用户：同意两次却失败，确认触发的是后台 autoInsight 重跑不是对话）。
   · **工具优先**：AiPanel systemPrompt 追加【任务执行】——查已有洞察用 query_price_insights、查行情用 insight_material_trend（走审批）、禁凭空"搜索/综合"，工具结果回填后基于真实数据回答（用户：让AI洞察却没用工具）。
 
+
+## 三·补12、AI 数据工程：写回 + 导入闭环（2026-08-18 用户：AI 自动调用工具达成目的，结论记录到已有功能；丢 BOM 表 AI 自动拆解录入；工具里所有能力都要用上）
+
+- **写回工具**（AI 分析后结论落库，不覆盖用户手工数据）：save_selling_analysis（卖点价值结论 → selling_point_analysis，卖点面板显示「最近 AI 分析结论」）/ save_project_analysis（项目分析结论 → project_analysis_logs，驾驶舱「最近 AI 分析结论」）/ quote_review 审价自动落库（quote_review_logs，审价页历史）/ insight_material_trend 写 trend_snapshots（洞察卡片）+ 自动续跑（pendingRetryRef + costhub-insight-request）。
+- **导入工具**（AI 读文件→拆解→入库）：import_bom_to_project（器件去重 name+model 完全相等复用→parts+project_boms，规则自动归模块）/ import_supplier_quote（匹配器件→part_suppliers+更新加权成本）/ import_competitor_bom（竞品 BOM）/ import_voice_items（原声去重导入）。共用 db/dataImport.ts 导入层（校验/去重/统计）+ moduleRules.ts 规则引擎（纯函数+6 测试，从原 LAI 提取 MODULE_RULES）。
+- **联动**：AiPanel 系统提示【写回结论】+【数据工程】（read_excel/附件读文件→解析 JSON 数组→调导入工具→如实汇报统计）；写库后广播事件（costhub-project-bom-updated / supplier-updated / competitor-updated / voice-updated / project-analysis-updated / selling-updated / quote-review-updated / trend-updated）。
+- **页面呈现（克制，不复杂）**：5 页面补 app-page-active 刷新监听（Projects/PartsLibrary/UserVoice/Competitors/SupplierManagement——写库后切回即见）；展示卡=驾驶舱分析结论/卖点面板结论/审价历史，无弹窗无复杂表单。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。

@@ -45,6 +45,16 @@ async function ensureSellingTables() {
   } catch { }
   try { await d.execute("ALTER TABLE selling_points ADD COLUMN positive INTEGER DEFAULT 0"); } catch { }
   try { await d.execute("ALTER TABLE selling_points ADD COLUMN negative INTEGER DEFAULT 0"); } catch { }
+  try {
+    await d.execute(`CREATE TABLE IF NOT EXISTS selling_point_analysis (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      product TEXT DEFAULT '',
+      conclusion TEXT NOT NULL,
+      source TEXT DEFAULT 'ai_analysis',
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    )`);
+  } catch { }
   ensured = true;
 }
 
@@ -112,4 +122,16 @@ export async function getSellingPointMaps(projectId: number): Promise<{ modules:
   for (const m of mods) (modules[m.selling_point_id] = modules[m.selling_point_id] || []).push(m.module_name);
   for (const di of dimRows) (dims[di.selling_point_id] = dims[di.selling_point_id] || []).push(di.voice_dimension_id);
   return { modules, dims };
+}
+
+
+// ===== AI 分析结论写回（2026-08-18 用户：AI 分析价值工程后结论记录到已有功能） =====
+export async function saveSellingAnalysis(projectId: number, product: string, conclusion: string) {
+  await ensureSellingTables();
+  const r = await (await getDb()).execute("INSERT INTO selling_point_analysis (project_id, product, conclusion) VALUES (?,?,?)", [projectId, product || '', conclusion || '']);
+  return Number(r.lastInsertId) || 0;
+}
+export async function getSellingAnalysis(projectId: number, limit = 3): Promise<any[]> {
+  await ensureSellingTables();
+  return (await getDb()).select<any[]>('SELECT * FROM selling_point_analysis WHERE project_id = ? ORDER BY id DESC LIMIT ?', [projectId, limit]);
 }

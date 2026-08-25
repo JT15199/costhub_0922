@@ -36,7 +36,13 @@ export default function Competitors() {
   const [compEntries, setCompEntries] = useState<Record<string, { qty: number; cost: number; enabled: boolean }>>({});
   const [refProjectList, setRefProjectList] = useState<any[]>([]);
   const [mainCats, setMainCats] = useState(MAIN_CATEGORIES);
-  useEffect(() => { (async () => { setComps(await getCompetitors()); try { setMainCats(await getMainCategories()); } catch(e) {} })(); }, []);
+  useEffect(() => { (async () => { setComps(await getCompetitors());
+  // AI 数据工程联动：切回页面自动刷新（BOM/报价/原声等写库后可见）
+  useEffect(() => {
+    const h = async (e: Event) => { const d = (e as CustomEvent).detail; if (d?.page === 'competitors') { setComps(await getCompetitors()); } };
+    window.addEventListener('app-page-active', h);
+    return () => window.removeEventListener('app-page-active', h);
+  }, [setComps]); try { setMainCats(await getMainCategories()); } catch(e) {} })(); }, []);
   // 加载品类列表 + 按品类筛选竞品
   useEffect(() => {
     import('../db').then(async (m) => {

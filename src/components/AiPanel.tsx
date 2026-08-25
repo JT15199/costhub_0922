@@ -222,7 +222,16 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       '· 计算核验 → calc\n' +
       '【严禁】行情/洞察类任务调用 query_project_bom / query_project_cost / query_part_suppliers / query_project_health / compare_subcategory_cost 等与物料行情无关的工具。\n' +
       '【禁止自言自语】不要输出"让我先查看…""现在我需要…"这类计划性独白——需要数据就直接输出 [TOOL] 调用标记，否则直接给结论。\n' +
-      '【数据铁律】所有价格/百分比/份额/趋势数字必须来自工具 [RESULT] 返回的真实数据；禁止编造（如"$100-$150"）；工具没查到就明确说"未查到该物料行情数据"；输出前自检每个数字都能在工具结果里找到。';
+      '【数据铁律】所有价格/百分比/份额/趋势数字必须来自工具 [RESULT] 返回的真实数据；禁止编造（如"$100-$150"）；工具没查到就明确说"未查到该物料行情数据"；输出前自检每个数字都能在工具结果里找到。\n' +
+      '【写回结论】分析类任务完成后，可把结论落库供以后参考（落库后对话显示"✅ 已记录"，对应面板自动展示）：\n' +
+      '· 卖点/模块价值分析 → save_selling_analysis({"project_code":"项目代号","conclusion":"结论要点"})——如哪个卖点值得保留/哪个模块该降本减配\n' +
+      '· 物料行情洞察 → insight_material_trend 已自动写入洞察列表卡片，无需额外操作\n' +
+      '· 只有用户明确要求记录时才调用 save_* 工具，不要每次分析都写。\n' +
+      '【数据工程】用户让你录入/拆解数据时（丢 BOM 表/供应商报价/竞品 BOM/原声）：\n' +
+      '① 先 read_excel 或读取附件获取文件内容，理解表结构（识别 器件名/型号/数量/单价 列，不要猜列名）\n' +
+      '② 解析成结构化 JSON 数组后调对应导入工具：BOM→import_bom_to_project（自动归类模块）、供应商报价→import_supplier_quote、竞品 BOM→import_competitor_bom、原声→import_voice_items\n' +
+      '③ 数据校验：数量/单价必须是数字；缺失必填字段的条目跳过并报告；导入工具返回统计后如实汇报（新建几个器件/复用几个/跳过几个）\n' +
+      '④ 用户没给目标项目/产品时先问清楚，不要擅自指定。';
     const baseUrl = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
     // 用 state model（头部下拉选择已同步 setSetting；detectOllama 同步）
     if (!(model || modelInfo.model)) { message.warning('未选择模型（头部下拉选择）'); setStreaming(false); return; }
