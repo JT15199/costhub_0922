@@ -15,6 +15,7 @@ import { runThinkLoop, buildThinkSystemPrompt } from '../thinkEngine';
 import { detectOllama } from '../aiStatus';
 import { loadSessions, newSession, loadMessages, saveMsg, type Session } from '../aiPanelChat';
 import { getDataReadiness } from '../dataReadiness';
+import { verifyConclusionNumbers } from '../verifyConclusion';
 
 // ===== 页面 → 上下文名（App 传入当前页 key） =====
 const PAGE_LABELS: Record<string, string> = {
@@ -23,6 +24,10 @@ const PAGE_LABELS: Record<string, string> = {
   supplierManagement: '供应商管理', decomposition: '物料趋势洞察', userVoice: '用户原声分析',
   quoteReview: '审价',
 };
+
+// 行情/洞察类任务判断：用于无关工具软拦截（用户：更新行情却调用了查询项目工具）
+const isTrendTask = (q: string) => /行情|洞察|趋势|最新价格|物料行情/.test(q || '');
+const IRRELEVANT_FOR_TREND = ['query_project_bom', 'query_project_cost', 'query_part_suppliers', 'query_project_health', 'compare_subcategory_cost'];
 
 interface Step { kind: 'tool' | 'cloud'; name: string; ok: boolean; detail: string; }
 interface Msg { role: 'user' | 'assistant'; content: string; reasoning?: string; steps?: Step[]; }
@@ -218,6 +223,9 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     // 用 state model（头部下拉选择已同步 setSetting；detectOllama 同步）
     if (!(model || modelInfo.model)) { message.warning('未选择模型（头部下拉选择）'); setStreaming(false); return; }
 
+    // 数字防幻觉证据收集（工具/云端结果原文，供 verifyConclusionNumbers 校验结论文本）
+    const evidenceParts: string[] = [];
+
     const appendStep = (st: Step) => {
       setMessages(prev => {
         const arr = [...prev]; const last = arr[arr.length - 1];
@@ -237,6 +245,11 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         executeTool: async (id, args) => {
           const res = await executeTool(id, args);
           if (!res.ok && res.text.includes('等待云端发送确认')) pendingRetryRef.current = { prompt: userContent };
+          evidenceParts.push(res.text || '');
+          // 行情任务软拦截：无关工具调用给提示，引导改用行情工具（用户：更新 Scaler IC 行情却查了 M270 项目）
+          if (isTrendTask(userContent) && IRRELEVANT_FOR_TREND.includes(id)) {
+            return { ...res, text: res.text + '\n\n[提示] 当前是行情/洞察任务，你调用了与物料行情无关的工具。请改用 query_material_insight 查历史洞察、insight_material_trend 查最新行情（需审批），不要再查项目/器件数据。' };
+          }
           return res;
         },
         approveCloud: async (call) => {
@@ -272,11 +285,18 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
             arr[arr.length - 1] = { ...last, content: (last.content || '') + t };
             return arr;
           }),
-          onToolResult: (name, args, ok, text) => appendStep({ kind: 'tool', name, ok, detail: JSON.stringify(args || {}) + ' → ' + (text || '').slice(0, 150) }),
-          onCloudResult: (_call, ok, result) => appendStep({ kind: 'cloud', name: '云端行情', ok, detail: (ok ? '✓ ' : '✗ ') + (result || '').slice(0, 150) }),
+          onToolResult: (name, args, ok, text) => { evidenceParts.push(text || ''); appendStep({ kind: 'tool', name, ok, detail: JSON.stringify(args || {}) + ' → ' + (text || '').slice(0, 150) }); },
+          onCloudResult: (_call, ok, result) => { evidenceParts.push(result || ''); appendStep({ kind: 'cloud', name: '云端行情', ok, detail: (ok ? '✓ ' : '✗ ') + (result || '').slice(0, 150) }); },
         },
       });
       finalText = res.finalText || '';
+      // 数字防幻觉：结论中的数字必须在工具/云端结果证据中出现，否则附注请人工核对（用户：模型编造"$100-$150"行情）
+      try {
+        const { unverified } = verifyConclusionNumbers(finalText, userContent + '\n' + evidenceParts.join('\n'));
+        if (unverified.length > 0) {
+          finalText += '\n\n[校验] 含 ' + unverified.length + ' 个未能溯源的数字：' + unverified.map(u => u.ctx).join('、') + '——请人工核对（行情数字应以工具 [RESULT] 为准）';
+        }
+      } catch { /* 校验失败不影响 */ }
     } catch (e: any) {
       finalText = '模型调用失败：' + String(e?.message || e).slice(0, 300);
       setMessages(prev => {
