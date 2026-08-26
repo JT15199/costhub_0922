@@ -66,7 +66,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState('');
   const [deepThink, setDeepThink] = useState(() => localStorage.getItem('ai-panel-deepthink') !== '0');
-  const [attachments, setAttachments] = useState<{ kind: 'excel' | 'image'; name: string; data: string }[]>([]);
+  const [attachments, setAttachments] = useState<{ kind: 'excel' | 'image'; name: string; data?: string; type?: string; label?: string; rowsCount?: number; headers?: string[] }[]>([]);
   const [readiness, setReadiness] = useState<{ ok: number; partial: number; missing: number; total: number }>({ ok: 0, partial: 0, missing: 0, total: 0 });
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -184,15 +184,24 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   const send = async (raw: string) => {
     const text = (raw || '').trim();
     if ((!text && attachments.length === 0) || streaming) return;
-    // 2026-08-18 附件：Excel 表格文本拼进提问；图片 base64 走多模态（images）
+    // 2026-08-19 智能附件：Excel → 只给模型摘要+类型引导（完整数据由 import_* 工具直接从全局附件数据读取，不再把表格当 prompt）
     let userContent = text;
     const images: string[] = [];
     if (attachments.length) {
       const excelParts = attachments.filter(a => a.kind === 'excel');
       if (excelParts.length) {
-        userContent += (text ? '\n\n' : '') + excelParts.map(a => '【附件：' + a.name + '】\n' + a.data).join('\n\n') + '\n\n请基于以上附件内容一起分析。';
+        const summary = excelParts.map(a => {
+          const guide =
+            a.type === 'bom' ? '这是 BOM 表——请调用 import_bom_to_project 自动拆解录入（工具会直接读取该表格完整数据，无需你传内容），然后分析成本结构、给出降本建议'
+            : a.type === 'voice' ? '这是用户原声表——请调用 import_voice_items 自动导入（工具直接读取完整数据），再分析用户最在意的维度/卖点'
+            : a.type === 'supplier' ? '这是供应商报价表——请调用 import_supplier_quote 自动录入（工具直接读取），再分析价格合理性'
+            : a.type === 'competitor' ? '这是竞品数据表——请调用 import_competitor_bom 自动录入（工具直接读取），再给出对标分析'
+            : '请读取该表格（可调 read_excel）并分析内容给出建议';
+          return '【附件：' + a.name + ' · ' + (a.label || '表格') + ' · 列：' + (a.headers || []).slice(0, 8).join('/') + ' · ' + (a.rowsCount || 0) + ' 行】' + guide;
+        }).join('\n');
+        userContent += (text ? '\n\n' : '') + summary + (text ? '' : '\n\n请按上述引导处理该附件。');
       }
-      attachments.filter(a => a.kind === 'image').forEach(a => images.push(a.data));
+      attachments.filter(a => a.kind === 'image').forEach(a => { if (a.data) images.push(a.data); });
       setAttachments([]);
     }
     abortRef.current.aborted = false;
@@ -386,9 +395,20 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           const wb = XLSX.read(buf);
           const ws = wb.Sheets[wb.SheetNames[0]];
           const rows = XLSX.utils.sheet_to_json(ws, { defval: '', header: 1 }) as any[][];
-          const text = rows.slice(0, 120).map((r: any[]) => (r || []).map(String).join('\t')).join('\n');
-          setAttachments(prev => [...prev, { kind: 'excel', name: file.name, data: text }]);
-          message.success('已附加表格：' + file.name);
+          const dataRows = rows.filter((r: any[]) => (r || []).some((c: any) => String(c || '').trim() !== ''));
+          const headerRow = dataRows[0] || [];
+          const headers = (headerRow || []).map((x: any) => String(x || ''));
+          const body = dataRows.slice(1);
+          // 2026-08-19 智能表格：识别类型（BOM/原声/报价/竞品）→ 完整数据存全局（工具直接读取），不塞 prompt
+          const { detectSheetType } = await import('../sheetType');
+          const st = detectSheetType(headers, body);
+          try {
+            const W = window as any;
+            W.__costhub_attachment_data = (W.__costhub_attachment_data || []).filter((x: any) => x.name !== file.name);
+            W.__costhub_attachment_data.push({ name: file.name, type: st.type, rows: [headerRow, ...body] });
+          } catch { }
+          setAttachments(prev => [...prev, { kind: 'excel', name: file.name, type: st.type, label: st.label, rowsCount: body.length, headers }]);
+          message.success('已附加' + st.label + '：' + file.name + '（' + body.length + ' 行）');
         } else {
           const reader = new FileReader();
           reader.onload = () => { setAttachments(prev => [...prev, { kind: 'image', name: file.name, data: String(reader.result || '') }]); message.success('已附加图片：' + file.name + '（需支持视觉的模型，如 qwen3-vl）'); };

@@ -101,6 +101,28 @@ async function readExcelText(file: File, maxRows: number): Promise<string> {
   return '文件：' + file.name + '（工作表 ' + wb.SheetNames.join('、') + '，共 ' + rows.length + ' 行，显示前 ' + Math.min(maxRows, rows.length) + ' 行）\n' + lines.join('\n');
 }
 
+// ===== 智能附件（2026-08-19）：AI 窗 📎 附加 Excel 后完整数据存 window.__costhub_attachment_data，工具直接读取 =====
+function attachmentRows(type?: string): { rows: any[][]; name: string } | null {
+  try {
+    const W = window as any;
+    const attach = W.__costhub_attachment_data || [];
+    const match = type ? attach.find((x: any) => x.type === type) || attach[0] : attach[0];
+    if (match && Array.isArray(match.rows) && match.rows.length > 1) return { rows: match.rows, name: match.name };
+  } catch { }
+  return null;
+}
+// 按表头列名映射成对象数组（第一行是表头）
+function mapColumns(rows: any[][], defs: { names: string[]; out: string }[]): Record<string, any>[] {
+  const header = rows[0] || [];
+  const h = (header || []).map((x: any) => String(x || '').toLowerCase());
+  const idx = defs.map(d => ({ out: d.out, i: h.findIndex(c => d.names.includes(c)) }));
+  return rows.slice(1).map(r => {
+    const o: Record<string, any> = {};
+    idx.forEach(({ out, i }) => { if (i >= 0) o[out] = r[i]; });
+    return o;
+  });
+}
+
 // ==================== 工具实现 ====================
 
 const tools: AiTool[] = [
@@ -654,9 +676,22 @@ const tools: AiTool[] = [
       const projs = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
       const p = projs.find((x: any) => x.code === a.project_code);
       if (!p) return '未找到项目代号：' + a.project_code;
-      let items: any[];
-      try { items = JSON.parse(String(a.items || '[]')); } catch { return 'items 不是合法 JSON 数组（请用 JSON 数组字符串传条目）'; }
-      if (!Array.isArray(items) || items.length === 0) return 'items 为空';
+      let items: any[] = [];
+      try { items = JSON.parse(String(a.items || '[]')); } catch { items = []; }
+      if (!Array.isArray(items) || items.length === 0) {
+        // 2026-08-19 智能附件：未传 items → 从附加的 BOM 表自动读取（列名映射）
+        const att = attachmentRows('bom');
+        if (att) {
+          items = mapColumns(att.rows, [
+            { names: ['名称', '器件名称', '器件名', '物料名称', '物料', 'name'], out: 'name' },
+            { names: ['型号', 'model'], out: 'model' },
+            { names: ['数量', 'quantity', 'qty'], out: 'quantity' },
+            { names: ['单价', '成本', '价格', 'cost', 'price'], out: 'cost' },
+            { names: ['模块', 'module'], out: 'module' },
+          ]).map((x: any) => ({ name: String(x.name || '').trim(), model: String(x.model || '').trim(), quantity: Number(x.quantity) || 1, cost: Number(x.cost) || 0, module: String(x.module || '').trim() })).filter((x: any) => x.name);
+        }
+      }
+      if (items.length === 0) return 'items 为空（可传 JSON 数组，或在输入区附加 BOM Excel 后重试）';
       const { classifyByModule } = await import('./moduleRules');
       const norm = items.map((it: any) => {
         const cls = classifyByModule(String(it.name || ''));
@@ -681,9 +716,21 @@ const tools: AiTool[] = [
     desc: '把供应商报价表录入供应商管理：按器件名+型号匹配已有器件，写入该器件的供应商报价（价格/份额）。参数 rows 必填（JSON 数组字符串，每项 {name:器件名, model?:型号, supplier:供应商名, price:报价, share?:份额%}）。未匹配到器件的会列出，提示先入器件库。',
     params: [{ key: 'rows', type: 'string', required: true, desc: 'JSON 数组字符串' }],
     execute: async (a) => {
-      let rows: any[];
-      try { rows = JSON.parse(String(a.rows || '[]')); } catch { return 'rows 不是合法 JSON 数组'; }
-      if (!Array.isArray(rows) || rows.length === 0) return 'rows 为空';
+      let rows: any[] = [];
+      try { rows = JSON.parse(String(a.rows || '[]')); } catch { rows = []; }
+      if (!Array.isArray(rows) || rows.length === 0) {
+        const att = attachmentRows('supplier');
+        if (att) {
+          rows = mapColumns(att.rows, [
+            { names: ['名称', '器件名称', '器件名', '物料', 'name'], out: 'name' },
+            { names: ['型号', 'model'], out: 'model' },
+            { names: ['供应商', '供应商名称', 'supplier'], out: 'supplier' },
+            { names: ['价格', '单价', '报价', 'price'], out: 'price' },
+            { names: ['份额', '占比', 'share'], out: 'share' },
+          ]).map((x: any) => ({ name: String(x.name || '').trim(), model: String(x.model || '').trim(), supplier: String(x.supplier || '').trim(), price: Number(x.price) || 0, share: Number(x.share) || 0 })).filter((x: any) => x.name && x.supplier);
+        }
+      }
+      if (rows.length === 0) return 'rows 为空（可传 JSON 数组，或在输入区附加供应商报价 Excel 后重试）';
       const { importSupplierQuotes } = await import('./db');
       const st = await importSupplierQuotes(rows);
       try { window.dispatchEvent(new CustomEvent('costhub-supplier-updated')); } catch { }
@@ -704,9 +751,21 @@ const tools: AiTool[] = [
       const comps = await getCompetitors();
       const c = comps.find((x: any) => String(x.brand || '').includes(String(a.brand || '')) && String(x.model || '').includes(String(a.model || '')));
       if (!c) return '未找到竞品：' + a.brand + ' ' + a.model + '（可在竞品管理页先录入）';
-      let rows: any[];
-      try { rows = JSON.parse(String(a.rows || '[]')); } catch { return 'rows 不是合法 JSON 数组'; }
-      if (!Array.isArray(rows) || rows.length === 0) return 'rows 为空';
+      let rows: any[] = [];
+      try { rows = JSON.parse(String(a.rows || '[]')); } catch { rows = []; }
+      if (!Array.isArray(rows) || rows.length === 0) {
+        const att = attachmentRows('competitor');
+        if (att) {
+          rows = mapColumns(att.rows, [
+            { names: ['名称', '器件名称', '物料', 'name'], out: 'name' },
+            { names: ['型号', 'model'], out: 'model' },
+            { names: ['成本', '估算成本', '价格', 'cost'], out: 'cost' },
+            { names: ['数量', 'quantity', 'qty'], out: 'quantity' },
+            { names: ['模块', 'module'], out: 'module' },
+          ]).map((x: any) => ({ name: String(x.name || '').trim(), model: String(x.model || '').trim(), cost: Number(x.cost) || 0, quantity: Number(x.quantity) || 1, module: String(x.module || '').trim() })).filter((x: any) => x.name);
+        }
+      }
+      if (rows.length === 0) return 'rows 为空（可传 JSON 数组，或在输入区附加竞品 Excel 后重试）';
       const { classifyByModule } = await import('./moduleRules');
       const norm = rows.map((it: any) => {
         const cls = classifyByModule(String(it.name || ''));
@@ -727,9 +786,18 @@ const tools: AiTool[] = [
       { key: 'items', type: 'string', required: true, desc: 'JSON 数组字符串' },
     ],
     execute: async (a) => {
-      let arr: any[];
-      try { arr = JSON.parse(String(a.items || '[]')); } catch { return 'items 不是合法 JSON 数组'; }
-      if (!Array.isArray(arr) || arr.length === 0) return 'items 为空';
+      let arr: any[] = [];
+      try { arr = JSON.parse(String(a.items || '[]')); } catch { arr = []; }
+      if (!Array.isArray(arr) || arr.length === 0) {
+        const att = attachmentRows('voice');
+        if (att) {
+          const mapped = mapColumns(att.rows, [
+            { names: ['评价', '评论', '反馈', '内容', '意见', '点评', '口碑'], out: 'content' },
+          ]);
+          arr = mapped.map((x: any) => String(x.content || '')).filter(Boolean);
+        }
+      }
+      if (arr.length === 0) return 'items 为空（可传 JSON 数组，或在输入区附加原声 Excel 后重试）';
       const contents = arr.map((x: any) => String(typeof x === 'string' ? x : (x?.content ?? x?.text ?? '')).trim()).filter(Boolean);
       if (contents.length === 0) return '没有有效原声内容';
       const { importVoiceItems } = await import('./db');
