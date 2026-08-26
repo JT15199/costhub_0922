@@ -224,6 +224,8 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       '【严禁】行情/洞察类任务调用 query_project_bom / query_project_cost / query_part_suppliers / query_project_health / compare_subcategory_cost 等与物料行情无关的工具。\n' +
       '【禁止自言自语】不要输出"让我先查看…""现在我需要…"这类计划性独白——需要数据就直接输出 [TOOL] 调用标记，否则直接给结论。\n' +
       '【数据铁律】所有价格/百分比/份额/趋势数字必须来自工具 [RESULT] 返回的真实数据；禁止编造（如"$100-$150"）；工具没查到就明确说"未查到该物料行情数据"；输出前自检每个数字都能在工具结果里找到。\n' +
+      '· 工具返回"等待确认/需审批"时【绝对禁止编造行情数据】——告诉用户"已提交云端审批，底部横幅确认后会自动续跑获取真实行情"，然后等待，不要自己编价格区间。\n' +
+      '· 用户给的是品类级物料（如 Scaler IC）时，先用 query_material_insight 查看库内关联的具体型号，确认用户要查哪个型号，不要笼统编造。\n' +
       '【写回结论】分析类任务完成后，可把结论落库供以后参考（落库后对话显示"✅ 已记录"，对应面板自动展示）：\n' +
       '· 卖点/模块价值分析 → save_selling_analysis({"project_code":"项目代号","conclusion":"结论要点"})——如哪个卖点值得保留/哪个模块该降本减配\n' +
       '· 物料行情洞察 → insight_material_trend 已自动写入洞察列表卡片，无需额外操作\n' +
@@ -277,7 +279,8 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         localTools: tools.map(x => ({ id: x.id, desc: x.desc, params: x.params })),
         executeTool: async (id, args) => {
           const res = await executeTool(id, args);
-          if (!res.ok && res.text.includes('等待云端发送确认')) pendingRetryRef.current = { prompt: userContent };
+          // ⚠️ 2026-08-19 修复：insight_material_trend 返回"等待云端发送确认"时 ok 是 true（工具正常执行只是提示审批）——只看文本含"等待云端发送确认"即记 pending，确认后自动续跑
+          if (res.text && res.text.includes('等待云端发送确认')) pendingRetryRef.current = { prompt: userContent };
           evidenceParts.push(res.text || '');
           // 物料一致性：用户指定了物料，模型却查别的 → 拦截提示（用户：Scaler IC 被换成液晶面板）
           if (targetMaterial && (id === 'query_material_insight' || id === 'insight_material_trend')) {

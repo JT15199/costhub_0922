@@ -588,7 +588,13 @@ const tools: AiTool[] = [
         const snaps = await db.select<any[]>('SELECT * FROM trend_snapshots WHERE trend_item_id = ? ORDER BY query_time DESC, id DESC LIMIT 1', [it.id]);
         if (snaps.length === 0) { lines.push('「' + it.query_category + '」（' + src + '）有物料但暂无洞察结论' + (it.last_queried_at ? '，上次查询 ' + String(it.last_queried_at || '').slice(0, 16) : '')); continue; }
         const s = snaps[0];
-        lines.push('「' + it.query_category + '」（' + src + '）最近洞察 ' + String(s.query_time || '').slice(0, 16) + '：趋势 ' + (s.direction || '-') + '，置信度 ' + (s.confidence_level || '-') + (s.summary ? '。摘要：' + String(s.summary || '').slice(0, 150) : ''));
+        // 2026-08-19：附关联器件型号（用户：不知道是什么型号——Scaler IC 是品类，库内可能有关联具体型号）
+        let modelLine = '';
+        try {
+          const mp = await db.select<any[]>('SELECT p.name, p.model FROM parts p JOIN trend_part_mapping tpm ON p.id = tpm.part_id WHERE tpm.trend_item_id = ? LIMIT 6', [it.id]);
+          if (mp.length) modelLine = '。关联器件型号：' + mp.map((x: any) => (x.model || x.name || '')).filter(Boolean).join('、');
+        } catch { }
+        lines.push('「' + it.query_category + '」（' + src + '）最近洞察 ' + String(s.query_time || '').slice(0, 16) + '：趋势 ' + (s.direction || '-') + '，置信度 ' + (s.confidence_level || '-') + (s.summary ? '。摘要：' + String(s.summary || '').slice(0, 150) : '') + modelLine);
       }
       return lines.join('\n');
     },
