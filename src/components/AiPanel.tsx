@@ -71,7 +71,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef({ aborted: false });
-  const pendingRetryRef = useRef<{ prompt: string } | null>(null); // 云端申请等待确认：确认后自动重发（costhub-insight-request）
+  const pendingRetryRef = useRef<{ prompt: string; material?: string; category?: string } | null>(null); // 云端申请等待确认：确认后直接云端查询（不依赖模型）
   const followRef = useRef(true);
 
   // 上下文联动：页面切换 + 页面内选中对象（costhub-ai-ctx 事件，detail: { label }）
@@ -134,7 +134,8 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       const pr = pendingRetryRef.current;
       if (!pr) return;
       pendingRetryRef.current = null;
-      setTimeout(() => { sendRef.current?.(pr.prompt); }, 300);
+      if (pr.material) { runCloudDirectRef.current?.(pr.material, pr.category || ''); }
+      else setTimeout(() => { sendRef.current?.(pr.prompt); }, 300);
     };
     window.addEventListener('costhub-insight-request', h);
     return () => window.removeEventListener('costhub-insight-request', h);
@@ -280,7 +281,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         executeTool: async (id, args) => {
           const res = await executeTool(id, args);
           // ⚠️ 2026-08-19 修复：insight_material_trend 返回"等待云端发送确认"时 ok 是 true（工具正常执行只是提示审批）——只看文本含"等待云端发送确认"即记 pending，确认后自动续跑
-          if (res.text && res.text.includes('等待云端发送确认')) pendingRetryRef.current = { prompt: userContent };
+          if (res.text && res.text.includes('等待云端发送确认')) pendingRetryRef.current = { prompt: userContent, material: String(args?.material_name || ''), category: String(args?.category || '') };
           evidenceParts.push(res.text || '');
           // 物料一致性：用户指定了物料，模型却查别的 → 拦截提示（用户：Scaler IC 被换成液晶面板）
           if (targetMaterial && (id === 'query_material_insight' || id === 'insight_material_trend')) {
@@ -302,7 +303,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           if (ok) return true;
           // false 分两种情况：①刚入队/已在队列=等待确认（'pending'，不能误报"用户拒绝"）②本会话已跳过=真拒绝
           const inQueue = getPendingConfirms().some(p => p.material === material);
-          if (inQueue) { pendingRetryRef.current = { prompt: userContent }; return 'pending'; }
+          if (inQueue) { pendingRetryRef.current = { prompt: userContent, material, category: String(call.category || '') }; return 'pending'; }
           return false;
         },
         runCloud: async (call) => {
@@ -340,6 +341,10 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           finalText += '\n\n[校验] 含 ' + unverified.length + ' 个未能溯源的数字：' + unverified.map(u => u.ctx).join('、') + '——请人工核对（行情数字应以工具 [RESULT] 为准）';
         }
       } catch { /* 校验失败不影响 */ }
+      // 代码级防"假更新"：本轮有"等待云端发送确认"的工具结果（云端未真正执行）→ 结论前强制警示，防模型假装已更新
+      if (evidenceParts.some(t => String(t || '').includes('等待云端发送确认'))) {
+        finalText = '⚠️ 云端行情审批待确认：请点击屏幕底部「🔐 等待云端发送确认」横幅确认，确认后系统将自动获取真实行情并更新洞察卡片。以下内容中的行情数字未经云端核实。\n\n' + finalText;
+      }
     } catch (e: any) {
       finalText = '模型调用失败：' + String(e?.message || e).slice(0, 300);
       setMessages(prev => {
@@ -393,6 +398,37 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     };
     input.click();
   };
+
+  // ===== 审批确认后直接云端查询+写库（2026-08-19：不依赖 9B 模型重新调工具——确认即真正更新洞察） =====
+  const runCloudDirect = async (material: string, category: string) => {
+    setStreaming(true);
+    setMessages(prev => [...prev, { role: 'user', content: '（云端审批已确认，正在获取「' + material + '」最新行情…）' }]);
+    setMessages(prev => [...prev, { role: 'assistant', content: '', reasoning: '', steps: [] }]);
+    followRef.current = true;
+    try {
+      const { agentSearchLoop } = await import('../trendService');
+      const r = await agentSearchLoop(material, category, 'price-trend');
+      let synced = false;
+      try {
+        const { getDb, saveTrendSnapshot } = await import('../db');
+        const db = await getDb();
+        const items = await db.select<any[]>('SELECT * FROM trend_items WHERE query_category LIKE ? ORDER BY id DESC LIMIT 1', ['%' + material + '%']);
+        if (items.length) {
+          await saveTrendSnapshot({ trend_item_id: items[0].id, source_type: 'ai_panel', direction: r.trend_direction || '', confidence_level: r.confidence_level || '', summary: r.summary || '', suggested_action: r.suggested_action || '', skill_used: 'ai_confirm_retry', magnitude_min: r.magnitude_min, magnitude_max: r.magnitude_max });
+          await db.execute("UPDATE trend_items SET last_queried_at=datetime('now','localtime') WHERE id=?", [items[0].id]);
+          synced = true;
+          try { window.dispatchEvent(new CustomEvent('costhub-trend-updated')); } catch { }
+        }
+      } catch (e) { console.error('写库失败:', e); }
+      const text = '✅ 云端审批已确认，已获取「' + material + '」最新行情：\n趋势 ' + (r.trend_direction || '信号不明确') + '，置信度 ' + (r.confidence_level || '中') + (r.magnitude_min != null ? '，近1-3月幅度 ' + r.magnitude_min + '%~' + (r.magnitude_max ?? '') + '%' : '') + '\n摘要：' + (r.summary || '') + (r.suggested_action ? '\n建议：' + r.suggested_action : '') + (synced ? '\n📌 已更新物料洞察列表卡片' : '\n（该物料不在洞察列表，未写卡片）');
+      setMessages(prev => { const arr = [...prev]; const last = arr[arr.length - 1]; if (last && last.role === 'assistant') arr[arr.length - 1] = { ...last, content: text }; return arr; });
+    } catch (e: any) {
+      const err = '云端查询失败：' + String(e?.message || e).slice(0, 300);
+      setMessages(prev => { const arr = [...prev]; const last = arr[arr.length - 1]; if (last && last.role === 'assistant' && !last.content) arr[arr.length - 1] = { ...last, content: err }; return arr; });
+    } finally { setStreaming(false); }
+  };
+  const runCloudDirectRef = useRef<((m: string, c: string) => void) | null>(null);
+  useEffect(() => { runCloudDirectRef.current = runCloudDirect; });
 
   // ===== 停止生成（2026-08-18 用户：模型没有停止功能） =====
   const stopGen = () => {
