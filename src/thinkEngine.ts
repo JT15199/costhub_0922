@@ -194,13 +194,19 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
     const stopStream = () => { try { streamCleanup?.(); } catch { } streamCleanup = null; };
     await new Promise<void>((resolve, reject) => {
       let settled = false;
+      let lastTokenAt = Date.now(); // 无输出保护：任何 token（思考/正文）到达都更新
       const done = () => { if (!settled) { settled = true; clearInterval(iv); stopStream(); resolve(); } };
       const fail = (e: any) => { if (!settled) { settled = true; clearInterval(iv); stopStream(); reject(e); } };
-      const iv = setInterval(() => { if (opts.abortRef?.aborted) done(); }, 150);
+      // 150ms 检查：①abort 停止 ②90s 整轮完全无 token → 模型无响应报错（用户：只显示"正在分析"没反应=模型没输出却永久挂起）
+      // ⚠️ 有 token 持续到达就无限等（用户红线：不截断、有输出就等）
+      const iv = setInterval(() => {
+        if (opts.abortRef?.aborted) done();
+        else if (Date.now() - lastTokenAt > 90000) fail(new Error('模型 90 秒无任何输出（可能模型正在加载或 Ollama 异常），已停止——请检查 Ollama 后重试'));
+      }, 150);
       startOllamaStream(
         opts.baseUrl, opts.model, messages,
-        (t) => { buffer += t; opts.onEvent?.onAnswer?.(t); },
-        (t) => { buffer += t; opts.onEvent?.onThought?.(t); },
+        (t) => { lastTokenAt = Date.now(); buffer += t; opts.onEvent?.onAnswer?.(t); },
+        (t) => { lastTokenAt = Date.now(); buffer += t; opts.onEvent?.onThought?.(t); },
         () => done(),
         (e) => fail(new Error(e)),
         // ⚠️ json:false 必须（默认 format:'json' 会强制只输出 JSON，思考/正文被吞 → 无内容）；num_predict 16384 不截断长思考（用户 2026-08-18：所有本地 AI 不要截断）
