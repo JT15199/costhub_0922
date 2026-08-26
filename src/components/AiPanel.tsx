@@ -15,6 +15,7 @@ import { runThinkLoop, buildThinkSystemPrompt, parsePlanCall } from '../thinkEng
 import { detectOllama } from '../aiStatus';
 import { loadSessions, newSession, loadMessages, saveMsg, type Session } from '../aiPanelChat';
 import { getDataReadiness } from '../dataReadiness';
+import { detectSkills } from '../aiSkills';
 import { verifyConclusionNumbers } from '../verifyConclusion';
 
 // ===== 页面 → 上下文名（App 传入当前页 key） =====
@@ -221,7 +222,16 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         }).join('\n');
         userContent += (text ? '\n\n' : '') + summary + (text ? '' : '\n\n请按上述引导处理该附件。');
       }
-      attachments.filter(a => a.kind === 'image').forEach(a => { if (a.data) images.push(a.data); });
+      const imgParts = attachments.filter(a => a.kind === 'image');
+      if (imgParts.length) {
+        const imgSummary = imgParts.map(a => {
+          const W = window as any;
+          const ocr = (W.__costhub_attachment_data || []).find((x: any) => x.name === a.name);
+          return '【图片：' + a.name + '】' + (ocr ? '——已 OCR 提取为' + (ocr.label || ocr.type || '表格') + '（' + ((ocr.rows || []).length - 1) + ' 行），可按类型调 import_* 工具处理或直接分析内容' : '——需支持视觉的模型看图，或联网 OCR 提取文字');
+        }).join('\n');
+        userContent += (userContent ? '\n\n' : '') + imgSummary;
+      }
+      imgParts.forEach(a => { if (a.data) images.push(a.data); });
       setAttachments([]);
     }
     abortRef.current.aborted = false;
@@ -272,6 +282,11 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       '· 把数据整理成 Excel → write_excel（每表 rows 二维数组，第一行表头，数值用数字类型）\n' +
       '· 读用户提供的 Excel → read_excel；附件文件 → 输入区 📎\n' +
       '· 生成后如实汇报文件名/格式/保存位置，不编造内容。';
+    // 2026-08-19 技能注入（借鉴 DSH Skills）：按提问检测匹配技能，追加精炼步骤
+    try {
+      const skills = detectSkills(userContent);
+      if (skills.length) sys += '\n\n【当前任务技能】' + skills.map(s => s.name + '：' + s.guide).join('\n');
+    } catch { }
     baseUrl = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
     // 用 state model（头部下拉选择已同步 setSetting；detectOllama 同步）
     if (!(model || modelInfo.model)) { message.warning('未选择模型（头部下拉选择）'); setStreaming(false); return; }
@@ -425,36 +440,70 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   };
 
   // ===== 附件选择（2026-08-18 用户：对话框要能添加图片和 excel 等文件） =====
+  // 表格行处理：识别类型 → 完整数据存全局（工具直接读）→ 附件摘要
+  const handleSheetRows = async (name: string, rows: any[][]) => {
+    const dataRows = rows.filter((r: any[]) => (r || []).some((c: any) => String(c || '').trim() !== ''));
+    const headerRow = dataRows[0] || [];
+    const headers = (headerRow || []).map((x: any) => String(x || ''));
+    const body = dataRows.slice(1);
+    const { detectSheetType } = await import('../sheetType');
+    const st = detectSheetType(headers, body);
+    try {
+      const W = window as any;
+      W.__costhub_attachment_data = (W.__costhub_attachment_data || []).filter((x: any) => x.name !== name);
+      W.__costhub_attachment_data.push({ name, type: st.type, rows: [headerRow, ...body] });
+    } catch { }
+    setAttachments(prev => [...prev, { kind: 'excel', name, type: st.type, label: st.label, rowsCount: body.length, headers }]);
+    message.success('已附加' + st.label + '：' + name + '（' + body.length + ' 行）');
+  };
   const pickAttachment = () => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.xlsx,.xls,image/*';
+    input.accept = '.xlsx,.xls,.csv,.txt,.pdf,image/*';
     input.onchange = async (ev: any) => {
       const file = ev.target?.files?.[0];
       if (!file) return;
       try {
-        if (/\.(xlsx|xls)$/i.test(file.name)) {
-          const buf = await file.arrayBuffer();
-          const wb = XLSX.read(buf);
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const rows = XLSX.utils.sheet_to_json(ws, { defval: '', header: 1 }) as any[][];
-          const dataRows = rows.filter((r: any[]) => (r || []).some((c: any) => String(c || '').trim() !== ''));
-          const headerRow = dataRows[0] || [];
-          const headers = (headerRow || []).map((x: any) => String(x || ''));
-          const body = dataRows.slice(1);
-          // 2026-08-19 智能表格：识别类型（BOM/原声/报价/竞品）→ 完整数据存全局（工具直接读取），不塞 prompt
-          const { detectSheetType } = await import('../sheetType');
-          const st = detectSheetType(headers, body);
-          try {
-            const W = window as any;
-            W.__costhub_attachment_data = (W.__costhub_attachment_data || []).filter((x: any) => x.name !== file.name);
-            W.__costhub_attachment_data.push({ name: file.name, type: st.type, rows: [headerRow, ...body] });
-          } catch { }
-          setAttachments(prev => [...prev, { kind: 'excel', name: file.name, type: st.type, label: st.label, rowsCount: body.length, headers }]);
-          message.success('已附加' + st.label + '：' + file.name + '（' + body.length + ' 行）');
+        const ext = (file.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+        // 表格类（xlsx/xls/csv）：解析成二维数组 → 识别类型存全局
+        if (['.xlsx', '.xls', '.csv'].includes(ext)) {
+          let rows: any[][];
+          if (ext === '.csv') {
+            const text = await file.text();
+            const wb = XLSX.read(text, { type: 'string' });
+            rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '', header: 1 }) as any[][];
+          } else {
+            const buf = await file.arrayBuffer();
+            const wb = XLSX.read(buf);
+            rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '', header: 1 }) as any[][];
+          }
+          handleSheetRows(file.name, rows);
+        } else if (ext === '.txt' || ext === '.pdf') {
+          let text: string;
+          if (ext === '.pdf') {
+            const { extractPdfText } = await import('../attachmentTools');
+            text = await extractPdfText(await file.arrayBuffer());
+          } else { text = await file.text(); }
+          const { textToRows } = await import('../attachmentTools');
+          const rows = textToRows(text);
+          if (rows) handleSheetRows(file.name, rows);
+          else handleSheetRows(file.name, [['内容'], ...text.split('\n').map(l => [String(l || '').trim()]).filter(x => x[0])]);
         } else {
+          // 图片：存 base64（VL 模型用）+ 立即 OCR 提取文字（拍照报价单等，非 VL 也能处理）
           const reader = new FileReader();
-          reader.onload = () => { setAttachments(prev => [...prev, { kind: 'image', name: file.name, data: String(reader.result || '') }]); message.success('已附加图片：' + file.name + '（需支持视觉的模型，如 qwen3-vl）'); };
+          reader.onload = async () => {
+            const b64 = String(reader.result || '');
+            let ocrText = '';
+            try { const { ocrImage } = await import('../attachmentTools'); ocrText = await ocrImage(b64); } catch (e) { console.error('OCR 失败', e); }
+            if (ocrText.trim()) {
+              const { textToRows } = await import('../attachmentTools');
+              const rows = textToRows(ocrText);
+              if (rows) handleSheetRows(file.name, rows);
+              else handleSheetRows(file.name, [['内容'], ...ocrText.split('\n').map(l => [String(l || '').trim()]).filter(x => x[0])]);
+            }
+            setAttachments(prev => [...prev, { kind: 'image', name: file.name, data: b64 }]);
+            message.success('已附加图片：' + file.name + (ocrText.trim() ? '（OCR 提取 ' + ocrText.trim().split('\n').length + ' 行文字）' : '（未提取到文字，需联网 OCR 引擎）'));
+          };
           reader.readAsDataURL(file);
         }
       } catch (e: any) { message.error('附件读取失败：' + String(e?.message || e)); }

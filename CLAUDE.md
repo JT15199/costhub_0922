@@ -250,6 +250,13 @@
 - **结构化澄清（ask_user，借鉴 ask_user_question）**：第 34 个工具 ask_user（question+options JSON）；AiPanel 拦截渲染选项卡片（输入区上方），用户点击/继续/跳过 → 结果回填 [RESULT] 给模型继续；提示明确"没给目标先 ask_user 不要瞎猜"。
 - **批量编排（pendingQueue，借鉴 workflow）**：pendingRetryRef 改数组（去重 push）；确认事件后逐个 runCloudDirect 云端查询更新 + 显示「🔄 批量更新行情：第 X/N 个」；支持"把这 N 个物料都更新行情"。
 
+
+## 三·补15、技能库 + 文件格式扩展 + OCR（2026-08-19 用户：加上都加上——借鉴开源 agent 生态）
+
+- **技能库（aiSkills.ts，借鉴 DSH Skills/开源 agent 技能模板）**：6 个技能（行情洞察/审价/BOM 拆解/卖点价值/项目体检/报告生成），AiPanel send 时 detectSkills 按提问命中 → systemPrompt 追加「当前任务技能」精炼步骤；+6 测试。
+- **文件格式扩展（attachmentTools.ts + pickAttachment）**：📎 支持 .xlsx/.xls/.csv/.txt/.pdf——CSV 用 XLSX 读、TXT 按 tab/多空格/逗号拆表格（textToRows）、PDF 用 pdfjs-dist 提取文本（worker ?url 本地打包）按 y 坐标聚合行；统一 handleSheetRows → detectSheetType → 存全局附件（import_* 工具直接读）。
+- **OCR（tesseract.js）**：图片附件立即 OCR（eng+chi_sim，语言包本地 public/tessdata/ 已下载，引擎 CDN 需联网）；OCR 文本走表格识别流程，拍照报价单 → 提取 → 审价/录入；send 时图片摘要提示已 OCR 行数或需联网。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。
