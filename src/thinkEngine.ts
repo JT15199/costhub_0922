@@ -82,6 +82,19 @@ export function parseProtocolCalls(text: string): { kind: 'tool' | 'cloud'; name
   return calls;
 }
 
+// 任务清单协议（2026-08-19 借鉴 DSH todo_write/workflow）：模型复杂任务先输出 [PLAN] 标记拆解步骤，前端显示执行进度
+// 格式：[PLAN] {"steps":["查询历史行情","查询最新行情","生成报告"]}
+export function parsePlanCall(text: string): { steps: string[] } | null {
+  if (!text) return null;
+  const m = text.match(/\[PLAN\]\s*(\{[\s\S]*?\})/);
+  if (!m) return null;
+  try {
+    const j = JSON.parse(m[1]);
+    if (Array.isArray(j.steps) && j.steps.length) return { steps: j.steps.map((s: any) => String(s || '').trim()).filter(Boolean) };
+  } catch { }
+  return null;
+}
+
 // 展示用：去掉 [TOOL]/[CLOUD] 调用标记（保留思考/结论正文）
 export function cleanProtocolText(text: string): string {
   if (!text) return text;

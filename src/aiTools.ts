@@ -59,6 +59,7 @@ export const TOOL_ICONS: Record<string, React.ComponentType> = {
   import_voice_items: MessageOutlined,
   generate_report: BookOutlined,
   write_excel: FileExcelOutlined,
+  ask_user: MessageOutlined,
 };
 export function toolIcon(id: string): React.ComponentType {
   return TOOL_ICONS[id] || FolderOutlined;
@@ -853,6 +854,19 @@ const tools: AiTool[] = [
       await invoke('save_export_file', { fileName: name, base64Data: b64 });
       const rowsTotal = sheets.reduce((s: number, sh: any) => s + ((sh.rows || []).length - 1), 0);
       return '✅ 已生成 Excel：' + name + '（' + sheets.length + ' 个工作表，' + Math.max(0, rowsTotal) + ' 行数据，保存在导出目录 exports/）';
+    },
+  },
+  {
+    id: 'ask_user',
+    name: '询问用户确认',
+    desc: '遇到不确定的关键信息（如用户没说哪个物料/哪个项目/选哪个方案）时调用，向用户提问并给选项，等用户选择后再继续——不要瞎猜。参数 question 必填（问题），options 可选（JSON 数组字符串，选项列表）。前端会渲染选项按钮供用户点击。',
+    params: [
+      { key: 'question', type: 'string', required: true, desc: '要问用户的问题' },
+      { key: 'options', type: 'string', desc: 'JSON 数组字符串，选项列表，可空' },
+    ],
+    execute: async (_a) => {
+      // AiPanel 会拦截本工具渲染选项并等待用户点击；这里只是兜底（正常情况下不执行到这里）
+      return '已向用户提问，等待选择…';
     },
   },
 ];

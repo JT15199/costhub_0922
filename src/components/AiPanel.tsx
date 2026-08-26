@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons';
 import { getSetting, setSetting, saveAIRequestLog } from '../db';
 import { listTools, executeTool } from '../aiTools';
-import { runThinkLoop, buildThinkSystemPrompt } from '../thinkEngine';
+import { runThinkLoop, buildThinkSystemPrompt, parsePlanCall } from '../thinkEngine';
 import { detectOllama } from '../aiStatus';
 import { loadSessions, newSession, loadMessages, saveMsg, type Session } from '../aiPanelChat';
 import { getDataReadiness } from '../dataReadiness';
@@ -60,6 +60,11 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
+  // 2026-08-19 任务清单（[PLAN] 协议，借鉴 DSH todo_write/workflow）：模型拆解步骤，前端显示进度
+  const [plan, setPlan] = useState<{ steps: string[]; done: number } | null>(null);
+  // 2026-08-19 结构化澄清（借鉴 DSH ask_user_question）：AI 调 ask_user → 渲染选项等待用户点击
+  const [pendingAsk, setPendingAsk] = useState<{ question: string; options: string[] } | null>(null);
+  const askResolveRef = useRef<((answer: string) => void) | null>(null);
   const [modelInfo, setModelInfo] = useState<{ ready: boolean; model: string }>({ ready: false, model: '' });
   const [ctxLabel, setCtxLabel] = useState(PAGE_LABELS[activePage || ''] || '当前页面');
   // 2026-08-18：模型选择 / 深度思考 / 附件（图片+Excel）
@@ -71,7 +76,9 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef({ aborted: false });
-  const pendingRetryRef = useRef<{ prompt: string; material?: string; category?: string } | null>(null); // 云端申请等待确认：确认后直接云端查询（不依赖模型）
+  const planRef = useRef<{ steps: string[] } | null>(null);
+  const pendingRetryRef = useRef<{ prompt: string; material?: string; category?: string }[]>([]); // 云端申请等待确认队列（支持批量）：确认后逐个直接云端查询（不依赖模型）
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number; current: string } | null>(null);
   const followRef = useRef(true);
 
   // 上下文联动：页面切换 + 页面内选中对象（costhub-ai-ctx 事件，detail: { label }）
@@ -131,11 +138,24 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   // 对话里遇到 'pending'/工具返回'等待确认'时记下提问；底部横幅确认后 costhub-insight-request → 自动重发，第二次审批放行 → 云端真正调用
   useEffect(() => {
     const h = () => {
-      const pr = pendingRetryRef.current;
-      if (!pr) return;
-      pendingRetryRef.current = null;
-      if (pr.material) { runCloudDirectRef.current?.(pr.material, pr.category || ''); }
-      else setTimeout(() => { sendRef.current?.(pr.prompt); }, 300);
+      const q = pendingRetryRef.current;
+      if (!q.length) return;
+      pendingRetryRef.current = [];
+      const withMat = q.filter(x => x.material);
+      if (withMat.length) {
+        // 批量：逐个云端查询更新（借鉴 DSH workflow 批量编排），显示进度
+        const runAll = async () => {
+          for (let i = 0; i < withMat.length; i++) {
+            setBatchProgress({ done: i, total: withMat.length, current: withMat[i].material || '' });
+            await runCloudDirectRef.current?.(withMat[i].material || '', withMat[i].category || '');
+          }
+          setBatchProgress(null);
+        };
+        runAll();
+      } else {
+        const pr = q[0];
+        setTimeout(() => { sendRef.current?.(pr.prompt); }, 300);
+      }
     };
     window.addEventListener('costhub-insight-request', h);
     return () => window.removeEventListener('costhub-insight-request', h);
@@ -205,6 +225,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       setAttachments([]);
     }
     abortRef.current.aborted = false;
+    setPlan(null);
     if (!modelInfo.ready) { message.warning('本地模型未连接（设置 → 连接设置 → 配置 Ollama 模型并启动）'); return; }
     let sid = sessionId;
     if (!sid) { sid = await newSession((userContent || '附件').slice(0, 20)); setSessionId(sid); setSessions(await loadSessions()); }
@@ -224,6 +245,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     let prefCtx = '';
     try { prefCtx = await import('../aiLearning').then(m => m.buildPreferenceContext()); } catch { prefCtx = ''; }
     sys = buildThinkSystemPrompt(toolList, prefCtx) + '\n\n【任务执行】用户让你做任何查询/分析/洞察时，必须先用工具获取真实数据再回答：\n' +
+      '· 复杂任务（多步骤/多物料/分析+生成）先输出计划标记拆解步骤：[PLAN] {"steps":["步骤1","步骤2"]}——前端会显示执行进度，每完成一个工具自动勾选。\n' +
       '· 更新/查询某物料的最新行情洞察（如"更新 Scaler IC 行情"）→ 必须两步都做完，缺一不可：\n' +
       '   ① query_material_insight({"material_name":"物料名"}) 查历史结论\n' +
       '   ② insight_material_trend({"material_name":"物料名","category":"品类"}) 查最新行情（云端，需底部横幅审批；审批确认后会自动续跑）\n' +
@@ -244,7 +266,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       '① 先 read_excel 或读取附件获取文件内容，理解表结构（识别 器件名/型号/数量/单价 列，不要猜列名）\n' +
       '② 解析成结构化 JSON 数组后调对应导入工具：BOM→import_bom_to_project（自动归类模块）、供应商报价→import_supplier_quote、竞品 BOM→import_competitor_bom、原声→import_voice_items\n' +
       '③ 数据校验：数量/单价必须是数字；缺失必填字段的条目跳过并报告；导入工具返回统计后如实汇报（新建几个器件/复用几个/跳过几个）\n' +
-      '④ 用户没给目标项目/产品时先问清楚，不要擅自指定。\n' +
+      '④ 用户没给目标项目/产品时先问清楚，不要擅自指定——用 ask_user 工具提问并给选项，等用户选择后再继续（不要瞎猜）。\n' +
       '【报告与文件】用户要生成报告/演示/表格时：\n' +
       '· 生成报告/演示（HTML 网页报告或 PPTX）→ 分析完成把结论组织成 3-6 节（每节 heading+points）→ generate_report（保存到导出目录 exports/）\n' +
       '· 把数据整理成 Excel → write_excel（每表 rows 二维数组，第一行表头，数值用数字类型）\n' +
@@ -288,9 +310,23 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         images,
         localTools: tools.map(x => ({ id: x.id, desc: x.desc, params: x.params })),
         executeTool: async (id, args) => {
+          // 结构化澄清：ask_user 工具 → 渲染选项等待用户点击（借鉴 DSH ask_user_question）
+          if (id === 'ask_user') {
+            const question = String(args?.question || '');
+            let options: string[] = [];
+            try { const o = JSON.parse(String(args?.options || '[]')); if (Array.isArray(o)) options = o.map(String); } catch { }
+            const answer = await new Promise<string>(resolve => {
+              askResolveRef.current = resolve;
+              setPendingAsk({ question, options });
+            });
+            return { ok: true, text: '用户选择了：' + answer };
+          }
           const res = await executeTool(id, args);
           // ⚠️ 2026-08-19 修复：insight_material_trend 返回"等待云端发送确认"时 ok 是 true（工具正常执行只是提示审批）——只看文本含"等待云端发送确认"即记 pending，确认后自动续跑
-          if (res.text && res.text.includes('等待云端发送确认')) pendingRetryRef.current = { prompt: userContent, material: String(args?.material_name || ''), category: String(args?.category || '') };
+          if (res.text && res.text.includes('等待云端发送确认')) {
+            const mm = String(args?.material_name || '');
+            if (mm && !pendingRetryRef.current.some(x => x.material === mm)) pendingRetryRef.current.push({ prompt: userContent, material: mm, category: String(args?.category || '') });
+          }
           evidenceParts.push(res.text || '');
           // 物料一致性：用户指定了物料，模型却查别的 → 拦截提示（用户：Scaler IC 被换成液晶面板）
           if (targetMaterial && (id === 'query_material_insight' || id === 'insight_material_trend')) {
@@ -312,7 +348,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           if (ok) return true;
           // false 分两种情况：①刚入队/已在队列=等待确认（'pending'，不能误报"用户拒绝"）②本会话已跳过=真拒绝
           const inQueue = getPendingConfirms().some(p => p.material === material);
-          if (inQueue) { pendingRetryRef.current = { prompt: userContent, material, category: String(call.category || '') }; return 'pending'; }
+          if (inQueue) { if (!pendingRetryRef.current.some(x => x.material === material)) pendingRetryRef.current.push({ prompt: userContent, material, category: String(call.category || '') }); return 'pending'; }
           return false;
         },
         runCloud: async (call) => {
@@ -335,10 +371,17 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           onAnswer: (t) => setMessages(prev => {
             const arr = [...prev]; const last = arr[arr.length - 1];
             if (!last || last.role !== 'assistant') return prev;
-            arr[arr.length - 1] = { ...last, content: (last.content || '') + t };
+            const content = (last.content || '') + t;
+            arr[arr.length - 1] = { ...last, content };
+            // 任务清单：模型输出 [PLAN] 标记 → 显示执行计划（借鉴 DSH）
+            if (!planRef.current) { const p = parsePlanCall(content); if (p) { planRef.current = p; setPlan({ steps: p.steps, done: 0 }); } }
             return arr;
           }),
-          onToolResult: (name, args, ok, text) => { evidenceParts.push(text || ''); appendStep({ kind: 'tool', name, ok, detail: JSON.stringify(args || {}) + ' → ' + (text || '').slice(0, 150) }); },
+          onToolResult: (name, args, ok, text) => {
+            evidenceParts.push(text || ''); appendStep({ kind: 'tool', name, ok, detail: JSON.stringify(args || {}) + ' → ' + (text || '').slice(0, 150) });
+            // 任务清单：完成一个工具 → 步骤进度 +1
+            if (planRef.current) setPlan(p => p ? { ...p, done: Math.min(p.done + 1, p.steps.length) } : p);
+          },
           onCloudResult: (_call, ok, result) => { evidenceParts.push(result || ''); appendStep({ kind: 'cloud', name: '云端行情', ok, detail: (ok ? '✓ ' : '✗ ') + (result || '').slice(0, 150) }); },
         },
       });
@@ -521,6 +564,24 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       </div>
       {/* 对话区 */}
       <div ref={scrollRef} onScroll={onScroll} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* 批量云端更新进度 */}
+        {batchProgress && (
+          <div style={{ background: '#EDF6F0', border: '1px solid #CDE3D4', borderRadius: 9, padding: '7px 11px', fontSize: 11, color: '#1F7A4C', lineHeight: 1.7 }}>
+            🔄 批量更新行情：第 {batchProgress.done + 1}/{batchProgress.total} 个 · {batchProgress.current}
+          </div>
+        )}
+        {/* 任务清单（[PLAN] 协议，借鉴 DSH todo_write/workflow） */}
+        {plan && (
+          <div style={{ background: '#FBFAF6', border: '1px solid #E6E4DC', borderRadius: 9, padding: '8px 11px', fontSize: 11, color: '#5F5D54', lineHeight: 1.8 }}>
+            <div style={{ fontWeight: 700, color: '#181713', marginBottom: 3 }}>📋 执行计划</div>
+            {plan.steps.map((s, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ flexShrink: 0, width: 14, textAlign: 'center' }}>{i < plan.done ? '✅' : i === plan.done ? <span style={{ color: '#A67C1F' }}>⟳</span> : '□'}</span>
+                <span style={{ textDecoration: i < plan.done ? 'line-through' : 'none', opacity: i < plan.done ? 0.6 : 1 }}>{s}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {messages.length === 0 && !streaming ? (
           <div style={{ fontSize: 11.5, color: '#9A978B', lineHeight: 1.9, padding: '6px 4px' }}>
             <div style={{ fontWeight: 700, color: '#5F5D54', marginBottom: 2 }}>直接说需求，我自动调用工具查库分析</div>
@@ -570,6 +631,25 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
 
       {/* 输入区 */}
       <div style={{ padding: '8px 10px', borderTop: '1px solid #E6E4DC', flexShrink: 0 }}>
+        {pendingAsk && (
+          <div style={{ background: '#FFF8EC', border: '1px solid #F0D9B5', borderRadius: 9, padding: '9px 12px', marginBottom: 6 }}>
+            <div style={{ fontSize: 12, color: '#181713', fontWeight: 600, marginBottom: 7 }}>🤔 {pendingAsk.question}</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {pendingAsk.options.length > 0 ? pendingAsk.options.map((o, oi) => (
+                <Button key={oi} size="small" style={{ fontSize: 11.5, borderRadius: 6, background: '#FFFFFF', borderColor: '#D5C4A8' }} onClick={() => {
+                  askResolveRef.current?.(o); askResolveRef.current = null; setPendingAsk(null);
+                }}>{o}</Button>
+              )) : (
+                <Button size="small" type="primary" style={{ fontSize: 11.5, borderRadius: 6 }} onClick={() => {
+                  askResolveRef.current?.('（用户已确认，请继续）'); askResolveRef.current = null; setPendingAsk(null);
+                }}>继续</Button>
+              )}
+              <Button size="small" style={{ fontSize: 11.5, borderRadius: 6 }} onClick={() => {
+                askResolveRef.current?.('（用户选择跳过，请自行合理处理或说明）'); askResolveRef.current = null; setPendingAsk(null);
+              }}>跳过</Button>
+            </div>
+          </div>
+        )}
         {attachments.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 5 }}>
             {attachments.map((a, ai) => (

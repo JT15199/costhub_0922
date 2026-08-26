@@ -243,6 +243,13 @@
 - **引导**：AiPanel 提示【报告与文件】——生成报告/演示用 generate_report（3-6 节每节要点）、整理表格用 write_excel（首行表头）、读 Excel 用 read_excel、附件用 📎；生成后如实汇报文件名/格式/位置。
 - **双路径**：手动（页面功能）+ AI（右侧窗驱动全部工具）；页面不新增不复杂，展示=洞察卡片/卖点结论卡/驾驶舱分析卡/审价历史/导出目录。
 
+
+## 三·补14、借鉴 DSH 三件套：任务清单 / 结构化澄清 / 批量编排（2026-08-19 用户：把 DSH 可借鉴的放进来，为 27B 模型准备——代码级确定性，不依赖模型智能）
+
+- **任务清单（[PLAN] 协议，借鉴 todo_write/workflow）**：thinkEngine.parsePlanCall 解析模型输出的 [PLAN] {"steps":[...]}；AiPanel 对话区顶部显示「📋 执行计划」（✅完成/⟳进行中/□待办），每完成一个工具（onToolResult）自动勾选；复杂任务提示先输出 [PLAN]。
+- **结构化澄清（ask_user，借鉴 ask_user_question）**：第 34 个工具 ask_user（question+options JSON）；AiPanel 拦截渲染选项卡片（输入区上方），用户点击/继续/跳过 → 结果回填 [RESULT] 给模型继续；提示明确"没给目标先 ask_user 不要瞎猜"。
+- **批量编排（pendingQueue，借鉴 workflow）**：pendingRetryRef 改数组（去重 push）；确认事件后逐个 runCloudDirect 云端查询更新 + 显示「🔄 批量更新行情：第 X/N 个」；支持"把这 N 个物料都更新行情"。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。
