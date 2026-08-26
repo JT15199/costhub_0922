@@ -202,17 +202,18 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     setMessages(prev => [...prev, { role: 'user', content: userContent }]);
     await saveMsg(currentSid, 'user', userContent);
     setInput('');
-    setStreaming(true);
-    setMessages(prev => [...prev, { role: 'assistant', content: '', reasoning: '', steps: [] }]);
-    followRef.current = true;
-
-    const tools = listTools();
+    // ⚠️ 2026-08-18 修复"没反应"：streaming 延后到所有前置构建成功之后——前置抛错撤回消息不卡死
+    let tools: any[] = [];
+    let sys = '';
+    let baseUrl = '';
+    try {
+    tools = listTools();
     const toolList = tools.map(t =>
-      t.name + '（' + t.id + '）' + (t.params.length ? ' 参数：' + t.params.map(p => p.key + (p.required ? '' : '?') + '(' + p.desc + ')').join(',') : '无参数')
+      t.name + '（' + t.id + '）' + (t.params.length ? ' 参数：' + t.params.map((p: any) => p.key + (p.required ? '' : '?') + '(' + p.desc + ')').join(',') : '无参数')
     );
     let prefCtx = '';
     try { prefCtx = await import('../aiLearning').then(m => m.buildPreferenceContext()); } catch { prefCtx = ''; }
-    const sys = buildThinkSystemPrompt(toolList, prefCtx) + '\n\n【任务执行】用户让你做任何查询/分析/洞察时，必须先用工具获取真实数据再回答：\n' +
+    sys = buildThinkSystemPrompt(toolList, prefCtx) + '\n\n【任务执行】用户让你做任何查询/分析/洞察时，必须先用工具获取真实数据再回答：\n' +
       '· 更新/查询某物料的最新行情洞察（如"更新 Scaler IC 行情"）→ 必须两步都做完，缺一不可：\n' +
       '   ① query_material_insight({"material_name":"物料名"}) 查历史结论\n' +
       '   ② insight_material_trend({"material_name":"物料名","category":"品类"}) 查最新行情（云端，需底部横幅审批；审批确认后会自动续跑）\n' +
@@ -237,9 +238,19 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       '· 把数据整理成 Excel → write_excel（每表 rows 二维数组，第一行表头，数值用数字类型）\n' +
       '· 读用户提供的 Excel → read_excel；附件文件 → 输入区 📎\n' +
       '· 生成后如实汇报文件名/格式/保存位置，不编造内容。';
-    const baseUrl = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
+    baseUrl = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
     // 用 state model（头部下拉选择已同步 setSetting；detectOllama 同步）
     if (!(model || modelInfo.model)) { message.warning('未选择模型（头部下拉选择）'); setStreaming(false); return; }
+    } catch (e: any) {
+      // 前置失败（提示词构建/配置读取）：撤回用户消息 + 报错，streaming 保持 false 可重试
+      setMessages(prev => prev.slice(0, -1));
+      setStreaming(false);
+      message.error('发送失败：' + String(e?.message || e).slice(0, 200));
+      return;
+    }
+    setStreaming(true);
+    setMessages(prev => [...prev, { role: 'assistant', content: '', reasoning: '', steps: [] }]);
+    followRef.current = true;
 
     // 数字防幻觉证据收集（工具/云端结果原文，供 verifyConclusionNumbers 校验结论文本）
     const evidenceParts: string[] = [];
@@ -333,6 +344,8 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         if (last && last.role === 'assistant' && !last.content) arr[arr.length - 1] = { ...last, content: finalText };
         return arr;
       });
+    } finally {
+      setStreaming(false); // 任何路径都复位（用户：没反应=streaming 卡死）
     }
     // 完成后用干净结论覆盖（onAnswer 累积的多轮文本含 [TOOL] 标记与中间轮重复，finalText 才是 cleanProtocolText 后的结论）
     setMessages(prev => {
@@ -340,7 +353,6 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       if (last && last.role === 'assistant') arr[arr.length - 1] = { ...last, content: finalText };
       return arr;
     });
-    setStreaming(false);
     try { await saveMsg(currentSid, 'assistant', finalText || '(无内容)'); } catch { }
     setSessions(await loadSessions().catch(() => sessions));
     try {
