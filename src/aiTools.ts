@@ -896,9 +896,15 @@ const tools: AiTool[] = [
       const projs = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
       const p = projs.find((x: any) => x.code === a.project_code);
       if (!p) return '未找到项目代号：' + a.project_code;
+      // 2026-08-27 预检：模型未就绪快速报原因，不空跑（Ollama 未运行 / 模型未下载）
+      const { detectOllama } = await import('./aiStatus');
+      const pre = await detectOllama();
+      if (!pre.connected) return '规范化需要本地模型，但 ' + (pre.reason === 'model-missing' ? '模型未下载（请先在 Ollama 拉取模型，或到设置→连接设置选择已下载的模型）' : 'Ollama 未运行（请先启动 Ollama，设置 → 连接设置 → 检测连接）') + '。本次未修改任何数据。';
       const { canonicalizeProject } = await import('./canonicalize');
       const st = await canonicalizeProject(p.id);
-      return '项目 ' + a.project_code + ' 物料规范化完成：共 ' + st.total + ' 条，已规范 ' + st.done + ' 条（其中笼统保留 ' + st.kept + ' 条）、失败 ' + st.failed + ' 条。结果写入器件库标准名（原名/模块库不变）。';
+      let msg = '项目 ' + a.project_code + ' 物料规范化完成：共 ' + st.total + ' 条，已规范 ' + st.done + ' 条（其中笼统保留 ' + st.kept + ' 条）、失败 ' + st.failed + ' 条。结果写入器件库标准名（原名/模块库不变）。';
+      if (st.errors && st.errors.length) msg += '\n失败原因：' + st.errors.join('；') + '（可检查 Ollama 后重试，已规范的物料不会重复处理）。';
+      return msg;
     },
   },
 ];

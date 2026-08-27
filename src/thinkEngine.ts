@@ -210,11 +210,11 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
       let lastTokenAt = Date.now(); // 无输出保护：任何 token（思考/正文）到达都更新
       const done = () => { if (!settled) { settled = true; clearInterval(iv); stopStream(); resolve(); } };
       const fail = (e: any) => { if (!settled) { settled = true; clearInterval(iv); stopStream(); reject(e); } };
-      // 150ms 检查：①abort 停止 ②90s 整轮完全无 token → 模型无响应报错（用户：只显示"正在分析"没反应=模型没输出却永久挂起）
-      // ⚠️ 有 token 持续到达就无限等（用户红线：不截断、有输出就等）
+      // 150ms 检查：①abort 停止 ②180s 整轮完全无 token → 模型无响应报错（用户：只显示"正在分析"没反应=模型没输出却永久挂起）
+      // ⚠️ 有 token 持续到达就无限等（用户红线：不截断、有输出就等）；180s 给冷启动加载模型留时间（2026-08-27 用户实测规范化 90s 掐断）
       const iv = setInterval(() => {
         if (opts.abortRef?.aborted) done();
-        else if (Date.now() - lastTokenAt > 90000) fail(new Error('模型 90 秒无任何输出（可能模型正在加载或 Ollama 异常），已停止——请检查 Ollama 后重试'));
+        else if (Date.now() - lastTokenAt > 180000) fail(new Error('模型 3 分钟无任何输出（可能模型正在加载或 Ollama 异常），已停止——请检查 Ollama（是否启动/模型是否已下载）后重试'));
       }, 150);
       startOllamaStream(
         opts.baseUrl, opts.model, messages,

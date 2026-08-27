@@ -250,7 +250,20 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     }
     abortRef.current.aborted = false;
     setPlan(null);
-    if (!modelInfo.ready) { message.warning('本地模型未连接（设置 → 连接设置 → 配置 Ollama 模型并启动）'); return; }
+    // 2026-08-27 发送前实时预检（不用页面加载时的缓存状态）：区分 Ollama 未运行 / 模型未下载，快速报原因不空跑 3 分钟
+    try {
+      const st = await detectOllama();
+      if (!st.connected) {
+        setModelInfo({ ready: false, model: st.model || '' });
+        message.warning(st.reason === 'model-missing'
+          ? '本地模型未下载：请先在 Ollama 拉取模型（如 qwen2.5:1.5b），或在 设置 → 连接设置 选择已下载的模型'
+          : 'Ollama 未运行：请先启动 Ollama 再试（设置 → 连接设置 → 检测连接）');
+        return;
+      }
+      if (st.model) setModelInfo({ ready: true, model: st.model });
+    } catch {
+      if (!modelInfo.ready) { message.warning('本地模型未连接（设置 → 连接设置 → 配置 Ollama 模型并启动）'); return; }
+    }
     let sid = sessionId;
     if (!sid) { sid = await newSession((userContent || '附件').slice(0, 20)); setSessionId(sid); setSessions(await loadSessions()); }
     const currentSid = sid;

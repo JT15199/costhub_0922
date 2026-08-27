@@ -283,6 +283,7 @@
 - **存量按项目规范化**：canonicalize_project（第 37 个工具）——取项目 BOM 物料分批（20/批）调本地模型 → 写回 parts canonical_name/canonical_category/canonical_specs/canonical_updated_at（**影子字段：原名/模块库/关联不动**，ALTER 幂等兜底）；统计 已规范/笼统保留/失败。
 - **安全**：规范化不改 parts.name 与 modules/project_boms.module_name（模块库分类原封不动）；笼统物料不编造规格；canonicalize_project 记审计。
 - **收益**：规范后匹配/去重/统计/检索走 canonical 更准（后续接入 import 去重与供应商匹配）。
+- **防卡根因（2026-08-27 用户实测"模型 90 秒无任何输出"）**：非代码 bug——实证 Ollama /api/ps 显示当前加载模型 size_vram=0（纯 CPU 推理）时，9B 模型首 token 可超 90s 被 runThinkLoop 无输出保护掐断。三层改进：①runThinkLoop 无输出保护 90s→180s 惰性（有 token 无限等不变，冷启动留时间）②AiPanel send 前实时 detectOllama 预检（不用页面加载缓存，区分 offline"Ollama 未运行" / model-missing"模型未下载"，快速报原因不空跑）③canonicalize_project 工具预检 + canonicalizeProject 收集失败原因 errors 返回（不再静默 failed++）。使用侧：规范化是短 JSON 分类任务，选轻模型（minicpm5 1.1B / qwen3:4b）即可，勿用 CPU 上的 9B。
 - **修正闭环（2026-08-27 用户追问"规范错了如何处理/如何发现"）**：①核对——ToolResultView 渲染 canonicalize_project 规范化明细表（原名/型号/规范名/品类/规格/状态：已规范·笼统保留·未处理，代码级从库重查）②单条修正——明细表行内「还原」按钮（Popconfirm 确认 → resetPartCanonical 清空该物料 canonical 影子字段，原名本就没动；记 logWriteAudit('reset_canonical') 审计，可重新规范化）③整批回滚——canonicalize_project 执行时收集 UPDATE 前的影子字段原值 → window.__costhub_undo → 审计 undo_json（__restore_parts 结构）；undoWriteAudit 增加 __restore_parts 分支=UPDATE 恢复原值（非 DELETE 行），设置页「AI 写入记录」撤销按钮对规范化记录生效。
 
 ## 六、工作流约定

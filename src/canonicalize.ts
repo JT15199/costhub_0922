@@ -62,7 +62,7 @@ export async function resetPartCanonical(partId: number): Promise<boolean> {
   } catch { return false; }
 }
 
-export async function canonicalizeProject(projectId: number, onProgress?: (done: number, total: number, current: string) => void): Promise<{ total: number; done: number; kept: number; failed: number }> {
+export async function canonicalizeProject(projectId: number, onProgress?: (done: number, total: number, current: string) => void): Promise<{ total: number; done: number; kept: number; failed: number; errors?: string[] }> {
   const db = await getDb();
   // canonical 影子列兜底（幂等 ALTER；原名/模块库不动）
   for (const sql of ["ALTER TABLE parts ADD COLUMN canonical_name TEXT DEFAULT ''", "ALTER TABLE parts ADD COLUMN canonical_category TEXT DEFAULT ''", "ALTER TABLE parts ADD COLUMN canonical_specs TEXT DEFAULT '[]'", "ALTER TABLE parts ADD COLUMN canonical_updated_at TEXT DEFAULT ''"]) { try { await db.execute(sql); } catch { } }
@@ -81,6 +81,7 @@ export async function canonicalizeProject(projectId: number, onProgress?: (done:
   if (!model) return { total, done: 0, kept: 0, failed: total };
   const stats = { total, done: 0, kept: 0, failed: 0 };
   const undoRows: any[] = [];
+  const errors: string[] = [];
   const BATCH = 20;
   for (let i = 0; i < items.length; i += BATCH) {
     const batch = items.slice(i, i + BATCH);
@@ -94,7 +95,7 @@ export async function canonicalizeProject(projectId: number, onProgress?: (done:
         ], t => { full += t; }, () => { }, () => resolve(), e => reject(new Error(e)),
           { endpoint: 'native', think: false, json: false, num_predict: 4096 });
       });
-    } catch { stats.failed += batch.length; continue; }
+    } catch (e) { stats.failed += batch.length; const m = String((e as any)?.message || e || '模型无响应'); if (!errors.includes(m)) errors.push(m); continue; }
     const parsed = parseCanonicalResult(full);
     const byOriginal = new Map(parsed.map(p => [p.original, p]));
     for (const it of batch) {
@@ -119,5 +120,5 @@ export async function canonicalizeProject(projectId: number, onProgress?: (done:
   }
   // 撤销支持：UPDATE 前的影子字段原值交给审计 undo_json（设置页可整批还原）
   try { if (undoRows.length) { const W = window as any; W.__costhub_undo = { toolId: 'canonicalize_project', inserts: buildCanonicalUndo(undoRows) }; } } catch { }
-  return stats;
+  return { ...stats, errors: errors.slice(0, 3) };
 }
