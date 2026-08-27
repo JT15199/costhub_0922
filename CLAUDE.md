@@ -257,6 +257,11 @@
 - **文件格式扩展（attachmentTools.ts + pickAttachment）**：📎 支持 .xlsx/.xls/.csv/.txt/.pdf——CSV 用 XLSX 读、TXT 按 tab/多空格/逗号拆表格（textToRows）、PDF 用 pdfjs-dist 提取文本（worker ?url 本地打包）按 y 坐标聚合行；统一 handleSheetRows → detectSheetType → 存全局附件（import_* 工具直接读）。
 - **OCR（tesseract.js）**：图片附件立即 OCR（eng+chi_sim，语言包本地 public/tessdata/ 已下载，引擎 CDN 需联网）；OCR 文本走表格识别流程，拍照报价单 → 提取 → 审价/录入；send 时图片摘要提示已 OCR 行数或需联网。
 
+
+## 三·补16、写操作安全：确认 + 审计（2026-08-19 用户：防止工具把数据库乱改）
+
+- **三层防护**：①写前确认——导入类写工具（import_bom_to_project/import_supplier_quote/import_competitor_bom/import_voice_items）执行前 AiPanel 渲染「⚠️ 确认写入数据库」卡片（工具名+参数摘要），用户点执行/取消才继续；取消则返回"用户取消写入，未修改任何数据" ②写后审计——所有写工具（AUDIT_TOOLS：4 导入 + save_selling_analysis/save_project_analysis/create_todo/add_goal/insight_material_trend/quote_review）执行后 logWriteAudit 写 write_audit_logs（工具/参数摘要/结果摘要/时间），设置页「AI 写入记录」卡展示最近 15 条（谁·何时·用什么·改了什么） ③提示约束——【写操作安全】只有用户明确要求录入/导入/写入才调写工具，查询类绝不写库，不要擅自写入。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。

@@ -30,6 +30,10 @@ const PAGE_LABELS: Record<string, string> = {
 // 行情/洞察类任务判断：用于无关工具软拦截（用户：更新行情却调用了查询项目工具）
 const isTrendTask = (q: string) => /行情|洞察|趋势|最新价格|物料行情/.test(q || '');
 const IRRELEVANT_FOR_TREND = ['query_project_bom', 'query_project_cost', 'query_part_suppliers', 'query_project_health', 'compare_subcategory_cost'];
+// 写操作安全（2026-08-19 用户：防止工具乱改数据库）：导入类写工具执行前需用户确认；所有写工具执行后留审计日志
+const WRITE_TOOLS = ['import_bom_to_project', 'import_supplier_quote', 'import_competitor_bom', 'import_voice_items'];
+const AUDIT_TOOLS = [...WRITE_TOOLS, 'save_selling_analysis', 'save_project_analysis', 'create_todo', 'add_goal', 'insight_material_trend', 'quote_review'];
+const WRITE_TOOL_NAMES: Record<string, string> = { import_bom_to_project: 'BOM 拆解入库', import_supplier_quote: '供应商报价入库', import_competitor_bom: '竞品 BOM 入库', import_voice_items: '原声批量导入' };
 
 interface Step { kind: 'tool' | 'cloud'; name: string; ok: boolean; detail: string; }
 interface Msg { role: 'user' | 'assistant'; content: string; reasoning?: string; steps?: Step[]; }
@@ -67,6 +71,9 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   // 2026-08-19 结构化澄清（借鉴 DSH ask_user_question）：AI 调 ask_user → 渲染选项等待用户点击
   const [pendingAsk, setPendingAsk] = useState<{ question: string; options: string[] } | null>(null);
   const askResolveRef = useRef<((answer: string) => void) | null>(null);
+  // 写操作确认（防止工具乱改数据库）
+  const [pendingWrite, setPendingWrite] = useState<{ toolId: string; summary: string } | null>(null);
+  const writeConfirmRef = useRef<{ resolve: (ok: boolean) => void } | null>(null);
   const [modelInfo, setModelInfo] = useState<{ ready: boolean; model: string }>({ ready: false, model: '' });
   const [ctxLabel, setCtxLabel] = useState(PAGE_LABELS[activePage || ''] || '当前页面');
   // 2026-08-18：模型选择 / 深度思考 / 附件（图片+Excel）
@@ -279,6 +286,10 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       '② 解析成结构化 JSON 数组后调对应导入工具：BOM→import_bom_to_project（自动归类模块）、供应商报价→import_supplier_quote、竞品 BOM→import_competitor_bom、原声→import_voice_items\n' +
       '③ 数据校验：数量/单价必须是数字；缺失必填字段的条目跳过并报告；导入工具返回统计后如实汇报（新建几个器件/复用几个/跳过几个）\n' +
       '④ 用户没给目标项目/产品时先问清楚，不要擅自指定——用 ask_user 工具提问并给选项，等用户选择后再继续（不要瞎猜）。\n' +
+      '【写操作安全】以下工具会修改你的数据库，执行前会弹出确认（用户确认才执行）：import_bom_to_project / import_supplier_quote / import_competitor_bom / import_voice_items。\n' +
+      '· 只有用户明确要求"录入/导入/写入"时才调用写工具；查询类工具（query_* 等）绝不写库。\n' +
+      '· 不要为了完成任务擅自写入；用户取消写入时如实告知未修改任何数据。\n' +
+      '· 所有写操作都会记录审计日志（谁·何时·用什么工具·改了什么），可追溯。\n' +
       '【报告与文件】用户要生成报告/演示/表格时：\n' +
       '· 生成报告/演示（HTML 网页报告或 PPTX）→ 分析完成把结论组织成 3-6 节（每节 heading+points）→ generate_report（保存到导出目录 exports/）\n' +
       '· 把数据整理成 Excel → write_excel（每表 rows 二维数组，第一行表头，数值用数字类型）\n' +
@@ -338,7 +349,24 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
             });
             return { ok: true, text: '用户选择了：' + answer };
           }
+          // 写操作安全：导入类写工具执行前确认（用户确认才写库）
+          if (WRITE_TOOLS.includes(id)) {
+            const parts: string[] = [];
+            for (const k of ['project_code', 'brand', 'model', 'product', 'file_name', 'material']) { if (args?.[k]) parts.push(k + '=' + String(args[k]).slice(0, 40)); }
+            const summary = (WRITE_TOOL_NAMES[id] || id) + (parts.length ? '（' + parts.join('，') + '）' : '') + '——将写入你的数据库，请确认';
+            const confirmed = await new Promise<boolean>(resolve => {
+              writeConfirmRef.current = { resolve };
+              setPendingWrite({ toolId: id, summary });
+            });
+            writeConfirmRef.current = null;
+            setPendingWrite(null);
+            if (!confirmed) return { ok: true, text: '用户取消了本次写入（' + (WRITE_TOOL_NAMES[id] || id) + '），未修改任何数据。' };
+          }
           const res = await executeTool(id, args);
+          // 写操作审计：所有写工具执行后留痕（谁·何时·用什么·改了什么）
+          if (AUDIT_TOOLS.includes(id)) {
+            try { const { logWriteAudit } = await import('../db'); await logWriteAudit(id, JSON.stringify(args || {}).slice(0, 300), (res.text || '').slice(0, 500)); } catch { }
+          }
           // ⚠️ 2026-08-19 修复：insight_material_trend 返回"等待云端发送确认"时 ok 是 true（工具正常执行只是提示审批）——只看文本含"等待云端发送确认"即记 pending，确认后自动续跑
           if (res.text && res.text.includes('等待云端发送确认')) {
             const mm = String(args?.material_name || '');
@@ -682,6 +710,16 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
 
       {/* 输入区 */}
       <div style={{ padding: '8px 10px', borderTop: '1px solid #E6E4DC', flexShrink: 0 }}>
+        {pendingWrite && (
+          <div style={{ background: '#FFF3EC', border: '1px solid #F0C9B5', borderRadius: 9, padding: '9px 12px', marginBottom: 6 }}>
+            <div style={{ fontSize: 12, color: '#181713', fontWeight: 700, marginBottom: 5 }}>⚠️ 确认写入数据库</div>
+            <div style={{ fontSize: 11.5, color: '#5F5D54', marginBottom: 8, lineHeight: 1.6 }}>{pendingWrite.summary}</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Button size="small" type="primary" style={{ fontSize: 11.5, borderRadius: 6, background: '#C0392B', borderColor: '#C0392B' }} onClick={() => { writeConfirmRef.current?.resolve(true); }}>执行写入</Button>
+              <Button size="small" style={{ fontSize: 11.5, borderRadius: 6 }} onClick={() => { writeConfirmRef.current?.resolve(false); }}>取消</Button>
+            </div>
+          </div>
+        )}
         {pendingAsk && (
           <div style={{ background: '#FFF8EC', border: '1px solid #F0D9B5', borderRadius: 9, padding: '9px 12px', marginBottom: 6 }}>
             <div style={{ fontSize: 12, color: '#181713', fontWeight: 600, marginBottom: 7 }}>🤔 {pendingAsk.question}</div>

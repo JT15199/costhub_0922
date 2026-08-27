@@ -19,7 +19,7 @@ import {
   getApiProviders, saveApiProvider, deleteApiProvider, setActiveProvider,
   PRESET_PROVIDERS, updateProviderPriorities, ensurePresetProviders,
   getAllChecklistWithLogs, updateChecklistActive, deleteAnalysisChecklistItem,
-} from '../db';
+getWriteAuditLogs } from '../db';
 import { encryptText } from '../apiConfig';
 
 const STRENGTH_COLORS: Record<string, string> = {
@@ -33,7 +33,20 @@ const STRENGTH_LABELS: Record<string, string> = {
   'stable': '稳定记忆',
 };
 
-export default function Settings({ embedded }: { embedded?: boolean }) {
+export default function Settings({embedded }: { embedded?: boolean }) {
+  // AI 写入记录加载（2026-08-19 防止工具乱改：展示审计留痕）
+  useEffect(() => { (async () => {
+    try {
+      const logs = await getWriteAuditLogs(15);
+      const el = document.getElementById('costhub-write-audit');
+      if (el) {
+        el.innerHTML = logs.length === 0
+          ? '<div style="color:#94A3B8">暂无 AI 写入记录</div>'
+          : logs.map((l: any) => '<div style="padding:4px 0;border-bottom:1px dashed #F1F5F9"><b style="color:#181713">' + String(l.tool_id || '') + '</b> <span style="color:#94A3B8">' + String(l.created_at || '').slice(5, 16) + '</span> · ' + String(l.args_summary || '').slice(0, 90) + (l.result_summary ? '<div style="color:#64748B;font-size:10.5px">→ ' + String(l.result_summary).slice(0, 120) + '</div>' : '') + '</div>').join('');
+      }
+    } catch { }
+  })(); }, []);
+ 
   const { lowFx, setLowFx } = useTheme();
   const [loading, setLoading] = useState(true);
   const [testingSearch, setTestingSearch] = useState(false);
@@ -2004,6 +2017,11 @@ export default function Settings({ embedded }: { embedded?: boolean }) {
             </div>
           </>
         )}
+      </div>
+      {/* ====== AI 写入记录（2026-08-19：防止工具乱改数据库——每次 AI 写入留痕可追溯） ====== */}
+      <div style={{ border: '1px solid #E8ECF1', borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
+        <h3 style={{ margin: 0, marginBottom: 8 }}><SafetyCertificateOutlined /> AI 写入记录 <span style={{ fontSize: 11, fontWeight: 400, color: '#94A3B8' }}>（AI 协作窗每次写入数据库的留痕——导入/记录/洞察/审价等，可核对 AI 改了什么）</span></h3>
+        <div id="costhub-write-audit" style={{ fontSize: 11.5, color: '#64748B' }}>加载中…</div>
       </div>
       {/* ====== AI 外发安全中心（2026-08-18：逐条可验证外发边界） ====== */}
       <div className="content-card" style={{ marginBottom: 20 }}>

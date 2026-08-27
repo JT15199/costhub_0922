@@ -83,3 +83,31 @@ export async function importVoiceItems(product: string, contents: string[]) {
   }
   return { total: contents.length, added, dup };
 }
+
+
+// ===== 写操作审计（2026-08-19 用户：防止工具乱改数据库——每次 AI 写入留痕可追溯） =====
+let auditEnsured = false;
+async function ensureAuditTable() {
+  if (auditEnsured) return;
+  try {
+    await (await getDb()).execute(`CREATE TABLE IF NOT EXISTS write_audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tool_id TEXT NOT NULL,
+      args_summary TEXT DEFAULT '',
+      result_summary TEXT DEFAULT '',
+      source TEXT DEFAULT 'ai_panel',
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    )`);
+  } catch { }
+  auditEnsured = true;
+}
+export async function logWriteAudit(toolId: string, argsSummary: string, resultSummary: string) {
+  try {
+    await ensureAuditTable();
+    await (await getDb()).execute('INSERT INTO write_audit_logs (tool_id, args_summary, result_summary) VALUES (?,?,?)',
+      [toolId, String(argsSummary || '').slice(0, 500), String(resultSummary || '').slice(0, 1000)]);
+  } catch { /* 审计失败不影响主流程 */ }
+}
+export async function getWriteAuditLogs(limit = 20): Promise<any[]> {
+  try { await ensureAuditTable(); return (await getDb()).select<any[]>('SELECT * FROM write_audit_logs ORDER BY id DESC LIMIT ?', [limit]); } catch { return []; }
+}
