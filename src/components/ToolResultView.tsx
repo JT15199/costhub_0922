@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
-import { Table, Tag } from 'antd';
+import { Table, Tag, Popconfirm } from 'antd';
 import { getProjects, getProjectBOMs, getTargets, getCompetitors, getCompetitorBOMs, getSellingPoints, getSellingPointMaps, getLatestTrendSnapshot, getSupplierPriceProfiles } from '../db';
 import { computeSellingPointRows, computeModuleValueRows, type ModuleValueRow } from '../sellingPointAnalyzer';
 import { computeTargetStatuses } from '../targetInsight';
@@ -13,7 +13,7 @@ const COLORS = ['#3B82F6', '#8B5CF6', '#F97316', '#34C759', '#0891B2', '#AF52DE'
 const mono = { fontVariantNumeric: 'tabular-nums' } as const;
 
 interface ViewData {
-  type: 'pie' | 'bar' | 'table' | 'matrix' | 'card' | 'competitor';
+  type: 'pie' | 'bar' | 'table' | 'matrix' | 'card' | 'competitor' | 'canonical';
   title?: string;
   // pie
   pie?: { name: string; value: number }[];
@@ -136,6 +136,38 @@ async function loadData(toolId: string, args: any): Promise<ViewData | null> {
         rows: list.map((r: any) => ({ name: r.supplier_name || '', count: r.part_count || 0, avg: r.avg_price || 0, level: r.level || 0, share: r.max_share || 0 })),
       };
     }
+    if (toolId === 'canonicalize_project') {
+      const projs = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
+      const p = projs.find((x: any) => x.code === args?.project_code);
+      if (!p) return null;
+      const db = await (await import('../db')).getDb();
+      const rows = await db.select<any[]>(`SELECT p.id as part_id,
+        COALESCE(NULLIF(pb.part_name,''), p.name) as part_name,
+        COALESCE(NULLIF(pb.part_model,''), p.model) as part_model,
+        COALESCE(p.canonical_name,'') as canonical_name,
+        COALESCE(p.canonical_category,'') as canonical_category,
+        COALESCE(p.canonical_specs,'[]') as canonical_specs
+        FROM project_boms pb LEFT JOIN parts p ON pb.part_id = p.id
+        WHERE pb.project_id = ? AND COALESCE(pb.is_deleted,0)=0 AND p.id IS NOT NULL
+        GROUP BY p.id, part_name, part_model ORDER BY part_name`, [p.id]);
+      const statusOf = (r: any) => {
+        if (!r.canonical_name) return { text: '未处理', color: 'default' };
+        let specs: any[] = []; try { specs = JSON.parse(r.canonical_specs || '[]'); } catch { }
+        return specs.length ? { text: '已规范', color: 'green' } : { text: '笼统保留', color: 'gold' };
+      };
+      return {
+        type: 'canonical', title: p.code + ' 物料规范化明细 · ' + rows.length + ' 条',
+        columns: [
+          { title: '原名', dataIndex: 'part_name' },
+          { title: '型号', dataIndex: 'part_model' },
+          { title: '规范名', dataIndex: 'canonical_name', render: (v: string) => v ? <b>{v}</b> : <span style={{ color: '#B8B5AA' }}>—</span> },
+          { title: '品类', dataIndex: 'canonical_category', render: (v: string) => v ? v : '—' },
+          { title: '规格', dataIndex: 'specsText', render: (v: string) => v || '—' },
+          { title: '状态', dataIndex: 'status', align: 'center', render: (v: any) => <Tag color={v.color}>{v.text}</Tag> },
+        ],
+        rows: rows.map((r: any) => { const st = statusOf(r); let specs: any[] = []; try { specs = JSON.parse(r.canonical_specs || '[]'); } catch { } return { ...r, specsText: specs.join(' / '), status: st }; }),
+      } as ViewData;
+    }
     if (toolId === 'insight_material_trend' || toolId === 'query_material_insight') {
       const db = await (await import('../db')).getDb();
       const items = await db.select<any[]>('SELECT * FROM trend_items WHERE query_category LIKE ? ORDER BY id DESC LIMIT 1', ['%' + (args?.material_name || '') + '%']);
@@ -158,11 +190,23 @@ async function loadData(toolId: string, args: any): Promise<ViewData | null> {
 
 export default function ToolResultView({ toolId, args }: { toolId: string; args: any }) {
   const [data, setData] = useState<ViewData | null>(null);
+  const [reload, setReload] = useState(0);
   useEffect(() => {
     let alive = true;
     loadData(toolId, args).then(d => { if (alive) setData(d); });
     return () => { alive = false; };
-  }, [toolId, JSON.stringify(args || {})]);
+  }, [toolId, JSON.stringify(args || {}), reload]);
+  async function doReset(partId: number, name: string) {
+    try {
+      const { resetPartCanonical } = await import('../canonicalize');
+      const { logWriteAudit } = await import('../db');
+      const ok = await resetPartCanonical(partId);
+      if (ok) {
+        try { await logWriteAudit('reset_canonical', '物料还原:' + String(name || '').slice(0, 60), '已清空规范结果（可重新规范化）', ''); } catch { }
+        setReload(x => x + 1);
+      }
+    } catch { }
+  }
   if (!data) return null;
   return (
     <div style={{ background: '#FBFAF6', border: '1px solid #E6E4DC', borderRadius: 8, padding: '8px 10px', marginTop: 6 }}>
@@ -204,6 +248,16 @@ export default function ToolResultView({ toolId, args }: { toolId: string; args:
         <Table size="small" pagination={false} rowKey={(_, i) => String(i)} dataSource={data.rows} columns={data.columns} scroll={{ x: 320 }} />
       )}
       {data.type === 'matrix' && data.matrixRows && <ModuleValueMatrix rows={data.matrixRows} />}
+      {data.type === 'canonical' && (
+        <Table size="small" pagination={{ pageSize: 8 }} rowKey={(_, i) => String(i)} dataSource={data.rows} columns={[
+          ...(data.columns || []),
+          { title: '操作', dataIndex: 'op', align: 'center', width: 64, render: (_: any, row: any) => row.canonical_name ? (
+            <Popconfirm title="还原此物料规范化？" description="清空该物料规范结果（原名不受影响），之后可重新规范化。" okText="还原" cancelText="取消" onConfirm={() => doReset(row.part_id, row.part_name)}>
+              <a style={{ fontSize: 11, color: '#C0392B', whiteSpace: 'nowrap' }}>还原</a>
+            </Popconfirm>
+          ) : null },
+        ]} scroll={{ x: 580 }} />
+      )}
       {data.type === 'card' && (
         <div>
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 4 }}>

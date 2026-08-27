@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCanonicalResult, buildCanonicalPrompt } from './canonicalize';
+import { parseCanonicalResult, buildCanonicalPrompt, buildCanonicalUndo } from './canonicalize';
 
 describe('parseCanonicalResult', () => {
   it('解析标准 JSON 数组', () => {
@@ -25,5 +25,20 @@ describe('parseCanonicalResult', () => {
     expect(p).toContain('被动元件');
     expect(p).toContain('笼统');
     expect(p).toContain('绝不编造');
+  });
+});
+
+describe('buildCanonicalUndo', () => {
+  it('构造撤销数据：只保留有效 id 的原始影子值', () => {
+    const undo = buildCanonicalUndo([
+      { id: 5, canonical_name: '被动元件 电阻 10KΩ', canonical_category: '被动元件', canonical_specs: '["10KΩ"]', canonical_updated_at: '2026-08-27 19:50:00' },
+      { id: 0, canonical_name: 'x', canonical_category: 'x', canonical_specs: '[]', canonical_updated_at: '' },
+      null,
+    ]);
+    expect(undo.__restore_parts.length).toBe(1);
+    expect(undo.__restore_parts[0]).toEqual({ id: 5, canonical_name: '被动元件 电阻 10KΩ', canonical_category: '被动元件', canonical_specs: '["10KΩ"]', canonical_updated_at: '2026-08-27 19:50:00' });
+  });
+  it('空输入返回空数组', () => {
+    expect(buildCanonicalUndo([]).__restore_parts).toEqual([]);
   });
 });

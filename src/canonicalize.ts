@@ -41,6 +41,27 @@ export function parseCanonicalResult(text: string): CanonicalOut[] {
   return out.filter(x => x.original);
 }
 
+/** 构造规范化撤销数据（{__restore_parts:[{id, 原影子值}]}）——撤销=恢复 UPDATE 前的影子字段原值（非删除行） */
+export function buildCanonicalUndo(oldRows: any[]): Record<string, any> {
+  const rows = (oldRows || []).filter((r: any) => r && Number(r.id) > 0).map((r: any) => ({
+    id: Number(r.id),
+    canonical_name: String(r.canonical_name || ''),
+    canonical_category: String(r.canonical_category || ''),
+    canonical_specs: String(r.canonical_specs || '[]'),
+    canonical_updated_at: String(r.canonical_updated_at || ''),
+  }));
+  return { __restore_parts: rows };
+}
+
+/** 还原单条物料规范化：清空 canonical 影子字段（原名本就没动过，还原=回到未规范状态，可重新规范化） */
+export async function resetPartCanonical(partId: number): Promise<boolean> {
+  try {
+    const db = await getDb();
+    await db.execute("UPDATE parts SET canonical_name='', canonical_category='', canonical_specs='[]', canonical_updated_at='' WHERE id=?", [partId]);
+    return true;
+  } catch { return false; }
+}
+
 export async function canonicalizeProject(projectId: number, onProgress?: (done: number, total: number, current: string) => void): Promise<{ total: number; done: number; kept: number; failed: number }> {
   const db = await getDb();
   // canonical 影子列兜底（幂等 ALTER；原名/模块库不动）
@@ -59,6 +80,7 @@ export async function canonicalizeProject(projectId: number, onProgress?: (done:
   const model = await getSetting('local_ai_model', '');
   if (!model) return { total, done: 0, kept: 0, failed: total };
   const stats = { total, done: 0, kept: 0, failed: 0 };
+  const undoRows: any[] = [];
   const BATCH = 20;
   for (let i = 0; i < items.length; i += BATCH) {
     const batch = items.slice(i, i + BATCH);
@@ -81,6 +103,10 @@ export async function canonicalizeProject(projectId: number, onProgress?: (done:
       stats.done++;
       if (p && p.standard) {
         try {
+          const old = await db.select<any[]>('SELECT id, canonical_name, canonical_category, canonical_specs, canonical_updated_at FROM parts WHERE id = ?', [it.part_id]);
+          if (old.length) undoRows.push(old[0]);
+        } catch { }
+        try {
           await db.execute("UPDATE parts SET canonical_name=?, canonical_category=?, canonical_specs=?, canonical_updated_at=datetime('now','localtime') WHERE id=?",
             [p.standard, p.category || '其他', JSON.stringify(p.specs || []), it.part_id]);
         } catch { }
@@ -91,5 +117,7 @@ export async function canonicalizeProject(projectId: number, onProgress?: (done:
       onProgress?.(stats.done, total, it.name);
     }
   }
+  // 撤销支持：UPDATE 前的影子字段原值交给审计 undo_json（设置页可整批还原）
+  try { if (undoRows.length) { const W = window as any; W.__costhub_undo = { toolId: 'canonicalize_project', inserts: buildCanonicalUndo(undoRows) }; } } catch { }
   return stats;
 }

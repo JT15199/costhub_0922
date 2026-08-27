@@ -132,7 +132,21 @@ export async function undoWriteAudit(id: number): Promise<number> {
     if (!undo) return -1;
     const inserts = JSON.parse(undo);
     let removed = 0;
+    // 规范化撤销（canonicalize_project）：__restore_parts 恢复 parts 影子字段 UPDATE 前的原值（非删除行）
+    const restore = inserts.__restore_parts;
+    if (Array.isArray(restore) && restore.length) {
+      for (const r of restore) {
+        const rid = Number(r && r.id);
+        if (!rid) continue;
+        await (await getDb()).execute('UPDATE parts SET canonical_name=?, canonical_category=?, canonical_specs=?, canonical_updated_at=? WHERE id=?',
+          [String(r.canonical_name || ''), String(r.canonical_category || ''), String(r.canonical_specs || '[]'), String(r.canonical_updated_at || ''), rid]);
+        removed++;
+      }
+      await (await getDb()).execute("UPDATE write_audit_logs SET result_summary = result_summary || '（已撤销，恢复 ' || ? || ' 条物料规范化）' WHERE id = ?", [String(removed), id]);
+      return removed;
+    }
     for (const table of Object.keys(inserts)) {
+      if (table === '__restore_parts') continue;
       const ids = (inserts[table] || []).filter((x: any) => Number(x) > 0);
       if (!ids.length) continue;
       await (await getDb()).execute('DELETE FROM ' + table + ' WHERE id IN (' + ids.join(',') + ')');
