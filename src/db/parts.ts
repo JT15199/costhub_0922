@@ -7,8 +7,13 @@ import { recordProjectCostSnapshot } from './projects';
 
 
 // ==================== Parts ====================
+let canonicalEnsured = false; // 幂等兜底：canonical 影子列只在首次查询时 ALTER（防止未跑规范化时列不存在）
 export async function getParts(search = '', category = '', mainCategory = '') {
   const d = await getDb();
+  if (!canonicalEnsured) {
+    for (const sql of ["ALTER TABLE parts ADD COLUMN canonical_name TEXT DEFAULT ''", "ALTER TABLE parts ADD COLUMN canonical_category TEXT DEFAULT ''", "ALTER TABLE parts ADD COLUMN canonical_specs TEXT DEFAULT '[]'", "ALTER TABLE parts ADD COLUMN canonical_updated_at TEXT DEFAULT ''"]) { try { await d.execute(sql); } catch { } }
+    canonicalEnsured = true;
+  }
   let q = 'SELECT * FROM parts WHERE 1=1'; const p: any[] = [];
   if (search) { q += ' AND (name LIKE ? OR model LIKE ?)'; p.push(`%${search}%`, `%${search}%`); }
   if (category) { q += ' AND category = ?'; p.push(category); }

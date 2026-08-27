@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { EmojiIcon } from '../iconMap';
 import { Button, Input, Select, Space, Modal, Form, InputNumber, Tag, message, Popconfirm, Tooltip, Upload, Row, Col } from 'antd';
 import type { TableRowSelection } from 'antd/es/table/interface';
-import { PlusOutlined, EditOutlined, DeleteOutlined, DownloadOutlined, UploadOutlined, HistoryOutlined, SearchOutlined, ShopOutlined, ToolOutlined, CheckOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, DownloadOutlined, UploadOutlined, HistoryOutlined, SearchOutlined, ShopOutlined, ToolOutlined, CheckOutlined, UndoOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import { getParts, savePart, deletePart, getCategories, getPriceHistory, getMainCategories, getPartSuppliers, addPartSupplier, updatePartSupplier, deletePartSupplier, getSupplierPriceHistory, getPartCostChangeLogs } from '../db';
 import { summarizeSupplierTrend, supplierTrendTag } from '../supplierTrend';
@@ -328,6 +328,16 @@ export default function PartsLibrary() {
     }
   };
 
+  // 规范化还原（2026-08-27：人眼核对规范化结果，错了行内还原——原名不受影响，记审计）
+  const handleResetCanonical = async (r: any) => {
+    try {
+      const { resetPartCanonical } = await import('../canonicalize');
+      const { logWriteAudit } = await import('../db');
+      const ok = await resetPartCanonical(r.id);
+      if (ok) { try { await logWriteAudit('reset_canonical', '器件库还原:' + String(r.name || '').slice(0, 60), '已清空规范结果（可重新规范）', ''); } catch { } load(); }
+    } catch { }
+  };
+
   const cols = [
     { title: 'ID', dataIndex: 'id', width: 50 },
     { title: '大类', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={getCategoryColor(v)}>{v}</Tag> },
@@ -335,12 +345,31 @@ export default function PartsLibrary() {
     { title: '名称', dataIndex: 'name', width: 200, ellipsis: true },
     { title: '型号', dataIndex: 'model', width: 150, ellipsis: true },
     { title: '成本(¥)', dataIndex: 'cost', width: 100, align: 'right' as const, render: (v: number) => <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>{v?.toFixed(2)}</span> },
+    { title: '规范化', width: 200, render: (_: any, r: any) => {
+      const cn = r.canonical_name || '';
+      if (!cn) return <Tag style={{ margin: 0 }}>未规范</Tag>;
+      let specs: any[] = []; try { specs = JSON.parse(r.canonical_specs || '[]'); } catch { }
+      const cat = r.canonical_category || '';
+      const isGeneric = specs.length === 0;
+      return (
+        <Tooltip title={'品类: ' + (cat || '—') + (specs.length ? ' | 规格: ' + specs.join(' / ') : ' | 笼统（无规格）')}>
+          <span style={{ fontSize: 11.5, cursor: 'help' }}>{cn}</span>
+          {isGeneric && <Tag color="gold" style={{ marginLeft: 4, fontSize: 10 }}>笼统</Tag>}
+          {cat === '其他' && <Tag color="orange" style={{ marginLeft: 4, fontSize: 10 }}>存疑</Tag>}
+        </Tooltip>
+      );
+    } },
     { title: '项目', dataIndex: 'projects', width: 100, ellipsis: true },
-    { title: '操作', width: 180, render: (_: any, r: any) => (
+    { title: '操作', width: 230, render: (_: any, r: any) => (
       <Space size="small">
         <Tooltip title="编辑"><Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} /></Tooltip>
         <Tooltip title="供应商"><Button type="link" size="small" icon={<ShopOutlined />} onClick={() => openSupplierModal(r)} /></Tooltip>
         <Tooltip title="价格历史"><Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => showHistory(r)} /></Tooltip>
+        {r.canonical_name ? (
+          <Popconfirm title="还原规范化？" description="清空该器件规范结果（原名不受影响），之后可重新规范" onConfirm={() => handleResetCanonical(r)}>
+            <Tooltip title="还原规范化"><Button type="link" size="small" icon={<UndoOutlined />} /></Tooltip>
+          </Popconfirm>
+        ) : null}
         <Popconfirm title="删除？" onConfirm={() => handleDelete(r.id)}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm>
       </Space>
     )},
