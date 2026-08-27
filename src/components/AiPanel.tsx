@@ -76,6 +76,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   const [plan, setPlan] = useState<{ steps: string[]; done: number } | null>(null);
   // 2026-08-19 结构化澄清（借鉴 DSH ask_user_question）：AI 调 ask_user → 渲染选项等待用户点击
   const [pendingAsk, setPendingAsk] = useState<{ question: string; options: string[] } | null>(null);
+  const [askInput, setAskInput] = useState('');
   const askResolveRef = useRef<((answer: string) => void) | null>(null);
   // 写操作确认（防止工具乱改数据库）
   const [pendingWrite, setPendingWrite] = useState<{ toolId: string; summary: string } | null>(null);
@@ -304,7 +305,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       '① 先 read_excel 或读取附件获取文件内容，理解表结构（识别 器件名/型号/数量/单价 列，不要猜列名）\n' +
       '② 解析成结构化 JSON 数组后调对应导入工具：BOM→import_bom_to_project（自动归类模块）、供应商报价→import_supplier_quote、竞品 BOM→import_competitor_bom、原声→import_voice_items\n' +
       '③ 数据校验：数量/单价必须是数字；缺失必填字段的条目跳过并报告；导入工具返回统计后如实汇报（新建几个器件/复用几个/跳过几个）\n' +
-      '④ 用户没给目标项目/产品时先问清楚，不要擅自指定——用 ask_user 工具提问并给选项，等用户选择后再继续（不要瞎猜）。\n' +
+      '④ 用户没给目标项目/产品时先问清楚，不要擅自指定——用 ask_user 工具提问，options 必须给具体选项（问项目就先用 query_projects 拿项目列表作选项），不要空选项\n' +
       '【物料规范化】用户嫌物料名不规范（供应商写法不一）时：\n' +
       '· 调 canonicalize_project 按项目批量规范化（一套通用规则套所有物料：品类+规格+型号；笼统物料如支架/底座只归类不编造规格）\n' +
       '· 结果写入器件库标准名字段，原名/模块库不动；规范后可更准匹配与统计\n' +
@@ -366,6 +367,16 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
             const question = String(args?.question || '');
             let options: string[] = [];
             try { const o = JSON.parse(String(args?.options || '[]')); if (Array.isArray(o)) options = o.map(String); } catch { }
+            // 2026-08-27 问项目但模型没给选项 → 代码级自动填充项目列表（用户实测：只有"继续/跳过"两个无意义按钮）
+            if (options.length === 0 && /项目|project|project_code/.test(question)) {
+              try {
+                const { getProjects } = await import('../db');
+                const projs = (await getProjects('', '', '')).filter((x: any) => !x.is_deleted);
+                options = projs.map((x: any) => String(x.code || x.name || '')).filter(Boolean).slice(0, 12);
+                if (!options.length) options = ['暂无项目（先去项目管理页创建）'];
+              } catch { }
+            }
+            setAskInput('');
             const answer = await new Promise<string>(resolve => {
               askResolveRef.current = resolve;
               setPendingAsk({ question, options });
@@ -792,18 +803,29 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           <div style={{ background: '#FFF8EC', border: '1px solid #F0D9B5', borderRadius: 9, padding: '9px 12px', marginBottom: 6 }}>
             <div style={{ fontSize: 12, color: '#181713', fontWeight: 600, marginBottom: 7 }}>🤔 {pendingAsk.question}</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {pendingAsk.options.length > 0 ? pendingAsk.options.map((o, oi) => (
-                <Button key={oi} size="small" style={{ fontSize: 11.5, borderRadius: 6, background: '#FFFFFF', borderColor: '#D5C4A8' }} onClick={() => {
-                  askResolveRef.current?.(o); askResolveRef.current = null; setPendingAsk(null);
-                }}>{o}</Button>
-              )) : (
-                <Button size="small" type="primary" style={{ fontSize: 11.5, borderRadius: 6 }} onClick={() => {
-                  askResolveRef.current?.('（用户已确认，请继续）'); askResolveRef.current = null; setPendingAsk(null);
-                }}>继续</Button>
+              {pendingAsk.options.length > 0 ? (
+                <>
+                  {pendingAsk.options.map((o, oi) => (
+                    <Button key={oi} size="small" style={{ fontSize: 11.5, borderRadius: 6, background: '#FFFFFF', borderColor: '#D5C4A8' }} onClick={() => {
+                      askResolveRef.current?.(o); askResolveRef.current = null; setPendingAsk(null); setAskInput('');
+                    }}>{o}</Button>
+                  ))}
+                  <Button size="small" style={{ fontSize: 11.5, borderRadius: 6 }} onClick={() => {
+                    askResolveRef.current?.('（用户选择跳过，请自行合理处理或说明）'); askResolveRef.current = null; setPendingAsk(null); setAskInput('');
+                  }}>跳过</Button>
+                </>
+              ) : (
+                <>
+                  <Input size="small" placeholder="输入你的回答…" value={askInput}
+                    onChange={e => setAskInput(e.target.value)}
+                    onPressEnter={() => { const v = askInput.trim(); if (!v) return; askResolveRef.current?.(v); askResolveRef.current = null; setPendingAsk(null); setAskInput(''); }}
+                    style={{ flex: 1, minWidth: 160, fontSize: 11.5, borderRadius: 6 }} />
+                  <Button size="small" type="primary" style={{ fontSize: 11.5, borderRadius: 6 }} disabled={!askInput.trim()} onClick={() => { const v = askInput.trim(); if (!v) return; askResolveRef.current?.(v); askResolveRef.current = null; setPendingAsk(null); setAskInput(''); }}>发送</Button>
+                  <Button size="small" style={{ fontSize: 11.5, borderRadius: 6 }} onClick={() => {
+                    askResolveRef.current?.('（用户选择跳过，请自行合理处理或说明）'); askResolveRef.current = null; setPendingAsk(null); setAskInput('');
+                  }}>跳过</Button>
+                </>
               )}
-              <Button size="small" style={{ fontSize: 11.5, borderRadius: 6 }} onClick={() => {
-                askResolveRef.current?.('（用户选择跳过，请自行合理处理或说明）'); askResolveRef.current = null; setPendingAsk(null);
-              }}>跳过</Button>
             </div>
           </div>
         )}

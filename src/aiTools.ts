@@ -863,10 +863,10 @@ const tools: AiTool[] = [
   {
     id: 'ask_user',
     name: '询问用户确认',
-    desc: '遇到不确定的关键信息（如用户没说哪个物料/哪个项目/选哪个方案）时调用，向用户提问并给选项，等用户选择后再继续——不要瞎猜。参数 question 必填（问题），options 可选（JSON 数组字符串，选项列表）。前端会渲染选项按钮供用户点击。',
+    desc: '遇到不确定的关键信息（如用户没说哪个物料/哪个项目/选哪个方案）时调用，向用户提问并给选项，等用户选择后再继续——不要瞎猜。参数 question 必填（问题），options 必填（JSON 数组字符串）——必须给出具体可选项（如项目列表/物料列表/方案名），禁止空 options；问项目选择时可先调 query_projects 拿项目列表作为选项。前端渲染选项按钮供用户点击。',
     params: [
       { key: 'question', type: 'string', required: true, desc: '要问用户的问题' },
-      { key: 'options', type: 'string', desc: 'JSON 数组字符串，选项列表，可空' },
+      { key: 'options', type: 'string', required: true, desc: 'JSON 数组字符串，选项列表——必须给具体可选项，禁止空' },
     ],
     execute: async (_a) => {
       // AiPanel 会拦截本工具渲染选项并等待用户点击；这里只是兜底（正常情况下不执行到这里）
