@@ -34,6 +34,16 @@ export async function importProjectBom(projectId: number, items: BomImportItem[]
     stats.byModule[module] = (stats.byModule[module] || 0) + 1;
   }
   try { const W = window as any; W.__costhub_undo = { toolId: 'import_bom_to_project', inserts: { parts: undoParts, project_boms: undoBoms } }; } catch { }
+  // 隐线规范化（2026-08-27 用户：规范化是被动触发的隐线——导入新器件自动规范，无需用户主动操作；失败静默不阻塞导入）
+  try {
+    const ids = undoParts.filter((x: any) => Number(x) > 0);
+    if (ids.length) {
+      const { canonicalizePartBatch } = await import('../canonicalize');
+      const parts = await d.select<any[]>('SELECT id, name, model FROM parts WHERE id IN (' + ids.join(',') + ')');
+      const st = await canonicalizePartBatch(parts);
+      if (st.done > 0) stats.autoCanonical = st.done;
+    }
+  } catch { }
   return stats;
 }
 

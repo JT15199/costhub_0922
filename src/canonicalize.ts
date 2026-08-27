@@ -53,6 +53,54 @@ export function buildCanonicalUndo(oldRows: any[]): Record<string, any> {
   return { __restore_parts: rows };
 }
 
+/** 隐线规范化（2026-08-27 用户：规范化是被动触发的隐线——导入新器件时自动规范，用户无需主动操作）
+ * 单批（≤20）调本地模型写 canonical 影子字段；模型不可用/失败静默返回（不阻塞导入、不打扰）；60s 完全无输出放弃（有输出无限等，不截断） */
+export async function canonicalizePartBatch(parts: { id: number; name: string; model?: string }[]): Promise<{ done: number; kept: number; failed: number }> {
+  const items = (parts || []).filter((x: any) => x && Number(x.id) > 0 && String(x.name || '').trim());
+  if (!items.length) return { done: 0, kept: 0, failed: 0 };
+  const db = await getDb();
+  for (const sql of ["ALTER TABLE parts ADD COLUMN canonical_name TEXT DEFAULT ''", "ALTER TABLE parts ADD COLUMN canonical_category TEXT DEFAULT ''", "ALTER TABLE parts ADD COLUMN canonical_specs TEXT DEFAULT '[]'", "ALTER TABLE parts ADD COLUMN canonical_updated_at TEXT DEFAULT ''"]) { try { await db.execute(sql); } catch { } }
+  // 预检：模型不可用直接静默返回（隐线不阻塞）
+  try {
+    const { detectOllama } = await import('./aiStatus');
+    const st = await detectOllama();
+    if (!st.connected) return { done: 0, kept: 0, failed: items.length };
+  } catch { return { done: 0, kept: 0, failed: items.length }; }
+  const base = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
+  const model = await getSetting('local_ai_model', '');
+  if (!model) return { done: 0, kept: 0, failed: items.length };
+  const names = items.map(x => x.name + (x.model ? ' ' + x.model : ''));
+  let full = '';
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false; let lastAt = Date.now(); let cleanup: (() => void) | null = null;
+      const done = () => { if (!settled) { settled = true; clearInterval(iv); try { cleanup?.(); } catch { } resolve(); } };
+      const fail = (e: any) => { if (!settled) { settled = true; clearInterval(iv); try { cleanup?.(); } catch { } reject(e); } };
+      const iv = setInterval(() => { if (Date.now() - lastAt > 60000) fail(new Error('模型 60s 无输出（隐线规范化放弃）')); }, 1000);
+      startOllamaStream(base, model, [
+        { role: 'system', content: '你是物料命名规范化助手。' },
+        { role: 'user', content: buildCanonicalPrompt(names) },
+      ], t => { lastAt = Date.now(); full += t; }, () => { }, () => done(), e => fail(new Error(e)),
+        { endpoint: 'native', think: false, json: false, num_predict: 4096 }).then(c => { cleanup = c; }).catch(() => { /* 错误走 onError */ });
+    });
+  } catch { return { done: 0, kept: 0, failed: items.length }; }
+  const parsed = parseCanonicalResult(full);
+  const byOriginal = new Map(parsed.map(p => [p.original, p]));
+  let done = 0, kept = 0, failed = 0;
+  for (const it of items) {
+    const key = it.name + (it.model ? ' ' + it.model : '');
+    const p = byOriginal.get(key) || byOriginal.get(it.name);
+    if (p && p.standard) {
+      try {
+        await db.execute("UPDATE parts SET canonical_name=?, canonical_category=?, canonical_specs=?, canonical_updated_at=datetime('now','localtime') WHERE id=?",
+          [p.standard, p.category || '其他', JSON.stringify(p.specs || []), it.id]);
+        done++;
+      } catch { failed++; }
+    } else kept++;
+  }
+  return { done, kept, failed };
+}
+
 /** 还原单条物料规范化：清空 canonical 影子字段（原名本就没动过，还原=回到未规范状态，可重新规范化） */
 export async function resetPartCanonical(partId: number): Promise<boolean> {
   try {

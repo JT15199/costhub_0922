@@ -279,6 +279,7 @@
 
 ## 三·补19、物料规范化（canonicalize，2026-08-19 用户：一套通用规则套所有物料，导入+存量按项目规范）
 
+- **隐线化（2026-08-27 用户：这个功能应该被动触发，因为是隐线）**：规范化改为导入时自动发生——canonicalizePartBatch（canonicalize.ts，单批 ≤20 隐线规范化：detectOllama 预检快速失败+60s 完全无输出放弃（有输出无限等不截断）+全程静默）；importProjectBom 新建器件后自动规范化（undoParts → canonicalizePartBatch，stats.autoCanonical 汇报）；模型不可用/失败静默不阻塞导入。canonicalize_project 降级为"存量项目一次性补录"（系统提示与工具 desc 同步：仅用户明确要补存量时才用，写操作仍要求用户指定项目）；导入汇报克制加"已自动规范 X 条新器件"。
 - **canonicalize.ts**：AI 批量物料规范化——统一模板（品类|主规格|次规格|型号）+ 标准品类词表（14 类）+ 通用单位规则（K/M/u/n 等，不按品类）；**内容判定交给 AI**（不写品类解析器）；**笼统物料**（支架/底座）只归类不编造规格；健壮解析（JSON 数组/前缀包裹/截断逐对象抠出）；+5 测试。
 - **存量按项目规范化**：canonicalize_project（第 37 个工具）——取项目 BOM 物料分批（20/批）调本地模型 → 写回 parts canonical_name/canonical_category/canonical_specs/canonical_updated_at（**影子字段：原名/模块库/关联不动**，ALTER 幂等兜底）；统计 已规范/笼统保留/失败。
 - **安全**：规范化不改 parts.name 与 modules/project_boms.module_name（模块库分类原封不动）；笼统物料不编造规格；canonicalize_project 记审计。

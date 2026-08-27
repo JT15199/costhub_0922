@@ -306,10 +306,9 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       '② 解析成结构化 JSON 数组后调对应导入工具：BOM→import_bom_to_project（自动归类模块）、供应商报价→import_supplier_quote、竞品 BOM→import_competitor_bom、原声→import_voice_items\n' +
       '③ 数据校验：数量/单价必须是数字；缺失必填字段的条目跳过并报告；导入工具返回统计后如实汇报（新建几个器件/复用几个/跳过几个）\n' +
       '④ 用户没给目标项目/产品时先问清楚，不要擅自指定——用 ask_user 工具提问，options 必须给具体选项（问项目就先用 query_projects 拿项目列表作选项），不要空选项\n' +
-      '【物料规范化】用户嫌物料名不规范（供应商写法不一）时：\n' +
-      '· 调 canonicalize_project 按项目批量规范化（一套通用规则套所有物料：品类+规格+型号；笼统物料如支架/底座只归类不编造规格）\n' +
-      '· 结果写入器件库标准名字段，原名/模块库不动；规范后可更准匹配与统计\n' +
-      '· 这是写操作：用户没明确指定项目代号时，必须先 ask_user 让用户选择要规范哪个项目，绝不能擅自选一个项目规范化\n' +
+      '【物料规范化】规范化是自动发生的隐线：导入 BOM/报价时新器件会自动规范成标准名（品类+规格+型号），用户无需主动操作。\n' +
+      '· 仅当用户明确要"补规范存量项目"时才调 canonicalize_project（按项目批量补录，笼统物料如支架/底座只归类不编造规格）\n' +
+      '· 这是写操作：用户没明确指定项目代号时，必须先 ask_user 让用户选择要规范哪个项目（选项给项目列表），绝不能擅自选一个项目规范化\n' +
       '【写操作安全】以下工具会修改你的数据库，执行前会弹出确认（用户确认才执行）：import_bom_to_project / import_supplier_quote / import_competitor_bom / import_voice_items。\n' +
       '· 只有用户明确要求"录入/导入/写入"时才调用写工具；查询类工具（query_* 等）绝不写库。\n' +
       '· 不要为了完成任务擅自写入；用户取消写入时如实告知未修改任何数据。\n' +
