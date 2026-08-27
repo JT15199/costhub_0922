@@ -889,7 +889,7 @@ const tools: AiTool[] = [
   {
     id: 'canonicalize_project',
     name: '规范化项目物料',
-    desc: '把某项目 BOM 的全部物料用 AI 批量规范成统一标准名（品类+规格+型号，一套通用规则套所有物料；笼统物料如"支架/底座"只归类不编造规格）。结果写入器件库的 canonical 影子字段（原名/模块库不动），匹配/统计/检索将更准。参数 project_code 必填（项目代号）。',
+    desc: '把某项目 BOM 的全部物料用 AI 批量规范成统一标准名（品类+规格+型号，一套通用规则套所有物料；笼统物料如"支架/底座"只归类不编造规格）。结果写入器件库的 canonical 影子字段（原名/模块库不动），匹配/统计/检索将更准。注意：这是写操作，必须在用户明确指定要规范哪个项目（参数 project_code）后才能调用；用户没指定项目时先调 ask_user 让用户选择，不要擅自选一个项目。',
     params: [{ key: 'project_code', type: 'string', required: true, desc: '项目代号' }],
     execute: async (a) => {
       const { getProjects } = await import('./db');

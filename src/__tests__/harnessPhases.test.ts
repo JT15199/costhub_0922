@@ -22,6 +22,13 @@ describe('verifyConclusionNumbers — 结论数字溯源校验（阶段③）', 
     expect(vals).toContain(12.5);
     expect(vals).toContain(8);
   });
+
+  it('列表序号（1. 3）不算数据数字 → 不误报未溯源', () => {
+    const { unverified } = verifyConclusionNumbers('1. 项目 BOM 明细。3）继续分析。结论：成本 ¥85.00', 'M270 BOM ¥612.50，驱动板 ¥85.00 × 2，占比 27%');
+    const bad = unverified.filter(n => n.num === 1 || n.num === 3);
+    expect(bad.length).toBe(0);
+    expect(unverified.length).toBe(0);
+  });
 });
 
 describe('MAX_TOOLS_PER_ROUND — 单路高质量硬约束（2026-08-18）', () => {

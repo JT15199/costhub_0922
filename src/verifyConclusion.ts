@@ -11,6 +11,9 @@ export function extractNums(text: string): UnverifiedNum[] {
   while ((m = re.exec(text))) {
     const num = parseFloat(m[1]);
     if (num === 0) continue;
+    // 列表序号不算数据数字（"1. 项目" "3）继续" "2、xxx"）——数字后紧跟序号标点即跳过（金额/百分比的小数点已在 m[0] 内，不受影响）
+    const afterCh = text.charAt(m.index + m[0].length);
+    if (/^[.、)）:：,，。]/.test(afterCh)) continue;
     const start = Math.max(0, m.index - 12);
     out.push({ num, ctx: text.slice(start, m.index + m[0].length).trim() });
   }

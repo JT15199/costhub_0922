@@ -308,6 +308,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       '【物料规范化】用户嫌物料名不规范（供应商写法不一）时：\n' +
       '· 调 canonicalize_project 按项目批量规范化（一套通用规则套所有物料：品类+规格+型号；笼统物料如支架/底座只归类不编造规格）\n' +
       '· 结果写入器件库标准名字段，原名/模块库不动；规范后可更准匹配与统计\n' +
+      '· 这是写操作：用户没明确指定项目代号时，必须先 ask_user 让用户选择要规范哪个项目，绝不能擅自选一个项目规范化\n' +
       '【写操作安全】以下工具会修改你的数据库，执行前会弹出确认（用户确认才执行）：import_bom_to_project / import_supplier_quote / import_competitor_bom / import_voice_items。\n' +
       '· 只有用户明确要求"录入/导入/写入"时才调用写工具；查询类工具（query_* 等）绝不写库。\n' +
       '· 不要为了完成任务擅自写入；用户取消写入时如实告知未修改任何数据。\n' +
@@ -370,6 +371,13 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
               setPendingAsk({ question, options });
             });
             return { ok: true, text: '用户选择了：' + answer };
+          }
+          // 写操作保护：canonicalize_project 会修改器件库，必须在用户明确指定项目代号后才能执行（用户没指定→先 ask_user 让用户选，不要擅自选项目写库——2026-08-27 用户实测：没指定项目被规范了 M270）
+          if (id === 'canonicalize_project') {
+            const codeMatch = userContent.match(/[A-Za-z]{1,4}\s?[-_]?\d{2,}/);
+            if (!codeMatch) {
+              return { ok: true, text: '[提示] 用户没有指定要规范哪个项目，且 canonicalize_project 会修改器件库（写入规范化结果）。请先调用 ask_user 工具让用户选择项目（可先调用 query_projects 拿到项目列表作为选项），不要擅自选一个项目规范化。' };
+            }
           }
           // 写操作安全：导入类写工具执行前确认（用户确认才写库）
           if (WRITE_TOOLS.includes(id)) {
