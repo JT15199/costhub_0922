@@ -322,6 +322,16 @@ export default function App() {
   // 侧边栏「报价情报」入口：任何页面可点 → 跳项目管理页并打开情报弹窗
   // ⚠️ 2026-08-17 修复：原来直接 setActive('projects') 不走 navigate → mountedPages 没有 projects 时白屏；
   // 且事件在 Projects 组件挂载前发出 → 没反应。现在 navigate 挂载页面 + localStorage 标志兜底（组件挂载后消费）+ 延迟事件双保险
+  // 结果可视化跳转（2026-08-19）：costhub-open-project → 切项目页 + 延迟重发选中（Projects 懒加载需挂载后接收）
+  useEffect(() => {
+    const h = (e: Event) => {
+      const pid = (e as CustomEvent).detail?.pid;
+      if (pid) { navigate('projects'); setTimeout(() => window.dispatchEvent(new CustomEvent('costhub-open-project', { detail: { pid } })), 300); }
+    };
+    window.addEventListener('costhub-open-project', h);
+    return () => window.removeEventListener('costhub-open-project', h);
+  }, [navigate]);
+
   const openInsightsEntry = useCallback(() => {
     localStorage.setItem('costhub-open-insights-pending', '1');
     navigate('projects');

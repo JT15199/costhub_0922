@@ -2,7 +2,7 @@
 // 设计：不预设功能——模型持有全部工具清单（文本协议 [TOOL]），对话里自主调用；右侧窗常驻、可折叠、可拖拽调宽
 // 引擎：thinkEngine.runThinkLoop（多轮工具循环 + 轨迹事件）；轨迹=执行记录卡（🔧 工具 / 🔐 云端）
 import { useEffect, useRef, useState } from 'react';
-import { Button, Dropdown, Tooltip, message, Select, Switch } from 'antd';
+import { Button, Dropdown, Tooltip, message, Select, Switch, Modal, Input } from 'antd';
 import * as XLSX from 'xlsx';
 import {
   PlusOutlined, HistoryOutlined, SendOutlined,
@@ -17,7 +17,7 @@ import { loadSessions, newSession, loadMessages, saveMsg, type Session } from '.
 import { getDataReadiness } from '../dataReadiness';
 import ToolResultView from './ToolResultView';
 // 支持结果可视化的工具（分析结果直接看图，不依赖模型）
-const VISUAL_TOOLS = ['query_project_cost', 'query_project_bom', 'query_target_status', 'compare_subcategory_cost', 'query_project_module_value', 'query_competitor_bom', 'insight_material_trend', 'query_material_insight'];
+const VISUAL_TOOLS = ['query_project_cost', 'query_project_bom', 'query_target_status', 'compare_subcategory_cost', 'query_project_module_value', 'query_competitor_bom', 'insight_material_trend', 'query_material_insight', 'query_supplier_profile'];
 import { detectSkills } from '../aiSkills';
 import { buildDataMap } from '../dataMap';
 import { verifyConclusionNumbers } from '../verifyConclusion';
@@ -66,6 +66,9 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   // ===== 对话状态 =====
   const [messages, setMessages] = useState<Msg[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchKw, setSearchKw] = useState('');
+  const [searchRes, setSearchRes] = useState<Session[]>([]);
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -368,7 +371,13 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           const res = await executeTool(id, args);
           // 写操作审计：所有写工具执行后留痕（谁·何时·用什么·改了什么）
           if (AUDIT_TOOLS.includes(id)) {
-            try { const { logWriteAudit } = await import('../db'); await logWriteAudit(id, JSON.stringify(args || {}).slice(0, 300), (res.text || '').slice(0, 500)); } catch { }
+            try {
+              const { logWriteAudit } = await import('../db');
+              // 撤销支持：写工具内部收集插入 id（window.__costhub_undo）→ 记入审计 undo_json
+              let undoJson = '';
+              try { const W = window as any; const u = W.__costhub_undo; if (u && u.toolId === id) { undoJson = JSON.stringify(u.inserts || {}); W.__costhub_undo = null; } } catch { }
+              await logWriteAudit(id, JSON.stringify(args || {}).slice(0, 300), (res.text || '').slice(0, 500), undoJson);
+            } catch { }
           }
           // ⚠️ 2026-08-19 修复：insight_material_trend 返回"等待云端发送确认"时 ok 是 true（工具正常执行只是提示审批）——只看文本含"等待云端发送确认"即记 pending，确认后自动续跑
           if (res.text && res.text.includes('等待云端发送确认')) {
@@ -585,6 +594,27 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   const sendRef = useRef<((raw: string) => void) | null>(null);
   useEffect(() => { sendRef.current = send; });
 
+  // 会话搜索 Modal（2026-08-19）
+  const runSearch = async () => {
+    try { const { searchSessions } = await import('../aiPanelChat'); setSearchRes(await searchSessions(searchKw)); } catch { setSearchRes([]); }
+  };
+  const searchModal = (
+    <Modal title="🔍 搜索历史会话" open={searchOpen} onCancel={() => setSearchOpen(false)} footer={null} width={420}>
+      <Input placeholder="输入关键词（如：Scaler、降本、审价）" value={searchKw} onChange={e => setSearchKw(e.target.value)} onPressEnter={runSearch} style={{ marginBottom: 10 }} />
+      <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+        {searchRes.length === 0 ? (
+          <div style={{ fontSize: 11.5, color: '#9A978B', textAlign: 'center', padding: 16 }}>输入关键词回车搜索会话内容</div>
+        ) : searchRes.map((s: any) => (
+          <div key={s.id} onClick={() => { setSearchOpen(false); switchSession(s.id); }} style={{ padding: '7px 9px', borderRadius: 6, cursor: 'pointer', fontSize: 12, color: '#334155' }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#F4F3EE'; }} onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
+            {s.title || ('会话 #' + s.id)}
+            <div style={{ fontSize: 10, color: '#94A3B8' }}>{String(s.updated_at || '').slice(0, 16)}</div>
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+
   // ===== 渲染：折叠态 =====
   if (collapsed) {
     return (
@@ -603,6 +633,9 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
 
   // ===== 渲染：展开态 =====
   return (
+    <>
+    {searchModal}
+
     <div style={{ width, height: '100vh', flexShrink: 0, background: '#F4F3EE', borderLeft: '1px solid #E6E4DC', display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative', overflow: 'hidden' }}>
       {/* 拖拽调整宽度 */}
       <div
@@ -634,7 +667,11 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 1 }}>
             <Tooltip title="AI 使用指南"><Button type="text" size="small" icon={<QuestionCircleOutlined />} style={{ color: '#9A978B' }} onClick={() => window.dispatchEvent(new Event('costhub-open-ai-guide'))} /></Tooltip>
             <Tooltip title="新对话"><Button type="text" size="small" icon={<PlusOutlined />} style={{ color: '#5F5D54' }} onClick={newChat} /></Tooltip>
-            <Dropdown menu={{ items: sessions.map(s => ({ key: String(s.id), label: s.title || ('会话 #' + s.id), onClick: () => switchSession(s.id) })) }} placement="bottomRight">
+            <Dropdown menu={{ items: [
+              { key: '__search', label: '🔍 搜索历史会话', onClick: () => setSearchOpen(true) },
+              { type: 'divider' },
+              ...sessions.map(s => ({ key: String(s.id), label: s.title || ('会话 #' + s.id), onClick: () => switchSession(s.id) })),
+            ] }} placement="bottomRight">
               <Tooltip title="历史会话"><Button type="text" size="small" icon={<HistoryOutlined />} style={{ color: '#5F5D54' }} /></Tooltip>
             </Dropdown>
             <Tooltip title="折叠"><Button type="text" size="small" icon={<RightOutlined />} style={{ color: '#5F5D54' }} onClick={toggleCollapse} /></Tooltip>
@@ -795,5 +832,6 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         </div>
       </div>
     </div>
+    </>
   );
 }

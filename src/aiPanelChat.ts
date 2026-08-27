@@ -25,3 +25,11 @@ export async function saveMsg(sessionId: number, role: string, content: string, 
   await db.execute("INSERT INTO local_ai_messages (session_id,role,content,reasoning) VALUES (?,?,?,?)", [sessionId, role, content, reasoning]);
   await db.execute("UPDATE local_ai_sessions SET updated_at=datetime('now','localtime') WHERE id=?", [sessionId]);
 }
+
+/** 搜索会话：按消息内容/标题关键词匹配（2026-08-19 用户：会话可搜索） */
+export async function searchSessions(keyword: string): Promise<Session[]> {
+  const k = String(keyword || '').trim();
+  if (!k) return loadSessions();
+  const d = await getDb();
+  return d.select<Session[]>('SELECT DISTINCT s.id, s.title, s.updated_at FROM local_ai_sessions s JOIN local_ai_messages m ON m.session_id = s.id WHERE m.content LIKE ? OR s.title LIKE ? ORDER BY s.updated_at DESC LIMIT 30', ['%' + k + '%', '%' + k + '%']);
+}

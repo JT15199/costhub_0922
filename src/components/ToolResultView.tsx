@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
 import { Table, Tag } from 'antd';
-import { getProjects, getProjectBOMs, getTargets, getCompetitors, getCompetitorBOMs, getSellingPoints, getSellingPointMaps, getLatestTrendSnapshot } from '../db';
+import { getProjects, getProjectBOMs, getTargets, getCompetitors, getCompetitorBOMs, getSellingPoints, getSellingPointMaps, getLatestTrendSnapshot, getSupplierPriceProfiles } from '../db';
 import { computeSellingPointRows, computeModuleValueRows, type ModuleValueRow } from '../sellingPointAnalyzer';
 import { computeTargetStatuses } from '../targetInsight';
 import ModuleValueMatrix from './ModuleValueMatrix';
@@ -122,6 +122,20 @@ async function loadData(toolId: string, args: any): Promise<ViewData | null> {
         rows: out,
       };
     }
+    if (toolId === 'query_supplier_profile') {
+      const rows = await getSupplierPriceProfiles();
+      const list = (rows || []).filter((r: any) => !args?.supplier || String(r.supplier_name || '').includes(String(args.supplier || '')));
+      return {
+        type: 'competitor', title: '供应商画像' + (args?.supplier ? '（含「' + args.supplier + '」）' : ''),
+        columns: [
+          { title: '供应商', dataIndex: 'name' }, { title: '覆盖器件', dataIndex: 'count', align: 'center' },
+          { title: '平均价', dataIndex: 'avg', align: 'right', render: (v: number) => <span style={mono}>¥{(v || 0).toFixed(0)}</span> },
+          { title: '价格水平', dataIndex: 'level', align: 'center', render: (v: number) => v === 0 ? <Tag color="default">持平</Tag> : v > 0 ? <Tag color="orange">偏高 {v}%</Tag> : <Tag color="green">偏低 {-v}%</Tag> },
+          { title: '最大份额', dataIndex: 'share', align: 'center', render: (v: number) => (v || 0) > 0 ? v + '%' : '—' },
+        ],
+        rows: list.map((r: any) => ({ name: r.supplier_name || '', count: r.part_count || 0, avg: r.avg_price || 0, level: r.level || 0, share: r.max_share || 0 })),
+      };
+    }
     if (toolId === 'insight_material_trend' || toolId === 'query_material_insight') {
       const db = await (await import('../db')).getDb();
       const items = await db.select<any[]>('SELECT * FROM trend_items WHERE query_category LIKE ? ORDER BY id DESC LIMIT 1', ['%' + (args?.material_name || '') + '%']);
@@ -152,7 +166,17 @@ export default function ToolResultView({ toolId, args }: { toolId: string; args:
   if (!data) return null;
   return (
     <div style={{ background: '#FBFAF6', border: '1px solid #E6E4DC', borderRadius: 8, padding: '8px 10px', marginTop: 6 }}>
-      {data.title && <div style={{ fontSize: 11, fontWeight: 700, color: '#181713', marginBottom: 6 }}>{data.title}</div>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        {data.title && <div style={{ fontSize: 11, fontWeight: 700, color: '#181713' }}>{data.title}</div>}
+        {['query_project_cost', 'query_project_bom', 'query_project_module_value'].includes(toolId) && args?.project_code && (
+          <a style={{ fontSize: 10.5, color: '#0A84FF', marginLeft: 'auto', cursor: 'pointer', flexShrink: 0 }} onClick={async () => {
+            try { const ps = await getProjects('', '', ''); const p = ps.find((x: any) => x.code === args.project_code); if (p) {
+              localStorage.setItem('costhub-open-project-pending', String(p.id));
+              window.dispatchEvent(new CustomEvent('costhub-open-project', { detail: { pid: p.id } }));
+            } } catch { }
+          }}>去项目页 →</a>
+        )}
+      </div>
       {data.type === 'pie' && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <div style={{ width: 150, flexShrink: 0 }}>

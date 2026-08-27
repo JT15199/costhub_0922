@@ -268,6 +268,14 @@
 - **ToolResultView.tsx**：8 个高频查询工具结果在对话里直接渲染（不依赖模型，代码级确定，从工具参数+库数据重查渲染）：query_project_cost→环形图+模块占比表、query_project_bom→BOM 明细表、query_target_status→目标达成表(红绿)、compare_subcategory_cost→柱状图(最低绿/最高红)、query_project_module_value→ModuleValueMatrix 四象限复用+表、query_competitor_bom→竞品对比表、insight_material_trend/query_material_insight→行情结果卡(趋势/置信度/摘要)。
 - **集成**：AiPanel 步骤卡(Step.args 记录工具参数)内、detail 下方渲染 ToolResultView；v2 视觉(骨色底+等宽数字+信号色)；与文本结论并存。
 
+
+## 三·补18、供应商画像 + 结果跳转 + 会话搜索 + 写入可回滚（2026-08-19 用户：这几个可以）
+
+- **供应商画像**：getSupplierPriceProfiles（db/dataImport 报价聚合：覆盖器件数/平均价/价格水平比库内均价高或低%/最大份额；注意与 db/suppliers 的 getSupplierProfiles(档案表) 区分）；工具 query_supplier_profile（第 36 个）+ ToolResultView 表渲染（偏高橙/偏低绿）。
+- **结果可跳转**：ToolResultView 项目类工具加「去项目页 →」按钮 → costhub-open-project 事件 → App 监听 navigate projects + 300ms 重发选中（Projects 懒加载）。
+- **会话可搜索**：aiPanelChat.searchSessions（按消息内容/标题 LIKE）；AiPanel 历史会话下拉加「🔍 搜索历史会话」→ Modal 输入关键词回车 → 结果列表点击切换。
+- **AI 写入可回滚**：write_audit_logs 加 undo_json 列；写工具内部收集插入 id（window.__costhub_undo：4 导入 + save_selling_analysis/save_project_analysis）→ AiPanel 审计时写入；undoWriteAudit(id) 按 undo_json DELETE；设置页「AI 写入记录」每条加「撤销」按钮（已撤销绿标）。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。

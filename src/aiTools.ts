@@ -60,6 +60,7 @@ export const TOOL_ICONS: Record<string, React.ComponentType> = {
   generate_report: BookOutlined,
   write_excel: FileExcelOutlined,
   ask_user: MessageOutlined,
+  query_supplier_profile: ShopOutlined,
 };
 export function toolIcon(id: string): React.ComponentType {
   return TOOL_ICONS[id] || FolderOutlined;
@@ -639,6 +640,7 @@ const tools: AiTool[] = [
       if (!conclusion) return '结论内容不能为空';
       const { saveSellingAnalysis } = await import('./db/selling');
       const id = await saveSellingAnalysis(p.id, p.code || '', conclusion);
+      try { const W = window as any; W.__costhub_undo = { toolId: 'save_selling_analysis', inserts: { selling_point_analysis: [id] } }; } catch { }
       try { window.dispatchEvent(new CustomEvent('costhub-selling-updated')); } catch { /* 非浏览器忽略 */ }
       return '已保存项目 ' + a.project_code + ' 的卖点价值分析结论（id ' + id + '），卖点价值分析面板已更新「最近 AI 分析结论」。';
     },
@@ -659,7 +661,8 @@ const tools: AiTool[] = [
       const conclusion = String(a.conclusion || '').trim();
       if (!conclusion) return '结论内容不能为空';
       const { saveProjectAnalysis } = await import('./db');
-      await saveProjectAnalysis(p.id, p.code || '', conclusion);
+      const id2 = await saveProjectAnalysis(p.id, p.code || '', conclusion);
+      try { const W = window as any; W.__costhub_undo = { toolId: 'save_project_analysis', inserts: { project_analysis_logs: [id2] } }; } catch { }
       try { window.dispatchEvent(new CustomEvent('costhub-project-analysis-updated')); } catch { }
       return '已保存项目 ' + a.project_code + ' 的分析结论，驾驶舱「最近 AI 分析结论」已更新。';
     },
@@ -867,6 +870,19 @@ const tools: AiTool[] = [
     execute: async (_a) => {
       // AiPanel 会拦截本工具渲染选项并等待用户点击；这里只是兜底（正常情况下不执行到这里）
       return '已向用户提问，等待选择…';
+    },
+  },
+  {
+    id: 'query_supplier_profile',
+    name: '查询供应商画像',
+    desc: '查每个供应商的画像（覆盖器件数/平均价/价格水平比库内均价高或低%/最大份额）——审价或谈价前了解"这家历来贵不贵、好不好压价"。参数 supplier 可选（供应商名，不填列出全部）。',
+    params: [{ key: 'supplier', type: 'string', desc: '供应商名，可空（空则全部）' }],
+    execute: async (_a) => {
+      const { getSupplierPriceProfiles } = await import('./db');
+      const rows = await getSupplierPriceProfiles();
+      const list = (rows || []).filter((r: any) => !_a.supplier || String(r.supplier_name || '').includes(String(_a.supplier || '')));
+      if (list.length === 0) return '没有供应商报价数据（先在器件库录入供应商报价）';
+      return list.slice(0, 15).map((r: any) => (r.supplier_name || '') + '：覆盖 ' + r.part_count + ' 个器件，平均价 ¥' + r.avg_price + '，价格水平 ' + (r.level > 0 ? '偏高 ' + r.level + '%' : r.level < 0 ? '偏低 ' + (-r.level) + '%' : '持平') + (r.max_share > 0 ? '，最大份额 ' + r.max_share + '%' : '')).join('\n');
     },
   },
 ];
