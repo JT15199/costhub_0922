@@ -291,6 +291,10 @@
 - **擅自选项目教训（2026-08-27 用户实测：没指定项目被规范了 M270）**：1B 模型不遵守提示词"没给目标先 ask_user"→ 代码级拦截：AiPanel executeTool 里 canonicalize_project 执行前检查 userContent 是否含项目代号（/[A-Za-z]{1,4}[-_]?\d{2,}/），无代号直接返回 [提示] 让模型先 ask_user（可先 query_projects 列项目），不执行不写库；工具 desc 与系统提示同步强调"写操作必须用户明确指定项目"。另修 verifyConclusion.extractNums 把列表序号（"1. 项目""3）继续"）误报为未溯源数字 → 数字后紧跟 [.、)）:：,，。] 标点即跳过（金额/百分比小数点在 m[0] 内不受影响），+1 测试。人工核对口径：结论数字应在对话工具 [RESULT] 中可见，找不到才附 [校验] 提醒，以工具结果为准。
 - **修正闭环（2026-08-27 用户追问"规范错了如何处理/如何发现"）**：①核对——ToolResultView 渲染 canonicalize_project 规范化明细表（原名/型号/规范名/品类/规格/状态：已规范·笼统保留·未处理，代码级从库重查）②单条修正——明细表行内「还原」按钮（Popconfirm 确认 → resetPartCanonical 清空该物料 canonical 影子字段，原名本就没动；记 logWriteAudit('reset_canonical') 审计，可重新规范化）③整批回滚——canonicalize_project 执行时收集 UPDATE 前的影子字段原值 → window.__costhub_undo → 审计 undo_json（__restore_parts 结构）；undoWriteAudit 增加 __restore_parts 分支=UPDATE 恢复原值（非 DELETE 行），设置页「AI 写入记录」撤销按钮对规范化记录生效。
 
+## 三·补20、任务状态可见 + 对话优先（2026-08-27 用户：指定任务时如何看到当前状态/能否同时跑多个模型）
+
+- **现状回答**：①指定任务的状态 = AI 协作窗内轨迹卡链（📤发送→🔧工具(参数+结果)→🔐云端→📌结论）+ 流式输出（思考中/已 X 字）+ [PLAN] 计划清单 + 停止按钮；后台自主分析状态 = 驾驶舱 AutoThinkPanel 实时区 + costhub-ai-task 顶部任务气泡 + AI 情报 badge ②**不能真正并行跑多个模型**：Ollama 单实例，同模型请求排队串行、异模型切换加载（慢）——后台引擎与对话同时调模型会互相排队。
+- **对话优先让路（本交付）**：Ollama 串行导致后台引擎抢模型会拖慢用户对话 → App.tsx 加模块级 dialogActive()（读 window.__costhub_ai_dialog）；四个后台引擎（compare 报价识别/advisor 自主巡检/insight 关键物料洞察/think 自主分析）调度开头若用户正在 AI 窗对话 → **本轮静默跳过**（下轮 60s 自动续，不丢任务不打扰）；AiPanel 在 streaming 开始/结束（send + runCloudDirect 共 4 处）维护 __costhub_ai_dialog 标记。
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。

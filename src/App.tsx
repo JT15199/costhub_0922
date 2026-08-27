@@ -67,6 +67,9 @@ const NAV_GROUPS: { title: string; items: typeof NAV }[] = [
 
 const ZOOM_LEVELS = [80, 100, 125, 150];
 
+// 对话优先（2026-08-27 用户：指定任务时后台自主扫描是否冲突——Ollama 单实例串行，用户在 AI 协作窗对话时后台引擎让路，避免抢模型拖慢对话）
+const dialogActive = () => { try { return !!(window as any).__costhub_ai_dialog; } catch { return false; } };
+
 export default function App() {
   const [active, setActive] = useState(() => localStorage.getItem('app-active') || 'dashboard');
   // 登录门禁：null=未登录(显示登录页) false=受限模式(不显示数据) true=已解锁
@@ -109,6 +112,7 @@ export default function App() {
   useEffect(() => { refreshInsightCount(); }, [refreshInsightCount]);
   const scheduleAppCompare = useCallback(() => {
     if (autoRunningRef.current) return;
+    if (dialogActive()) return; // 对话优先让路
     autoRunningRef.current = true;
     (async () => {
       let didWork = false;
@@ -135,6 +139,7 @@ export default function App() {
   const advisorRunningRef = useRef(false);
   const scheduleAppAdvisor = useCallback(() => {
     if (advisorRunningRef.current) return;
+    if (dialogActive()) return; // 对话优先让路
     advisorRunningRef.current = true;
     (async () => {
       try {
@@ -161,6 +166,7 @@ export default function App() {
   const insightRunningRef = useRef(false);
   const scheduleAppInsight = useCallback(() => {
     if (insightRunningRef.current) return;
+    if (dialogActive()) return; // 对话优先让路
     insightRunningRef.current = true;
     (async () => {
       try {
@@ -210,6 +216,7 @@ export default function App() {
   const lastThinkAtRef = useRef(0);
   const scheduleAppThink = useCallback((force = false) => {
     if (thinkRunningRef.current) return;
+    if (dialogActive()) return; // 对话优先让路（2026-08-27：用户在 AI 窗对话时后台自主分析跳过本轮）
     const now = Date.now();
     if (!force && now - lastThinkAtRef.current < 5 * 60 * 1000) return; // 数据变更触发节流 5 分钟
     thinkRunningRef.current = true;

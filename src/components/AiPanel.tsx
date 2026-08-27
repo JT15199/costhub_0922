@@ -36,6 +36,8 @@ const IRRELEVANT_FOR_TREND = ['query_project_bom', 'query_project_cost', 'query_
 // 规范化任务判断（2026-08-27 用户：主动规范化却收到"物料通用名没有洞察记录"——1B 模型跑偏去查行情工具）
 const isCanonicalTask = (q: string) => /规范化|规范一下|标准名|统一命名|整理物料|物料规范/.test(q || '');
 const IRRELEVANT_FOR_CANONICAL = ['query_material_insight', 'insight_material_trend', 'query_project_bom', 'query_project_cost', 'query_part_suppliers', 'query_project_health', 'compare_subcategory_cost', 'query_competitor_bom', 'query_supplier_profile', 'query_price_insights', 'query_voice_dims'];
+// 对话进行中标记（2026-08-27：App 后台引擎据此让路——Ollama 单实例串行，对话优先）
+const setDialogActive = (active: boolean) => { try { (window as any).__costhub_ai_dialog = active; } catch { } };
 // 写操作安全（2026-08-19 用户：防止工具乱改数据库）：导入类写工具执行前需用户确认；所有写工具执行后留审计日志
 const WRITE_TOOLS = ['import_bom_to_project', 'import_supplier_quote', 'import_competitor_bom', 'import_voice_items'];
 const AUDIT_TOOLS = [...WRITE_TOOLS, 'save_selling_analysis', 'save_project_analysis', 'create_todo', 'add_goal', 'insight_material_trend', 'quote_review', 'canonicalize_project'];
@@ -337,7 +339,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       message.error('发送失败：' + String(e?.message || e).slice(0, 200));
       return;
     }
-    setStreaming(true);
+    setStreaming(true); setDialogActive(true);
     setMessages(prev => [...prev, { role: 'assistant', content: '', reasoning: '', steps: [] }]);
     followRef.current = true;
 
@@ -504,7 +506,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         return arr;
       });
     } finally {
-      setStreaming(false); // 任何路径都复位（用户：没反应=streaming 卡死）
+      setStreaming(false); setDialogActive(false); // 任何路径都复位（用户：没反应=streaming 卡死）
     }
     // 完成后用干净结论覆盖（onAnswer 累积的多轮文本含 [TOOL] 标记与中间轮重复，finalText 才是 cleanProtocolText 后的结论）
     setMessages(prev => {
@@ -597,7 +599,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
 
   // ===== 审批确认后直接云端查询+写库（2026-08-19：不依赖 9B 模型重新调工具——确认即真正更新洞察） =====
   const runCloudDirect = async (material: string, category: string) => {
-    setStreaming(true);
+    setStreaming(true); setDialogActive(true);
     setMessages(prev => [...prev, { role: 'user', content: '（云端审批已确认，正在获取「' + material + '」最新行情…）' }]);
     setMessages(prev => [...prev, { role: 'assistant', content: '', reasoning: '', steps: [] }]);
     followRef.current = true;
@@ -621,7 +623,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     } catch (e: any) {
       const err = '云端查询失败：' + String(e?.message || e).slice(0, 300);
       setMessages(prev => { const arr = [...prev]; const last = arr[arr.length - 1]; if (last && last.role === 'assistant' && !last.content) arr[arr.length - 1] = { ...last, content: err }; return arr; });
-    } finally { setStreaming(false); }
+    } finally { setStreaming(false); setDialogActive(false); }
   };
   const runCloudDirectRef = useRef<((m: string, c: string) => void) | null>(null);
   useEffect(() => { runCloudDirectRef.current = runCloudDirect; });
