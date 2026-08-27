@@ -16,6 +16,7 @@ import { detectOllama } from '../aiStatus';
 import { loadSessions, newSession, loadMessages, saveMsg, type Session } from '../aiPanelChat';
 import { getDataReadiness } from '../dataReadiness';
 import { detectSkills } from '../aiSkills';
+import { buildDataMap } from '../dataMap';
 import { verifyConclusionNumbers } from '../verifyConclusion';
 
 // ===== 页面 → 上下文名（App 传入当前页 key） =====
@@ -254,7 +255,8 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     );
     let prefCtx = '';
     try { prefCtx = await import('../aiLearning').then(m => m.buildPreferenceContext()); } catch { prefCtx = ''; }
-    sys = buildThinkSystemPrompt(toolList, prefCtx) + '\n\n【任务执行】用户让你做任何查询/分析/洞察时，必须先用工具获取真实数据再回答：\n' +
+    try { sys = (await buildDataMap()) + '\n\n'; } catch { sys = ''; } // 数据库地图：先看数据在哪再选工具（用户：AI 能否清晰知道什么内容在哪里）
+    sys = sys + buildThinkSystemPrompt(toolList, prefCtx) + '\n\n【任务执行】用户让你做任何查询/分析/洞察时，必须先用工具获取真实数据再回答：\n' +
       '· 复杂任务（多步骤/多物料/分析+生成）先输出计划标记拆解步骤：[PLAN] {"steps":["步骤1","步骤2"]}——前端会显示执行进度，每完成一个工具自动勾选。\n' +
       '· 更新/查询某物料的最新行情洞察（如"更新 Scaler IC 行情"）→ 必须两步都做完，缺一不可：\n' +
       '   ① query_material_insight({"material_name":"物料名"}) 查历史结论\n' +

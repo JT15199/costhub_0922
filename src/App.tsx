@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
-import { message, Dropdown, Modal, Badge } from 'antd';
+import { message, Dropdown, Modal, Badge, Tooltip } from 'antd';
 import { runAutoCompare } from './autoCompare';
 import { runAutoAdvisor } from './autoAdvisor';
 import { getInsights } from './db';
@@ -28,7 +28,8 @@ import ErrorBoundary from './components/ErrorBoundary';
 import {
   BarChartOutlined, ToolOutlined, AppstoreOutlined, ProjectOutlined,
   ShopOutlined, LineChartOutlined, FileTextOutlined, PartitionOutlined, CalendarOutlined,
-  TeamOutlined, SettingOutlined, RobotOutlined, BookOutlined, BulbOutlined, LockOutlined, MessageOutlined, AuditOutlined
+  TeamOutlined, SettingOutlined, RobotOutlined, BookOutlined, BulbOutlined, LockOutlined, MessageOutlined, AuditOutlined,
+  MenuFoldOutlined, MenuUnfoldOutlined
 } from '@ant-design/icons';
 
 // 导航分区（v2.3.19 界面轻量化第一步：12 项平铺 → 驾驶舱 + 三区收敛，页面零改动）
@@ -84,6 +85,9 @@ export default function App() {
   // 使用说明弹窗
   const [guideOpen, setGuideOpen] = useState(false);
   const [customLogo] = useState(() => localStorage.getItem('costhub_custom_logo') || '');
+  // 侧边栏折叠（借鉴 DSH：收进去只显示常用 3 个功能）
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sidebar-collapsed') === '1');
+  const toggleSidebar = () => { const v = !sidebarCollapsed; setSidebarCollapsed(v); localStorage.setItem('sidebar-collapsed', v ? '1' : '0'); };
   // 当前登录用户名（侧边栏底部显示）
   const [currentUser, setCurrentUser] = useState('');
 
@@ -389,7 +393,18 @@ export default function App() {
       )}
       {/* 云端洞察待确认横幅（非打断式，底部固定，任何页面可见） */}
       <CloudConfirmBar />
-      <aside className="sidebar">
+      <aside className="sidebar" style={{ width: sidebarCollapsed ? 48 : 220, minWidth: sidebarCollapsed ? 48 : 220, overflow: 'hidden' }}>
+        {sidebarCollapsed ? (
+          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 0', gap: 6 }}>
+            <div style={{ width: 30, height: 30, borderRadius: 8, background: '#181713', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, marginBottom: 12, flexShrink: 0 }}>C</div>
+            <Tooltip title="驾驶舱" placement="right"><div onClick={() => navigate('dashboard')} style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: active === 'dashboard' ? '#181713' : '#5F5D54', background: active === 'dashboard' ? '#F4F3EE' : 'transparent' }}><BarChartOutlined style={{ fontSize: 16 }} /></div></Tooltip>
+            <Tooltip title="项目管理" placement="right"><div onClick={() => navigate('projects')} style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: active === 'projects' ? '#181713' : '#5F5D54', background: active === 'projects' ? '#F4F3EE' : 'transparent' }}><ProjectOutlined style={{ fontSize: 16 }} /></div></Tooltip>
+            <Tooltip title="AI 协作窗" placement="right"><div onClick={() => window.dispatchEvent(new Event('costhub-ai-focus'))} style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#5F5D54' }}><RobotOutlined style={{ fontSize: 16 }} /></div></Tooltip>
+            <div style={{ flex: 1 }} />
+            <Tooltip title="展开侧边栏" placement="right"><div onClick={toggleSidebar} style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#9A978B' }}><MenuUnfoldOutlined /></div></Tooltip>
+          </div>
+        ) : (
+          <>
         <div className="sidebar-logo">
           <div className="logo-img">
             {customLogo
@@ -525,6 +540,11 @@ export default function App() {
             </div>
           </Dropdown>
         </div>
+          <Tooltip title="收起侧边栏" placement="right">
+            <div onClick={toggleSidebar} style={{ padding: '6px 16px', cursor: 'pointer', color: '#9A978B', fontSize: 13, borderTop: '1px solid var(--color-border)', textAlign: 'center' }}><MenuFoldOutlined /></div>
+          </Tooltip>
+          </>
+        )}
       </aside>
       <main className="main-content" style={{ zoom: `${zoom}%` }}>
         {render()}
