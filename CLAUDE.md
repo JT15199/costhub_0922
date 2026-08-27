@@ -279,6 +279,7 @@
 
 ## 三·补19、物料规范化（canonicalize，2026-08-19 用户：一套通用规则套所有物料，导入+存量按项目规范）
 
+- **规范化任务跑偏教训（2026-08-27 用户实测：主动说"把物料批量规范化一下"却收到"物料通用名没有洞察记录"）**：1B 模型把"规范化"误解成查物料行情 → 调 query_material_insight 还编造 material_name:"物料通用名"。修复：AiPanel 加 isCanonicalTask（/规范化|规范一下|标准名|统一命名|整理物料|物料规范/）+ IRRELEVANT_FOR_CANONICAL（行情/洞察/项目查询类 11 个）软拦截——规范化任务调无关工具时 [提示] 引导：指定项目→canonicalize_project，没指定→ask_user 问项目（选项给项目列表），严禁查行情/洞察、严禁编造物料名；系统提示【物料规范化】同步补引导。
 - **隐线≠黑盒：人眼核对入口（2026-08-27 用户追问：如何知道规范对错/是否有幻觉）**：器件库表格加「规范化」列（getParts 幂等 ALTER 保证 canonical 列存在）——显示 规范名（Tooltip 品类·规格）+ 状态标签（未规范灰 / 笼统金 / 存疑橙=category 其他 提示重点核对）；操作列加「还原」按钮（Popconfirm → resetPartCanonical 清空影子字段，原名不受影响，logWriteAudit 审计，可重新规范）。防幻觉三线：①笼统物料 specs 空不编造 ②category='其他' 标"存疑"提示人眼重点核对 ③结果随时可见可还原（人眼核对是最终防线）。
 - **隐线化（2026-08-27 用户：这个功能应该被动触发，因为是隐线）**：规范化改为导入时自动发生——canonicalizePartBatch（canonicalize.ts，单批 ≤20 隐线规范化：detectOllama 预检快速失败+60s 完全无输出放弃（有输出无限等不截断）+全程静默）；importProjectBom 新建器件后自动规范化（undoParts → canonicalizePartBatch，stats.autoCanonical 汇报）；模型不可用/失败静默不阻塞导入。canonicalize_project 降级为"存量项目一次性补录"（系统提示与工具 desc 同步：仅用户明确要补存量时才用，写操作仍要求用户指定项目）；导入汇报克制加"已自动规范 X 条新器件"。
 - **canonicalize.ts**：AI 批量物料规范化——统一模板（品类|主规格|次规格|型号）+ 标准品类词表（14 类）+ 通用单位规则（K/M/u/n 等，不按品类）；**内容判定交给 AI**（不写品类解析器）；**笼统物料**（支架/底座）只归类不编造规格；健壮解析（JSON 数组/前缀包裹/截断逐对象抠出）；+5 测试。

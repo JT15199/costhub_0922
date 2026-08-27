@@ -33,6 +33,9 @@ const PAGE_LABELS: Record<string, string> = {
 // 行情/洞察类任务判断：用于无关工具软拦截（用户：更新行情却调用了查询项目工具）
 const isTrendTask = (q: string) => /行情|洞察|趋势|最新价格|物料行情/.test(q || '');
 const IRRELEVANT_FOR_TREND = ['query_project_bom', 'query_project_cost', 'query_part_suppliers', 'query_project_health', 'compare_subcategory_cost'];
+// 规范化任务判断（2026-08-27 用户：主动规范化却收到"物料通用名没有洞察记录"——1B 模型跑偏去查行情工具）
+const isCanonicalTask = (q: string) => /规范化|规范一下|标准名|统一命名|整理物料|物料规范/.test(q || '');
+const IRRELEVANT_FOR_CANONICAL = ['query_material_insight', 'insight_material_trend', 'query_project_bom', 'query_project_cost', 'query_part_suppliers', 'query_project_health', 'compare_subcategory_cost', 'query_competitor_bom', 'query_supplier_profile', 'query_price_insights', 'query_voice_dims'];
 // 写操作安全（2026-08-19 用户：防止工具乱改数据库）：导入类写工具执行前需用户确认；所有写工具执行后留审计日志
 const WRITE_TOOLS = ['import_bom_to_project', 'import_supplier_quote', 'import_competitor_bom', 'import_voice_items'];
 const AUDIT_TOOLS = [...WRITE_TOOLS, 'save_selling_analysis', 'save_project_analysis', 'create_todo', 'add_goal', 'insight_material_trend', 'quote_review', 'canonicalize_project'];
@@ -307,7 +310,8 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       '③ 数据校验：数量/单价必须是数字；缺失必填字段的条目跳过并报告；导入工具返回统计后如实汇报（新建几个器件/复用几个/跳过几个）\n' +
       '④ 用户没给目标项目/产品时先问清楚，不要擅自指定——用 ask_user 工具提问，options 必须给具体选项（问项目就先用 query_projects 拿项目列表作选项），不要空选项\n' +
       '【物料规范化】规范化是自动发生的隐线：导入 BOM/报价时新器件会自动规范成标准名（品类+规格+型号），用户无需主动操作。\n' +
-      '· 仅当用户明确要"补规范存量项目"时才调 canonicalize_project（按项目批量补录，笼统物料如支架/底座只归类不编造规格）\n' +
+      '· 仅当用户明确要"补规范存量项目"时才调 canonicalize_project（按项目批量补录，笼统物料如支架/底座只归类不编造规格）；用户说"规范化/规范一下"却没给项目时，用 ask_user 问要规范哪个项目（选项给项目列表）\n' +
+      '· 严禁把"规范化"理解成查物料行情/洞察——规范化与行情无关，不要调 query_material_insight/insight_material_trend，也不要编造物料名\n' +
       '· 这是写操作：用户没明确指定项目代号时，必须先 ask_user 让用户选择要规范哪个项目（选项给项目列表），绝不能擅自选一个项目规范化\n' +
       '【写操作安全】以下工具会修改你的数据库，执行前会弹出确认（用户确认才执行）：import_bom_to_project / import_supplier_quote / import_competitor_bom / import_voice_items。\n' +
       '· 只有用户明确要求"录入/导入/写入"时才调用写工具；查询类工具（query_* 等）绝不写库。\n' +
@@ -429,6 +433,10 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           // 行情任务软拦截：无关工具调用给提示，引导改用行情工具（用户：更新 Scaler IC 行情却查了 M270 项目）
           if (isTrendTask(userContent) && IRRELEVANT_FOR_TREND.includes(id)) {
             return { ...res, text: res.text + '\n\n[提示] 当前是行情/洞察任务，你调用了与物料行情无关的工具。请改用 query_material_insight 查历史洞察、insight_material_trend 查最新行情（需审批），不要再查项目/器件数据。' };
+          }
+          // 规范化任务软拦截（2026-08-27 用户：主动说规范化却收到"物料通用名没有洞察记录"——模型跑偏去查行情工具）
+          if (isCanonicalTask(userContent) && id !== 'canonicalize_project' && IRRELEVANT_FOR_CANONICAL.includes(id)) {
+            return { ...res, text: res.text + '\n\n[提示] 当前是"物料规范化"任务。新器件导入时会自动规范化（隐线），无需查行情/洞察。如需补规范存量项目：用户已指定项目代号则调 canonicalize_project(project_code)；没指定则先调 ask_user 让用户选择项目（选项给项目列表）。不要调用行情/洞察/项目查询类工具，也不要编造物料名参数。' };
           }
           return res;
         },
