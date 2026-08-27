@@ -262,6 +262,12 @@
 
 - **三层防护**：①写前确认——导入类写工具（import_bom_to_project/import_supplier_quote/import_competitor_bom/import_voice_items）执行前 AiPanel 渲染「⚠️ 确认写入数据库」卡片（工具名+参数摘要），用户点执行/取消才继续；取消则返回"用户取消写入，未修改任何数据" ②写后审计——所有写工具（AUDIT_TOOLS：4 导入 + save_selling_analysis/save_project_analysis/create_todo/add_goal/insight_material_trend/quote_review）执行后 logWriteAudit 写 write_audit_logs（工具/参数摘要/结果摘要/时间），设置页「AI 写入记录」卡展示最近 15 条（谁·何时·用什么·改了什么） ③提示约束——【写操作安全】只有用户明确要求录入/导入/写入才调写工具，查询类绝不写库，不要擅自写入。
 
+
+## 三·补17、结果可视化（2026-08-19 用户：体验的结果可视化很重要，重点规划）
+
+- **ToolResultView.tsx**：8 个高频查询工具结果在对话里直接渲染（不依赖模型，代码级确定，从工具参数+库数据重查渲染）：query_project_cost→环形图+模块占比表、query_project_bom→BOM 明细表、query_target_status→目标达成表(红绿)、compare_subcategory_cost→柱状图(最低绿/最高红)、query_project_module_value→ModuleValueMatrix 四象限复用+表、query_competitor_bom→竞品对比表、insight_material_trend/query_material_insight→行情结果卡(趋势/置信度/摘要)。
+- **集成**：AiPanel 步骤卡(Step.args 记录工具参数)内、detail 下方渲染 ToolResultView；v2 视觉(骨色底+等宽数字+信号色)；与文本结论并存。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。

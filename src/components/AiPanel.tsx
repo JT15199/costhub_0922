@@ -15,6 +15,9 @@ import { runThinkLoop, buildThinkSystemPrompt, parsePlanCall } from '../thinkEng
 import { detectOllama } from '../aiStatus';
 import { loadSessions, newSession, loadMessages, saveMsg, type Session } from '../aiPanelChat';
 import { getDataReadiness } from '../dataReadiness';
+import ToolResultView from './ToolResultView';
+// 支持结果可视化的工具（分析结果直接看图，不依赖模型）
+const VISUAL_TOOLS = ['query_project_cost', 'query_project_bom', 'query_target_status', 'compare_subcategory_cost', 'query_project_module_value', 'query_competitor_bom', 'insight_material_trend', 'query_material_insight'];
 import { detectSkills } from '../aiSkills';
 import { buildDataMap } from '../dataMap';
 import { verifyConclusionNumbers } from '../verifyConclusion';
@@ -35,7 +38,7 @@ const WRITE_TOOLS = ['import_bom_to_project', 'import_supplier_quote', 'import_c
 const AUDIT_TOOLS = [...WRITE_TOOLS, 'save_selling_analysis', 'save_project_analysis', 'create_todo', 'add_goal', 'insight_material_trend', 'quote_review'];
 const WRITE_TOOL_NAMES: Record<string, string> = { import_bom_to_project: 'BOM 拆解入库', import_supplier_quote: '供应商报价入库', import_competitor_bom: '竞品 BOM 入库', import_voice_items: '原声批量导入' };
 
-interface Step { kind: 'tool' | 'cloud'; name: string; ok: boolean; detail: string; }
+interface Step { kind: 'tool' | 'cloud'; name: string; ok: boolean; detail: string; args?: any; }
 interface Msg { role: 'user' | 'assistant'; content: string; reasoning?: string; steps?: Step[]; }
 
 export default function AiPanel({ activePage }: { activePage?: string }) {
@@ -423,7 +426,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
             return arr;
           }),
           onToolResult: (name, args, ok, text) => {
-            evidenceParts.push(text || ''); appendStep({ kind: 'tool', name, ok, detail: JSON.stringify(args || {}) + ' → ' + (text || '').slice(0, 150) });
+            evidenceParts.push(text || ''); appendStep({ kind: 'tool', name, ok, args: args || {}, detail: JSON.stringify(args || {}) + ' → ' + (text || '').slice(0, 150) });
             // 任务清单：完成一个工具 → 步骤进度 +1
             if (planRef.current) setPlan(p => p ? { ...p, done: Math.min(p.done + 1, p.steps.length) } : p);
           },
@@ -689,6 +692,10 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
                         <div key={si} style={{ background: '#FBFAF6', border: '1px dashed #D5D2C6', borderRadius: 7, padding: '5px 9px', fontSize: 10.5, color: '#5F5D54', lineHeight: 1.6 }}>
                           <span>{s.kind === 'tool' ? '🔧' : '🔐'}</span> <b style={{ color: '#181713' }}>{s.name}</b> {s.ok ? '' : <span style={{ color: '#C0392B' }}>失败</span>}
                           <span style={{ marginLeft: 4, color: '#9A978B' }}>{s.detail}</span>
+                          {/* 2026-08-19 结果可视化：查询类工具结果直接渲染图表/表格（不依赖模型） */}
+                          {s.kind === 'tool' && s.ok && s.args && VISUAL_TOOLS.includes(s.name) && (
+                            <ToolResultView toolId={s.name} args={s.args} />
+                          )}
                         </div>
                       ))}
                     </div>
