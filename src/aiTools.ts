@@ -61,6 +61,7 @@ export const TOOL_ICONS: Record<string, React.ComponentType> = {
   write_excel: FileExcelOutlined,
   ask_user: MessageOutlined,
   query_supplier_profile: ShopOutlined,
+  canonicalize_project: AuditOutlined,
 };
 export function toolIcon(id: string): React.ComponentType {
   return TOOL_ICONS[id] || FolderOutlined;
@@ -883,6 +884,21 @@ const tools: AiTool[] = [
       const list = (rows || []).filter((r: any) => !_a.supplier || String(r.supplier_name || '').includes(String(_a.supplier || '')));
       if (list.length === 0) return '没有供应商报价数据（先在器件库录入供应商报价）';
       return list.slice(0, 15).map((r: any) => (r.supplier_name || '') + '：覆盖 ' + r.part_count + ' 个器件，平均价 ¥' + r.avg_price + '，价格水平 ' + (r.level > 0 ? '偏高 ' + r.level + '%' : r.level < 0 ? '偏低 ' + (-r.level) + '%' : '持平') + (r.max_share > 0 ? '，最大份额 ' + r.max_share + '%' : '')).join('\n');
+    },
+  },
+  {
+    id: 'canonicalize_project',
+    name: '规范化项目物料',
+    desc: '把某项目 BOM 的全部物料用 AI 批量规范成统一标准名（品类+规格+型号，一套通用规则套所有物料；笼统物料如"支架/底座"只归类不编造规格）。结果写入器件库的 canonical 影子字段（原名/模块库不动），匹配/统计/检索将更准。参数 project_code 必填（项目代号）。',
+    params: [{ key: 'project_code', type: 'string', required: true, desc: '项目代号' }],
+    execute: async (a) => {
+      const { getProjects } = await import('./db');
+      const projs = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
+      const p = projs.find((x: any) => x.code === a.project_code);
+      if (!p) return '未找到项目代号：' + a.project_code;
+      const { canonicalizeProject } = await import('./canonicalize');
+      const st = await canonicalizeProject(p.id);
+      return '项目 ' + a.project_code + ' 物料规范化完成：共 ' + st.total + ' 条，已规范 ' + st.done + ' 条（其中笼统保留 ' + st.kept + ' 条）、失败 ' + st.failed + ' 条。结果写入器件库标准名（原名/模块库不变）。';
     },
   },
 ];

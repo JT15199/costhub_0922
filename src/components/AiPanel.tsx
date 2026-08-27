@@ -35,7 +35,7 @@ const isTrendTask = (q: string) => /行情|洞察|趋势|最新价格|物料行�
 const IRRELEVANT_FOR_TREND = ['query_project_bom', 'query_project_cost', 'query_part_suppliers', 'query_project_health', 'compare_subcategory_cost'];
 // 写操作安全（2026-08-19 用户：防止工具乱改数据库）：导入类写工具执行前需用户确认；所有写工具执行后留审计日志
 const WRITE_TOOLS = ['import_bom_to_project', 'import_supplier_quote', 'import_competitor_bom', 'import_voice_items'];
-const AUDIT_TOOLS = [...WRITE_TOOLS, 'save_selling_analysis', 'save_project_analysis', 'create_todo', 'add_goal', 'insight_material_trend', 'quote_review'];
+const AUDIT_TOOLS = [...WRITE_TOOLS, 'save_selling_analysis', 'save_project_analysis', 'create_todo', 'add_goal', 'insight_material_trend', 'quote_review', 'canonicalize_project'];
 const WRITE_TOOL_NAMES: Record<string, string> = { import_bom_to_project: 'BOM 拆解入库', import_supplier_quote: '供应商报价入库', import_competitor_bom: '竞品 BOM 入库', import_voice_items: '原声批量导入' };
 
 interface Step { kind: 'tool' | 'cloud'; name: string; ok: boolean; detail: string; args?: any; }
@@ -292,6 +292,9 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       '② 解析成结构化 JSON 数组后调对应导入工具：BOM→import_bom_to_project（自动归类模块）、供应商报价→import_supplier_quote、竞品 BOM→import_competitor_bom、原声→import_voice_items\n' +
       '③ 数据校验：数量/单价必须是数字；缺失必填字段的条目跳过并报告；导入工具返回统计后如实汇报（新建几个器件/复用几个/跳过几个）\n' +
       '④ 用户没给目标项目/产品时先问清楚，不要擅自指定——用 ask_user 工具提问并给选项，等用户选择后再继续（不要瞎猜）。\n' +
+      '【物料规范化】用户嫌物料名不规范（供应商写法不一）时：\n' +
+      '· 调 canonicalize_project 按项目批量规范化（一套通用规则套所有物料：品类+规格+型号；笼统物料如支架/底座只归类不编造规格）\n' +
+      '· 结果写入器件库标准名字段，原名/模块库不动；规范后可更准匹配与统计\n' +
       '【写操作安全】以下工具会修改你的数据库，执行前会弹出确认（用户确认才执行）：import_bom_to_project / import_supplier_quote / import_competitor_bom / import_voice_items。\n' +
       '· 只有用户明确要求"录入/导入/写入"时才调用写工具；查询类工具（query_* 等）绝不写库。\n' +
       '· 不要为了完成任务擅自写入；用户取消写入时如实告知未修改任何数据。\n' +

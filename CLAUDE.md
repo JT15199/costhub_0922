@@ -276,6 +276,14 @@
 - **会话可搜索**：aiPanelChat.searchSessions（按消息内容/标题 LIKE）；AiPanel 历史会话下拉加「🔍 搜索历史会话」→ Modal 输入关键词回车 → 结果列表点击切换。
 - **AI 写入可回滚**：write_audit_logs 加 undo_json 列；写工具内部收集插入 id（window.__costhub_undo：4 导入 + save_selling_analysis/save_project_analysis）→ AiPanel 审计时写入；undoWriteAudit(id) 按 undo_json DELETE；设置页「AI 写入记录」每条加「撤销」按钮（已撤销绿标）。
 
+
+## 三·补19、物料规范化（canonicalize，2026-08-19 用户：一套通用规则套所有物料，导入+存量按项目规范）
+
+- **canonicalize.ts**：AI 批量物料规范化——统一模板（品类|主规格|次规格|型号）+ 标准品类词表（14 类）+ 通用单位规则（K/M/u/n 等，不按品类）；**内容判定交给 AI**（不写品类解析器）；**笼统物料**（支架/底座）只归类不编造规格；健壮解析（JSON 数组/前缀包裹/截断逐对象抠出）；+5 测试。
+- **存量按项目规范化**：canonicalize_project（第 37 个工具）——取项目 BOM 物料分批（20/批）调本地模型 → 写回 parts canonical_name/canonical_category/canonical_specs/canonical_updated_at（**影子字段：原名/模块库/关联不动**，ALTER 幂等兜底）；统计 已规范/笼统保留/失败。
+- **安全**：规范化不改 parts.name 与 modules/project_boms.module_name（模块库分类原封不动）；笼统物料不编造规格；canonicalize_project 记审计。
+- **收益**：规范后匹配/去重/统计/检索走 canonical 更准（后续接入 import 去重与供应商匹配）。
+
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。
