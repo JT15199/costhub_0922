@@ -270,6 +270,12 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     } catch {
       if (!modelInfo.ready) { message.warning('本地模型未连接（设置 → 连接设置 → 配置 Ollama 模型并启动）'); return; }
     }
+    // 规范化任务确定性接管（2026-08-27：1B 模型两次跑偏仍不走正道——规范化由前端代码级驱动，不再依赖模型选工具）
+    if (isCanonicalTask(userContent) && attachments.length === 0) {
+      const codeMatch = userContent.match(/[A-Za-z]{1,4}\s?[-_]?\d{2,}/);
+      await runCanonicalDirect(codeMatch ? codeMatch[0].trim() : '', userContent);
+      return;
+    }
     let sid = sessionId;
     if (!sid) { sid = await newSession((userContent || '附件').slice(0, 20)); setSessionId(sid); setSessions(await loadSessions()); }
     const currentSid = sid;
@@ -596,6 +602,64 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     };
     input.click();
   };
+
+  // ===== 规范化任务确定性兜底（2026-08-27：1B 模型两次跑偏仍不走正道——代码级驱动：选项目→执行→审计，模型无需找工具） =====
+  const runCanonicalDirect = async (preCode: string, userContent: string) => {
+    setStreaming(true); setDialogActive(true);
+    setPlan(null);
+    let sid = sessionId;
+    if (!sid) { sid = await newSession((userContent || '规范化').slice(0, 20)); setSessionId(sid); setSessions(await loadSessions()); }
+    const csid = sid;
+    setMessages(prev => [...prev, { role: 'user', content: userContent }]);
+    try { await saveMsg(csid, 'user', userContent); } catch { }
+    try {
+      let code = (preCode || '').trim();
+      if (!code) {
+        // 无项目代号：代码级弹项目选择（不依赖模型 ask_user——模型常漏选项/跑偏）
+        const { getProjects } = await import('../db');
+        const projs = (await getProjects('', '', '')).filter((x: any) => !x.is_deleted);
+        const options = projs.map((x: any) => String(x.code || x.name || '')).filter(Boolean).slice(0, 12);
+        setAskInput('');
+        const answer = await new Promise<string>(resolve => {
+          askResolveRef.current = resolve;
+          setPendingAsk({ question: '要规范哪个项目的物料？', options: options.length ? options : ['暂无项目（先去项目管理页创建）'] });
+        });
+        askResolveRef.current = null;
+        if (!answer || answer.indexOf('（用户选择跳过') === 0) {
+          setMessages(prev => [...prev, { role: 'assistant', content: '已取消规范化（用户未选择项目）。', reasoning: '', steps: [] }]);
+          return;
+        }
+        code = answer.trim();
+      }
+      setMessages(prev => [...prev, { role: 'assistant', content: '', reasoning: '', steps: [] }]);
+      followRef.current = true;
+      const { getProjects, logWriteAudit } = await import('../db');
+      const projs = (await getProjects('', '', '')).filter((x: any) => !x.is_deleted);
+      const p = projs.find((x: any) => String(x.code || '') === code);
+      if (!p) {
+        setMessages(prev => { const arr = [...prev]; const last = arr[arr.length - 1]; if (last && last.role === 'assistant') arr[arr.length - 1] = { ...last, content: '未找到项目：' + code + '（可在项目管理页确认代号）' }; return arr; });
+        return;
+      }
+      const { canonicalizeProject } = await import('../canonicalize');
+      const st = await canonicalizeProject(p.id);
+      let text = '✅ 项目 ' + code + ' 物料规范化完成：共 ' + st.total + ' 条，已规范 ' + st.done + ' 条（其中笼统保留 ' + st.kept + ' 条）、失败 ' + st.failed + ' 条。结果写入器件库标准名（原名/模块库不变）。';
+      if (st.errors && st.errors.length) text += '\n失败原因：' + st.errors.join('；') + '（可检查 Ollama 后重试，已规范的不会重复处理）';
+      // 审计（与工具调用路径一致：undo_json 取 canonicalizeProject 收集的 __restore_parts）
+      try {
+        let undoJson = '';
+        try { const W = window as any; const u = W.__costhub_undo; if (u && u.toolId === 'canonicalize_project') { undoJson = JSON.stringify(u.inserts || {}); W.__costhub_undo = null; } } catch { }
+        await logWriteAudit('canonicalize_project', JSON.stringify({ project_code: code }), text.slice(0, 500), undoJson);
+      } catch { }
+      setMessages(prev => { const arr = [...prev]; const last = arr[arr.length - 1]; if (last && last.role === 'assistant') arr[arr.length - 1] = { ...last, content: text }; return arr; });
+      try { window.dispatchEvent(new CustomEvent('costhub-project-bom-updated')); } catch { }
+      try { await saveMsg(csid, 'assistant', text); } catch { }
+    } catch (e: any) {
+      const err = '规范化失败：' + String(e?.message || e).slice(0, 300);
+      setMessages(prev => { const arr = [...prev]; const last = arr[arr.length - 1]; if (last && last.role === 'assistant' && !last.content) arr[arr.length - 1] = { ...last, content: err }; return arr; });
+    } finally { setStreaming(false); setDialogActive(false); }
+  };
+  const runCanonicalDirectRef = useRef<((c: string, u: string) => void) | null>(null);
+  useEffect(() => { runCanonicalDirectRef.current = runCanonicalDirect; });
 
   // ===== 审批确认后直接云端查询+写库（2026-08-19：不依赖 9B 模型重新调工具——确认即真正更新洞察） =====
   const runCloudDirect = async (material: string, category: string) => {
