@@ -38,6 +38,14 @@ const isCanonicalTask = (q: string) => /规范化|规范一下|标准名|统一�
 const IRRELEVANT_FOR_CANONICAL = ['query_material_insight', 'insight_material_trend', 'query_project_bom', 'query_project_cost', 'query_part_suppliers', 'query_project_health', 'compare_subcategory_cost', 'query_competitor_bom', 'query_supplier_profile', 'query_price_insights', 'query_voice_dims'];
 // 对话进行中标记（2026-08-27：App 后台引擎据此让路——Ollama 单实例串行，对话优先）
 const setDialogActive = (active: boolean) => { try { (window as any).__costhub_ai_dialog = active; } catch { } };
+// 原声附件产品名提取（2026-08-28：提问中「XX的评论/原声」→ 附件名去前后缀兜底）
+const extractVoiceProduct = (question: string, fileName: string): string => {
+  const q = question || '';
+  const m = q.match(/([\u4e00-\u9fa5A-Za-z0-9][\u4e00-\u9fa5A-Za-z0-9 .\-]{1,30}?)(?:的(?:评论|评价|原声|源声)|评论|评价|原声|源声)/);
+  if (m) return m[1].trim();
+  const n = (fileName || '').replace(/\.(xlsx|xls|csv|txt)$/i, '').replace(/_?(?:京东评论|淘宝评论|评论|评价|原声|用户原声|源声|抓取)_?/g, '').replace(/^_+|_+$/g, '').trim();
+  return n || 'AI导入';
+};
 // 写操作安全（2026-08-19 用户：防止工具乱改数据库）：导入类写工具执行前需用户确认；所有写工具执行后留审计日志
 const WRITE_TOOLS = ['import_bom_to_project', 'import_supplier_quote', 'import_competitor_bom', 'import_voice_items'];
 const AUDIT_TOOLS = [...WRITE_TOOLS, 'save_selling_analysis', 'save_project_analysis', 'create_todo', 'add_goal', 'insight_material_trend', 'quote_review', 'canonicalize_project'];
@@ -242,6 +250,29 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         }).join('\n');
         userContent += (text ? '\n\n' : '') + summary + (text ? '' : '\n\n请按上述引导处理该附件。');
       }
+      // 2026-08-28 原声附件代码级导入（用户：让 AI 分析源声，模型却绕去 read_excel 弹文件框再让导入——数据已就绪，前端直接导入，模型只分析）
+      let voiceAuto = '';
+      try {
+        const W = window as any;
+        const voiceAtt = excelParts.filter((a: any) => a.type === 'voice');
+        if (voiceAtt.length) {
+          const attData = (W.__costhub_attachment_data || []).find((x: any) => x.name === voiceAtt[0].name);
+          if (attData && attData.rows && attData.rows.length > 1) {
+            const { importVoiceItems } = await import('../db/dataImport');
+            const rows = attData.rows;
+            const header = rows[0] || [];
+            let ci = -1;
+            header.forEach((h: any, i: number) => { const s = String(h || '').trim(); if (/评价|评论|反馈|内容|意见|点评|口碑|content|text/i.test(s)) ci = i; });
+            const contents = rows.slice(1).map((r: any) => String(ci >= 0 ? r[ci] : r[0] || '')).map((s: string) => s.trim()).filter(Boolean);
+            if (contents.length) {
+              const product = extractVoiceProduct(text, voiceAtt[0].name);
+              const st = await importVoiceItems(product, contents);
+              voiceAuto = '【已自动导入原声】产品「' + product + '」：共 ' + st.total + ' 条，新增 ' + st.added + ' 条，跳过重复 ' + st.dup + ' 条。数据已就绪，请直接基于原声分析用户最在意的维度/卖点（可调 query_voice_dims 查看维度），不要再调导入/读取类工具。\n\n';
+            }
+          }
+        }
+      } catch (e) { console.warn('voice auto import failed', e); }
+      if (voiceAuto) userContent = voiceAuto + userContent;
       const imgParts = attachments.filter(a => a.kind === 'image');
       if (imgParts.length) {
         const imgSummary = imgParts.map(a => {
@@ -393,6 +424,12 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
               setPendingAsk({ question, options });
             });
             return { ok: true, text: '用户选择了：' + answer };
+          }
+          // 2026-08-28 read_excel 拦截：已有附件数据就绪时禁止弹文件框（1B 模型常绕去 read_excel 造成"又让我导入"）
+          if (id === 'read_excel') {
+            try { const W = window as any; if (W.__costhub_attachment_data && W.__costhub_attachment_data.length) {
+              return { ok: true, text: '[提示] 附件数据已就绪（' + W.__costhub_attachment_data.length + ' 个），无需 read_excel（会弹文件选择框导致重复导入）。请直接调用对应 import_* 工具（import_voice_items / import_bom_to_project / import_supplier_quote / import_competitor_bom）或基于已就绪数据直接分析。' };
+            } } catch { }
           }
           // 写操作保护：canonicalize_project 会修改器件库，必须在用户明确指定项目代号后才能执行（用户没指定→先 ask_user 让用户选，不要擅自选项目写库——2026-08-27 用户实测：没指定项目被规范了 M270）
           if (id === 'canonicalize_project') {
