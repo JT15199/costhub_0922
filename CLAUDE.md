@@ -302,7 +302,7 @@
 - **纯函数 targetAllocation.ts（+5 测试）**：computeModuleCosts（BOM 按模块聚合，支持 field 参数）/ buildTargetAllocation —— 老特性模块按**价值密度（声量÷成本占比）**分配目标（客观不主观打分），模块内老特性按声量占比分摊，新特性预算扣除后并入所属模块，取整差额并入最大模块保证 Σ=目标（对账归零）。
 - **UI TargetAllocationPanel**（项目页目标区，mockup design-mockup/costhub-target-allocation.html 落地第一版）：选参考上一代项目 + 目标总成本 → 生成分配建议表（领域行可编辑目标 + 特性行：声量/上一代成本/依据）→ 对账实时（Σ vs 目标差额）→ 保存为领域目标（project_targets，覆盖同名领域，驾驶舱目标达成按新分配跟踪）。
 - **数据链路**：参考项目 BOM（main_category 聚合）+ selling_points（positive+negative=0 → isNew）+ selling_point_modules（特性↔模块映射）→ allocateModuleCosts（声量加权分摊）→ 价值密度分配。
-- 视图切换（领域/关注度）、AI 工具 generate_target_allocation、特性级可编辑 → 后续迭代。
+- **做到位（2026-08-28 用户：直接做到位）**：①特性级可编辑（InputNumber，新特性金边「你定」）②视图切换（按领域归集=领域列 rowSpan 合并+小计行 / 按关注度=声量降序平铺+新特性置底）③分配明细持久化（project_target_features 表 + get/saveTargetFeatures，重开可恢复新特性预算与手动调整）④领域目标=Σ特性实时对账 ⑤保存=saveTargetFeatures(特性级)+saveTarget(领域级=Σ特性) ⑥行样式 ta-sub-row/ta-feat-row。AI 工具 generate_target_allocation 仍留后续。
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。

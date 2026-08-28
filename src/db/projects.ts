@@ -682,6 +682,31 @@ export async function saveTarget(data: any) {
 
 export async function deleteTarget(id: number) { await (await getDb()).execute('DELETE FROM project_targets WHERE id = ?', [id]); }
 
+// ===== 目标成本分配明细（2026-08-28 用户：目标制定直接做到位——特性级分配持久化，重开不丢） =====
+let targetFeatureEnsured = false;
+async function ensureTargetFeatureTable() {
+  if (targetFeatureEnsured) return;
+  try {
+    await (await getDb()).execute("CREATE TABLE IF NOT EXISTS project_target_features (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, domain TEXT DEFAULT '', feature_name TEXT DEFAULT '', is_new INTEGER DEFAULT 0, voice INTEGER DEFAULT 0, prev_cost REAL DEFAULT 0, target_cost REAL DEFAULT 0, sort_order INTEGER DEFAULT 0)");
+    targetFeatureEnsured = true;
+  } catch { }
+}
+export async function getTargetFeatures(projectId: number) {
+  try { await ensureTargetFeatureTable(); return (await getDb()).select<any[]>('SELECT * FROM project_target_features WHERE project_id = ? ORDER BY sort_order, id', [projectId]); } catch { return []; }
+}
+export async function saveTargetFeatures(projectId: number, features: { domain: string; feature_name: string; is_new?: number; voice?: number; prev_cost?: number; target_cost: number; sort_order?: number }[]) {
+  try {
+    await ensureTargetFeatureTable();
+    const d = await getDb();
+    await d.execute('DELETE FROM project_target_features WHERE project_id = ?', [projectId]);
+    for (const f of features || []) {
+      await d.execute('INSERT INTO project_target_features (project_id, domain, feature_name, is_new, voice, prev_cost, target_cost, sort_order) VALUES (?,?,?,?,?,?,?,?)',
+        [projectId, f.domain, f.feature_name, f.is_new ? 1 : 0, f.voice || 0, f.prev_cost || 0, f.target_cost || 0, f.sort_order || 0]);
+    }
+    return true;
+  } catch { return false; }
+}
+
 
 
 // ==================== 整机供应商（ODM） ====================
