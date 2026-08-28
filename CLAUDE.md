@@ -296,6 +296,13 @@
 
 - **现状回答**：①指定任务的状态 = AI 协作窗内轨迹卡链（📤发送→🔧工具(参数+结果)→🔐云端→📌结论）+ 流式输出（思考中/已 X 字）+ [PLAN] 计划清单 + 停止按钮；后台自主分析状态 = 驾驶舱 AutoThinkPanel 实时区 + costhub-ai-task 顶部任务气泡 + AI 情报 badge ②**不能真正并行跑多个模型**：Ollama 单实例，同模型请求排队串行、异模型切换加载（慢）——后台引擎与对话同时调模型会互相排队。
 - **对话优先让路（本交付）**：Ollama 串行导致后台引擎抢模型会拖慢用户对话 → App.tsx 加模块级 dialogActive()（读 window.__costhub_ai_dialog）；四个后台引擎（compare 报价识别/advisor 自主巡检/insight 关键物料洞察/think 自主分析）调度开头若用户正在 AI 窗对话 → **本轮静默跳过**（下轮 60s 自动续，不丢任务不打扰）；AiPanel 在 streaming 开始/结束（send + runCloudDirect 共 4 处）维护 __costhub_ai_dialog 标记。
+## 三·补21、新项目目标成本制定（2026-08-27 用户：整体目标外部输入，按上一代特性价值+价值工程分配到领域/特性）
+
+- **口径**：整体目标成本用户外部算好手输（不做售价反推计算器）；领域 = BOM main_category 分组（用户领域词：大结构/大硬件/多媒体/包装/互连等，即 BOM 导入时的区分）；特性 = 卖点（声量）；新特性 = 无声量卖点（预算手输并入领域，不参与声量排序）。
+- **纯函数 targetAllocation.ts（+5 测试）**：computeModuleCosts（BOM 按模块聚合，支持 field 参数）/ buildTargetAllocation —— 老特性模块按**价值密度（声量÷成本占比）**分配目标（客观不主观打分），模块内老特性按声量占比分摊，新特性预算扣除后并入所属模块，取整差额并入最大模块保证 Σ=目标（对账归零）。
+- **UI TargetAllocationPanel**（项目页目标区，mockup design-mockup/costhub-target-allocation.html 落地第一版）：选参考上一代项目 + 目标总成本 → 生成分配建议表（领域行可编辑目标 + 特性行：声量/上一代成本/依据）→ 对账实时（Σ vs 目标差额）→ 保存为领域目标（project_targets，覆盖同名领域，驾驶舱目标达成按新分配跟踪）。
+- **数据链路**：参考项目 BOM（main_category 聚合）+ selling_points（positive+negative=0 → isNew）+ selling_point_modules（特性↔模块映射）→ allocateModuleCosts（声量加权分摊）→ 价值密度分配。
+- 视图切换（领域/关注度）、AI 工具 generate_target_allocation、特性级可编辑 → 后续迭代。
 ## 六、工作流约定
 
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。

@@ -22,6 +22,7 @@ function appendProjectCode(existing: string | undefined, code: string): string {
 }
 
 import DataTable, { ColumnSettingsButton } from '../components/DataTable';
+import TargetAllocationPanel from '../components/TargetAllocationPanel';
 import { chartTooltip, chartAxisStyle, chartTextMuted, chartSplitLine, barGradient } from '../chartTheme';
 import { runAiIdentifyOnce, buildRuleGroups, moduleFingerprint, partKey, buildInsights } from '../autoCompare';
 import { getAdvisorInsights, updateAdvisorStatus } from '../db/advisor';
@@ -1644,6 +1645,7 @@ export default function Projects() {
                       <Col span={12}><div className="content-card" style={{ margin: 0, padding: 12 }}><div className="card-header"><h3>模块成本分布</h3></div><ReactECharts echarts={echarts} option={modBarOption} style={{ height: 280, maxHeight: 400 }} /></div></Col>
                       <Col span={12}><div className="content-card" style={{ margin: 0, padding: 12 }}><div className="card-header"><h3>领域成本 vs 目标</h3></div><ReactECharts echarts={echarts} option={domainBarOption} style={{ height: 280 }} /></div></Col>
                     </Row>
+                    <TargetAllocationPanel projectId={selectedPid!} />
                     {/* Target setting table */}
                     <div className="content-card" style={{ margin: 0, padding: 12 }}>
                       <div className="card-header"><h3>领域成本目标设定</h3><Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { setEditTarget(null); targetForm.resetFields(); setTargetModal(true); }}>设定目标</Button></div>
