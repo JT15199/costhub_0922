@@ -25,15 +25,18 @@ describe('buildTargetAllocation', () => {
   ];
   const spModules = { 1: ['大结构'], 2: ['多媒体'] };
 
-  it('老特性按声量分配，Σ = 目标总成本（对账归零）', () => {
+  it('基线(上一代成本占比)+有界调整：声量占比超成本占比的领域加投、低于的降本，Σ=目标（对账归零）', () => {
     const r = buildTargetAllocation({ targetTotal: 400, moduleCosts, sps, spModules });
     expect(r.allocatedSum).toBe(400);
     expect(r.diff).toBe(0);
-    // 价值密度 = 声量 ÷ 成本占比：大结构(800/0.25=3200) > 多媒体(1000/0.75=1333) → 大结构分得多（声量少但成本占比低=密度高，加投）
+    // 大结构：成本占比 25%、声量占比 44% → 加投（钳制上限 1.3×100=130）
     const struc = r.domains.find(d => d.name === '大结构')!;
+    // 多媒体：成本占比 75%、声量占比 56% → 降本（钳制下限 0.8×300=240）
     const multi = r.domains.find(d => d.name === '多媒体')!;
-    expect(struc.targetCost).toBeGreaterThan(multi.targetCost);
-    expect(struc.density).toBeGreaterThan(multi.density);
+    expect(struc.targetCost).toBeGreaterThan(100);
+    expect(struc.targetCost).toBeLessThanOrEqual(132); // 归一化后允许 ±2 取整
+    expect(multi.targetCost).toBeGreaterThanOrEqual(238); // 归一化后允许 ±2 取整
+    expect(multi.targetCost).toBeLessThan(300);
     // 特性级：声量占比
     const f = multi.features.find(f => f.name === '高刷')!;
     expect(f.voice).toBe(1000);
@@ -57,11 +60,16 @@ describe('buildTargetAllocation', () => {
     expect(r.diff).toBe(0);
   });
 
-  it('全无声量（无卖点数据）→ 按模块均分兜底，Σ 仍对账', () => {
+  it('全无声量（无卖点数据）→ 按上一代成本占比分配（符合基本规律），Σ 仍对账', () => {
     const r = buildTargetAllocation({ targetTotal: 200, moduleCosts: { A: 10, B: 20 }, sps: [], spModules: {} });
     expect(r.allocatedSum).toBe(200);
     expect(r.diff).toBe(0);
     expect(r.domains.length).toBe(2);
+    const a = r.domains.find(d => d.name === 'A')!;
+    const b = r.domains.find(d => d.name === 'B')!;
+    // A:B = 10:20 → 目标 66.7 : 133.3
+    expect(Math.round(a.targetCost)).toBe(67);
+    expect(Math.round(b.targetCost)).toBe(133);
   });
 
   it('空模块成本 → 空结果不报错', () => {

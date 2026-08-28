@@ -302,6 +302,7 @@
 - **纯函数 targetAllocation.ts（+5 测试）**：computeModuleCosts（BOM 按模块聚合，支持 field 参数）/ buildTargetAllocation —— 老特性模块按**价值密度（声量÷成本占比）**分配目标（客观不主观打分），模块内老特性按声量占比分摊，新特性预算扣除后并入所属模块，取整差额并入最大模块保证 Σ=目标（对账归零）。
 - **UI TargetAllocationPanel**（项目页目标区，mockup design-mockup/costhub-target-allocation.html 落地第一版）：选参考上一代项目 + 目标总成本 → 生成分配建议表（领域行可编辑目标 + 特性行：声量/上一代成本/依据）→ 对账实时（Σ vs 目标差额）→ 保存为领域目标（project_targets，覆盖同名领域，驾驶舱目标达成按新分配跟踪）。
 - **数据链路**：参考项目 BOM（main_category 聚合）+ selling_points（positive+negative=0 → isNew）+ selling_point_modules（特性↔模块映射）→ allocateModuleCosts（声量加权分摊）→ 价值密度分配。
+- **分配口径修正（2026-08-28 用户：为什么声量大的成本目标反而低？——纯密度(声量÷成本占比)重新分配惩罚大头、无视成本刚性）**：改为**基线+有界调整**——基线=上一代成本占比（等比缩放，守住品类基本规律），因子=声量占比÷成本占比（>1 加投 / <1 降本），目标占比=基线×(1+(因子-1)×ALPHA=0.4)，钳制 [基线×0.8, 基线×1.3]（不砍穿物料刚需/不过度加码），归一化 Σ=目标。无声量领域因子 0 → 钳制保底 80%。测试更新（加投/降本/全无声量按成本占比）。
 - **做到位（2026-08-28 用户：直接做到位）**：①特性级可编辑（InputNumber，新特性金边「你定」）②视图切换（按领域归集=领域列 rowSpan 合并+小计行 / 按关注度=声量降序平铺+新特性置底）③分配明细持久化（project_target_features 表 + get/saveTargetFeatures，重开可恢复新特性预算与手动调整）④领域目标=Σ特性实时对账 ⑤保存=saveTargetFeatures(特性级)+saveTarget(领域级=Σ特性) ⑥行样式 ta-sub-row/ta-feat-row。AI 工具 generate_target_allocation 仍留后续。
 ## 六、工作流约定
 

@@ -60,7 +60,7 @@ export function buildTargetAllocation(input: {
   }
   const autoTotal = Math.max(0, targetTotal - newTotal);
 
-  // 价值密度：声量 ÷ 成本占比
+  // 价值密度（显示用）：声量 ÷ 成本占比
   const densityMap: Record<string, number> = {};
   for (const m of Object.keys(moduleCosts)) {
     const cost = moduleCosts[m] || 0;
@@ -68,12 +68,26 @@ export function buildTargetAllocation(input: {
     const ratio = totalPrev > 0 ? cost / totalPrev : 0;
     densityMap[m] = ratio > 0 ? voice / ratio : 0;
   }
-  const densitySum = Object.values(densityMap).reduce((s, v) => s + v, 0);
 
-  // 领域目标（先按价值密度给整数，差额并入最大模块）
+  // 2026-08-28 分配口径（用户：结合上一代、符合基本的大概规律——价值密度只做温和修正，不颠覆上一代结构）：
+  // 基线 = 上一代成本占比（等比缩放到目标总成本）；因子 = 声量占比 ÷ 成本占比（>1 关注度超成本规模→加投，<1→降）；
+  // 目标占比 = 基线 × (1 + (因子-1)×ALPHA)，钳制 [基线×LOW, 基线×HIGH]，归一化保证 Σ=1。
+  const ALPHA = 0.4; // 调整强度（温和）
+  const LOW = 0.8, HIGH = 1.3; // 上下限钳制（不砍穿物料刚需 / 不过度加码）
+  const voiceTotal = Object.values(modVoice).reduce((s, v) => s + v, 0);
+  const shares: Record<string, number> = {};
+  for (const m of Object.keys(moduleCosts)) {
+    const base = totalPrev > 0 ? (moduleCosts[m] || 0) / totalPrev : 0;
+    const voiceRatio = voiceTotal > 0 ? (modVoice[m] || 0) / voiceTotal : 0;
+    const factor = base > 0 ? voiceRatio / base : 0; // 无声量 → 0（该降），但钳制保底
+    let share = base * (1 + (factor - 1) * ALPHA);
+    if (base > 0) share = Math.min(Math.max(share, base * LOW), base * HIGH);
+    shares[m] = Math.max(0, share);
+  }
+  const shareSum = Object.values(shares).reduce((s, v) => s + v, 0);
   const rawTarget: Record<string, number> = {};
   for (const m of Object.keys(moduleCosts)) {
-    const share = densitySum > 0 ? (densityMap[m] / densitySum) : (Object.keys(moduleCosts).length ? 1 / Object.keys(moduleCosts).length : 0);
+    const share = shareSum > 0 ? shares[m] / shareSum : (Object.keys(moduleCosts).length ? 1 / Object.keys(moduleCosts).length : 0);
     rawTarget[m] = Math.floor(autoTotal * share * 100) / 100;
   }
   let used = Object.values(rawTarget).reduce((s, v) => s + v, 0);
