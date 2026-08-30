@@ -101,7 +101,7 @@ export function ColumnSettingsButton(props: { tableId: string; columns: any[]; l
   const [setting, setSetting] = useState<{ widths: Record<string, number>; hidden: Record<string, boolean> }>(() => loadSetting(tableId));
   const [popOpen, setPopOpen] = useState(false);
 
-  const colKey = (c: any) => String(c.key ?? c.dataIndex ?? c.title ?? Math.random());
+  const colKey = (c: any) => String(c.key ?? c.dataIndex ?? c.title ?? `column-${columns.indexOf(c)}`);
 
   const save = (next: any) => {
     setSetting(next);

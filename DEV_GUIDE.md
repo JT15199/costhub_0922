@@ -177,7 +177,7 @@ export const PALETTES = [
 
 ### 1. Excel 导入安全
 
-xlsx 库已更新至 0.20.2，修复了安全漏洞。避免导入恶意 Excel 文件。
+xlsx 库已更新至 SheetJS 官方分发 0.20.3，修复了已知安全漏洞。仍应避免导入来源不明的 Excel 文件。
 
 ### 2. 数据备份
 

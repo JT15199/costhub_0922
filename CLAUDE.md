@@ -297,6 +297,14 @@
 - **现状回答**：①指定任务的状态 = AI 协作窗内轨迹卡链（📤发送→🔧工具(参数+结果)→🔐云端→📌结论）+ 流式输出（思考中/已 X 字）+ [PLAN] 计划清单 + 停止按钮；后台自主分析状态 = 驾驶舱 AutoThinkPanel 实时区 + costhub-ai-task 顶部任务气泡 + AI 情报 badge ②**不能真正并行跑多个模型**：Ollama 单实例，同模型请求排队串行、异模型切换加载（慢）——后台引擎与对话同时调模型会互相排队。
 - **对话优先让路（本交付）**：Ollama 串行导致后台引擎抢模型会拖慢用户对话 → App.tsx 加模块级 dialogActive()（读 window.__costhub_ai_dialog）；四个后台引擎（compare 报价识别/advisor 自主巡检/insight 关键物料洞察/think 自主分析）调度开头若用户正在 AI 窗对话 → **本轮静默跳过**（下轮 60s 自动续，不丢任务不打扰）；AiPanel 在 streaming 开始/结束（send + runCloudDirect 共 4 处）维护 __costhub_ai_dialog 标记。
 ## 三·补22、原声附件代码级导入 + read_excel 拦截（2026-08-28 用户：分析源声却收到 read_excel 弹文件框）——voice 附件前端直接导入（提取评论列→importVoiceItems，产品名从提问/附件名提取）→ userContent 前置已导入说明让模型直接分析；executeTool 前置拦截 read_excel（有附件数据时提示勿弹文件框）；voice guide 文案改「已自动导入」。
+
+## 三·补23、安全与备份基线（2026-08-30 代码体检）
+
+- **认证存储**：密码只存带随机盐的 PBKDF2-SHA256（210,000 次）记录，禁止保存/展示明文密码；旧版 SHA-256 记录在用户首次验证成功后原密码无感迁移，启动时清理遗留 `auth_password_plain`。
+- **一致性备份**：运行中禁止直接分别复制 `costhub.db` 与 WAL；设置页必须用当前 SQLite 连接执行 `VACUUM INTO` 生成单文件一致性快照。恢复前关闭前端数据库连接；旧版 `.db + .db-wal` 备份仍兼容恢复。
+- **依赖安全**：Excel 读写使用 SheetJS 官方分发 `xlsx@0.20.3`（npm registry 的 0.18.5 已停止更新）；未使用的依赖应及时移除。`pptxgenjs` 的浏览器构建不加载其 Node-only `image-size` 依赖，npm audit 仍会报告该传递依赖，升级前需验证 PPTX 兼容性，禁止盲目 `audit fix --force` 降级主库。
+- **Tauri CSP**：生产配置不得为 `null`；只允许本地资源、Tauri IPC、data/blob 图片与本地/blob worker。新增外部资源必须先评估并最小化放行。
+- **Lint 基线**：忽略 Rust 构建产物；动态数据库/AI 行结构暂允许 `any`，React Hook 规则、渲染纯度等结构性问题保持 error，其余遗留债务以 warning 逐步收敛。
 ## 三·补21、新项目目标成本制定（2026-08-27 用户：整体目标外部输入，按上一代特性价值+价值工程分配到领域/特性）
 
 - **口径**：整体目标成本用户外部算好手输（不做售价反推计算器）；领域 = BOM main_category 分组（用户领域词：大结构/大硬件/多媒体/包装/互连等，即 BOM 导入时的区分）；特性 = 卖点（声量）；新特性 = 无声量卖点（预算手输并入领域，不参与声量排序）。

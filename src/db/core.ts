@@ -47,6 +47,17 @@ export function isDataLocked(): boolean { return dataLocked; }
 
 export function setDataLocked(locked: boolean) { dataLocked = locked; }
 
+// 数据库恢复前关闭两个连接；恢复完成后页面会重载，失败时也可按需重新连接。
+async function closeDbConnections(): Promise<void> {
+  const main = db;
+  const raw = rawDb;
+  db = null;
+  rawDb = null;
+  schemaReady = false;
+  try { await main?.close(); } catch { }
+  try { await raw?.close(); } catch { }
+}
+
 
 
 async function sha256(text: string): Promise<string> {
@@ -583,4 +594,4 @@ function localNow(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-export { getDb, getRawDb, sha256, localNow, dataLocked, AUTH_KEY, AUTH_PLAIN_KEY, AUTH_CHANGED_KEY, AUTH_USERNAME_KEY, DEFAULT_PASSWORD, DEFAULT_USERNAME };
+export { getDb, getRawDb, closeDbConnections, sha256, localNow, dataLocked, AUTH_KEY, AUTH_PLAIN_KEY, AUTH_CHANGED_KEY, AUTH_USERNAME_KEY, DEFAULT_PASSWORD, DEFAULT_USERNAME };

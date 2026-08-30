@@ -3,7 +3,6 @@
 // 引擎：thinkEngine.runThinkLoop（多轮工具循环 + 轨迹事件）；轨迹=执行记录卡（🔧 工具 / 🔐 云端）
 import { useEffect, useRef, useState } from 'react';
 import { Button, Dropdown, Tooltip, message, Select, Switch, Modal, Input } from 'antd';
-import * as XLSX from 'xlsx';
 import {
   PlusOutlined, HistoryOutlined, SendOutlined,
   RightOutlined, LeftOutlined, QuestionCircleOutlined, ReloadOutlined, StopOutlined,
@@ -59,7 +58,8 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('ai-panel-collapsed') === '1');
   const [width, setWidth] = useState(() => { const s = Number(localStorage.getItem('ai-panel-width')); return s >= 300 && s <= 560 ? s : 384; });
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
-  const widthRef = useRef(width); widthRef.current = width;
+  const widthRef = useRef(width);
+  useEffect(() => { widthRef.current = width; }, [width]);
   useEffect(() => {
     const mv = (e: MouseEvent) => {
       if (dragRef.current) {
@@ -596,6 +596,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         const ext = (file.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
         // 表格类（xlsx/xls/csv）：解析成二维数组 → 识别类型存全局
         if (['.xlsx', '.xls', '.csv'].includes(ext)) {
+          const XLSX = await import('xlsx');
           let rows: any[][];
           if (ext === '.csv') {
             const text = await file.text();

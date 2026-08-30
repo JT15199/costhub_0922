@@ -339,12 +339,20 @@ export default function Settings({embedded }: { embedded?: boolean }) {
   };
   const handleBackup = async () => {
     setBackingUp(true);
+    let target: { name: string; path: string } | null = null;
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      const name = await invoke<string>('backup_database');
-      message.success(`备份成功：${name}`);
+      const { getDb } = await import('../db');
+      target = await invoke<{ name: string; path: string }>('create_backup_target');
+      // VACUUM INTO 由当前 SQLite 连接生成单文件一致性快照，包含尚在 WAL 中的已提交数据。
+      await (await getDb()).execute('VACUUM INTO ?', [target.path]);
+      message.success(`备份成功：${target.name}`);
       loadBackups();
     } catch (e: any) {
+      if (target?.name) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('delete_backup', { backupName: target.name }).catch(() => undefined);
+      }
       message.error('备份失败: ' + (e?.message || '未知错误'));
     } finally {
       setBackingUp(false);
@@ -353,6 +361,8 @@ export default function Settings({embedded }: { embedded?: boolean }) {
   const handleRestore = async (name: string) => {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
+      const { closeDbConnections } = await import('../db');
+      await closeDbConnections();
       const msg = await invoke<string>('restore_database', { backupName: name });
       message.success(msg);
       setTimeout(() => window.location.reload(), 1500);

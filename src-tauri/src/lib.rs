@@ -45,24 +45,22 @@ fn backups_dir() -> PathBuf {
     db_dir().join("backups")
 }
 
-/// 创建数据库备份（复制 costhub.db 及 WAL 文件到 backups/）
+/// 预留数据库备份路径。实际快照由前端通过同一 SQLite 连接执行 VACUUM INTO，
+/// 避免运行中分别复制 db/WAL 造成不一致。
 #[tauri::command]
-fn backup_database() -> Result<String, String> {
+fn create_backup_target() -> Result<serde_json::Value, String> {
     let dir = backups_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("创建备份目录失败: {e}"))?;
     let ts = chrono_now_compact();
-    let db_path = db_dir().join("costhub.db");
-    if !db_path.exists() {
+    if !db_dir().join("costhub.db").exists() {
         return Err("数据库文件不存在".to_string());
     }
-    let dest = dir.join(format!("costhub-backup-{ts}.db"));
-    fs::copy(&db_path, &dest).map_err(|e| format!("复制数据库失败: {e}"))?;
-    // 若存在 WAL 文件也一并备份（未 checkpoint 的数据）
-    let wal = db_dir().join("costhub.db-wal");
-    if wal.exists() {
-        let _ = fs::copy(&wal, dir.join(format!("costhub-backup-{ts}.db-wal")));
+    let name = format!("costhub-backup-{ts}.db");
+    let dest = dir.join(&name);
+    if dest.exists() {
+        return Err("同名备份已存在，请稍后重试".to_string());
     }
-    Ok(dest.file_name().unwrap_or_default().to_string_lossy().to_string())
+    Ok(serde_json::json!({ "name": name, "path": dest.to_string_lossy() }))
 }
 
 /// 列出所有备份文件（按时间倒序）
@@ -112,6 +110,12 @@ fn restore_database(backup_name: String) -> Result<String, String> {
     let _ = fs::remove_file(db_dir().join("costhub.db-wal"));
     let _ = fs::remove_file(db_dir().join("costhub.db-shm"));
     fs::copy(&src, &db_path).map_err(|e| format!("恢复失败: {e}"))?;
+    // 兼容旧版“主库 + WAL”备份；新版 VACUUM INTO 备份不再产生 sidecar。
+    let backup_wal = backups_dir().join(format!("{backup_name}-wal"));
+    if backup_wal.exists() {
+        fs::copy(&backup_wal, db_dir().join("costhub.db-wal"))
+            .map_err(|e| format!("恢复 WAL 失败: {e}"))?;
+    }
     Ok(format!("已从 {backup_name} 恢复，请重启应用生效"))
 }
 
@@ -122,7 +126,9 @@ fn delete_backup(backup_name: String) -> Result<(), String> {
         return Err("非法的备份文件名".to_string());
     }
     let p = backups_dir().join(&backup_name);
-    fs::remove_file(&p).map_err(|e| format!("删除失败: {e}"))
+    fs::remove_file(&p).map_err(|e| format!("删除失败: {e}"))?;
+    let _ = fs::remove_file(backups_dir().join(format!("{backup_name}-wal")));
+    Ok(())
 }
 
 // ========== Excel 导出文件保存（前端生成 xlsx → base64 → 存 exports/） ==========
@@ -286,8 +292,8 @@ fn ollama_net_status() -> Result<serde_json::Value, String> {
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
     // 查询成功：stdout 包含规则名即为已封禁
-    let queryOk = out.status.success();
-    let blocked = if queryOk {
+    let query_ok = out.status.success();
+    let blocked = if query_ok {
         stdout.contains(OLLAMA_BLOCK_RULE) && stdout.contains("Block")
     } else {
         // 查询失败（多半是权限）：保守起见返回 true（假设已封禁），避免误导用户
@@ -298,7 +304,7 @@ fn ollama_net_status() -> Result<serde_json::Value, String> {
         "ollama_path": exe.unwrap_or_default(),
         "blocked": blocked,
         "rule_name": OLLAMA_BLOCK_RULE,
-        "query_error": if queryOk { String::new() } else { stderr.clone() },
+        "query_error": if query_ok { String::new() } else { stderr.clone() },
     }))
 }
 
@@ -597,7 +603,7 @@ pub fn run() {
             tauri_plugin_sql::Builder::default().build(),
         )
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![get_db_path, http_get, http_post, http_stream, ollama_net_status, ollama_net_set_block, backup_database, list_backups, restore_database, delete_backup, save_export_file, list_exports, open_exports_dir])
+        .invoke_handler(tauri::generate_handler![get_db_path, http_get, http_post, http_stream, ollama_net_status, ollama_net_set_block, create_backup_target, list_backups, restore_database, delete_backup, save_export_file, list_exports, open_exports_dir])
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(

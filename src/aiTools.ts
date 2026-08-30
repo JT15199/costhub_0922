@@ -14,7 +14,6 @@ import { computeTargetStatuses } from './targetInsight';
 import { computeSellingPointRows, computeModuleValueRows } from './sellingPointAnalyzer';
 import { startOllamaStream, logLocalAICall } from './ollama';
 import { buildQuoteReviewPrompt, parseQuoteReview } from './quoteReview';
-import * as XLSX from 'xlsx';
 // 工具图标（2026-08-16：按数据特征选择——查询=清单/文件夹，成本=钱币，趋势=折线，洞察=闪电，目标=靶心…）
 import React from 'react';
 import {
@@ -96,6 +95,7 @@ function pickExcelFile(): Promise<File | null> {
   });
 }
 async function readExcelText(file: File, maxRows: number): Promise<string> {
+  const XLSX = await import('xlsx');
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf);
   const ws = wb.Sheets[wb.SheetNames[0]];

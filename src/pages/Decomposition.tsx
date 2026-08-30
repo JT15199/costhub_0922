@@ -2440,12 +2440,6 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                         )}
                       </Space>
                     )}
-                    {/* 旧的汇总按钮（已整合到上面） */}
-                    {false && canRollup && childrenTotal.length > 0 && childrenQueried.length > 0 && (
-                      <Button size="small" icon={<ApartmentOutlined />} onClick={() => handleRollup(selectedNode)} loading={rollupLoading}>
-                        汇总 ({childrenQueried.length}/{childrenTotal.length})
-                      </Button>
-                    )}
                     {rollupResult?.source_type === 'aggregated' && (
                       <Button size="small" icon={<EditOutlined />} onClick={handleRollupFeedback}>修正</Button>
                     )}

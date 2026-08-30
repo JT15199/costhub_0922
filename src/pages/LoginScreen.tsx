@@ -14,16 +14,11 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
   const [checking, setChecking] = useState(false);
   // 首次使用提示（改过密码后不再显示）
   const [firstUse, setFirstUse] = useState(false);
-  // 双击 logo 显示真实密码（防遗忘）
-  const [showPwd, setShowPwd] = useState(false);
-  const [plainPwd, setPlainPwd] = useState('');
-
   useEffect(() => {
     (async () => {
       try {
-        const { isFirstUse, getPlainPassword, getUsername } = await import('../db');
+        const { isFirstUse, getUsername } = await import('../db');
         setFirstUse(await isFirstUse());
-        setPlainPwd(await getPlainPassword());
         setUsername(await getUsername());
       } catch { }
     })();
@@ -53,11 +48,6 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
     } finally {
       setChecking(false);
     }
-  };
-
-  const revealPassword = () => {
-    setShowPwd(!showPwd);
-    if (!showPwd) message.info(`密码：${plainPwd}（仅本机可见）`);
   };
 
   return (
@@ -144,13 +134,12 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
           }
         `}</style>
 
-        {/* Logo：双击显示真实密码（隐藏功能，保持不变） */}
+        {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <div
-            onDoubleClick={revealPassword}
             style={{
               width: 68, height: 68, margin: '0 auto 14px', borderRadius: 20,
-              overflow: 'hidden', cursor: 'pointer',
+              overflow: 'hidden',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               background: 'linear-gradient(135deg, #EEF0FF 0%, #F8F7FF 100%)',
               boxShadow: '0 8px 24px rgba(99,102,241,0.18), inset 0 0 0 1px rgba(99,102,241,0.10)',
@@ -163,16 +152,6 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
           </div>
           <div style={{ fontSize: 23, fontWeight: 800, color: '#201F1D', letterSpacing: '-0.02em' }}>CostHub</div>
           <div style={{ fontSize: 12, color: '#8A857E', marginTop: 3, letterSpacing: '0.02em' }}>成本管理平台 · 数据受密码保护</div>
-          {showPwd && (
-            <div style={{
-              marginTop: 10, fontSize: 13, fontWeight: 600, color: '#B45309',
-              background: '#FEF6E6', borderRadius: 8, padding: '7px 12px',
-              border: '1px solid rgba(245,165,36,0.25)',
-              fontVariantNumeric: 'tabular-nums',
-            }}>
-              当前密码：{plainPwd}
-            </div>
-          )}
         </div>
 
         {/* 用户名 + 密码输入 */}
