@@ -91,6 +91,11 @@ export default function App() {
   // 侧边栏折叠（借鉴 DSH：收进去只显示常用 3 个功能）
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sidebar-collapsed') === '1');
   const toggleSidebar = () => { const v = !sidebarCollapsed; setSidebarCollapsed(v); localStorage.setItem('sidebar-collapsed', v ? '1' : '0'); };
+  // 项目管理上下文直接复用应用左侧栏，避免页面内部再占一列、挤压 BOM 工作区。
+  const [sidebarProjects, setSidebarProjects] = useState<any[]>([]);
+  const [sidebarProjectStatuses, setSidebarProjectStatuses] = useState<Record<number, any>>({});
+  const [sidebarSelectedProject, setSidebarSelectedProject] = useState<number | null>(null);
+  const [sidebarProjectQuery, setSidebarProjectQuery] = useState('');
   // 驾驶舱直达项目的延迟转发：只允许转发一次，避免 App 自己再次接收后形成循环跳转。
   const projectRouteTimerRef = useRef<number | null>(null);
   // 当前登录用户名（侧边栏底部显示）
@@ -359,6 +364,22 @@ export default function App() {
     };
   }, [navigate]);
 
+  useEffect(() => {
+    const onProjectNavData = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      setSidebarProjects(Array.isArray(detail.projects) ? detail.projects : []);
+      setSidebarProjectStatuses(detail.statuses || {});
+      setSidebarSelectedProject(detail.selectedPid ?? null);
+    };
+    window.addEventListener('costhub-project-nav-data', onProjectNavData);
+    return () => window.removeEventListener('costhub-project-nav-data', onProjectNavData);
+  }, []);
+
+  const openSidebarProject = useCallback((pid: number) => {
+    setSidebarSelectedProject(pid);
+    window.dispatchEvent(new CustomEvent('costhub-open-project', { detail: { pid, __costhubForwarded: true } }));
+  }, []);
+
   const openInsightsEntry = useCallback(() => {
     localStorage.setItem('costhub-open-insights-pending', '1');
     navigate('projects');
@@ -450,7 +471,7 @@ export default function App() {
           </div>
           <div><h1>CostHub</h1><span>成本管理平台</span></div>
         </div>
-        <nav className="sidebar-nav">
+        <nav className={`sidebar-nav ${active === 'projects' ? 'has-project-context' : ''}`}>
           {NAV.map(item => (
             <div key={item.key} className={`nav-item ${active === item.key ? 'active' : ''}`} onClick={() => navigate(item.key)}>
               <span className="nav-icon" style={{
@@ -467,7 +488,13 @@ export default function App() {
               {item.label}
             </div>
           ))}
-          {NAV_GROUPS.map(group => (
+          {active === 'projects' && (
+            <div className="nav-item active" onClick={() => navigate('projects')}>
+              <span className="nav-icon" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 8, flexShrink: 0, background: '#F0FDF4', color: '#16A34A', fontSize: 14 }}><ProjectOutlined /></span>
+              项目管理
+            </div>
+          )}
+          {active !== 'projects' && NAV_GROUPS.map(group => (
             <div key={group.title}>
               <div style={{ padding: '10px 16px 4px', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--color-text-tertiary)', textTransform: 'uppercase' }}>{group.title}</div>
               {group.items.map(item => (
@@ -489,6 +516,44 @@ export default function App() {
             </div>
           ))}
 </nav>
+
+        {active === 'projects' && (
+          <section className="app-project-navigator" aria-label="项目列表">
+            <div className="app-project-navigator-head">
+              <b>项目</b><span>{sidebarProjects.length}</span>
+            </div>
+            <input
+              className="app-project-search"
+              value={sidebarProjectQuery}
+              onChange={e => setSidebarProjectQuery(e.target.value)}
+              placeholder="搜索项目"
+              aria-label="搜索项目"
+            />
+            <div className="app-project-list">
+              {sidebarProjects
+                .filter((project: any) => `${project.code || ''} ${project.name || ''}`.toLowerCase().includes(sidebarProjectQuery.trim().toLowerCase()))
+                .sort((a: any, b: any) => Number(a.project_type === '已完成') - Number(b.project_type === '已完成'))
+                .map((project: any) => {
+                  const status = sidebarProjectStatuses[project.id];
+                  const color = project.project_type === '已完成' ? '#34C759' : status?.level === 'danger' ? '#EF4444' : status?.level === 'warn' ? '#F59E0B' : '#3B82F6';
+                  return (
+                    <button
+                      key={project.id}
+                      type="button"
+                      className={`app-project-item ${sidebarSelectedProject === project.id ? 'is-active' : ''}`}
+                      onClick={() => openSidebarProject(project.id)}
+                      title={`${project.code || ''} ${project.name || ''}`}
+                    >
+                      <i style={{ background: color }} />
+                      <span><b>{project.code || '未编号'}</b><small>{project.name || '未命名项目'}</small></span>
+                      <em>{project.project_type === '已完成' ? '完成' : (project.status || '在研')}</em>
+                    </button>
+                  );
+                })}
+              {sidebarProjects.length === 0 && <div className="app-project-list-empty">项目载入后会显示在这里</div>}
+            </div>
+          </section>
+        )}
 
         {/* AI 情报中心（报价差异/自主建议/巡检发现 统一处理）——全局入口，任何页面可见 */}
         <div onClick={openInsightsEntry}

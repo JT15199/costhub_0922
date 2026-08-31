@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { EmojiIcon } from '../iconMap';
-import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Segmented, Tag, message, notification, Popconfirm, Tabs, Row, Col, Tooltip, Card, Statistic, Upload, Alert, DatePicker, Checkbox, AutoComplete, Radio, Badge } from 'antd';
+import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Segmented, Tag, message, notification, Popconfirm, Tabs, Row, Col, Tooltip, Card, Statistic, Upload, Alert, DatePicker, Checkbox, AutoComplete, Radio, Badge, Drawer } from 'antd';
 import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined, InboxOutlined, DollarOutlined, TagOutlined, LineChartOutlined, BarChartOutlined, ToolOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, AimOutlined, BuildOutlined, HistoryOutlined, EyeOutlined, CheckOutlined, CloseOutlined, RobotOutlined, BulbOutlined, MinusCircleOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import ReactECharts from 'echarts-for-react/esm/core';
@@ -11,7 +11,7 @@ import { getMainCategories, getSetting } from '../db';
 import { startOllamaStream, logLocalAICall } from '../ollama';
 import { calcSkuCost as calcSkuCostFn, buildSkuBom as buildSkuBomFn } from '../skuCalc';
 import { computeProjectHealth, type HealthIssue } from '../projectHealth';
-import { computeProjectStatuses, statusPointMeta } from '../projectStatus';
+import { computeProjectStatuses } from '../projectStatus';
 
 /** 往 parts.projects 追加项目代号（去重，避免重复拼接） */
 function appendProjectCode(existing: string | undefined, code: string): string {
@@ -72,13 +72,12 @@ export default function Projects() {
   const [modList, setModList] = useState<any[]>([]);
   const [previewModItems, setPreviewModItems] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState('bom');
-  const [navExpanded, setNavExpanded] = useState(true);
-  // 方案三：项目工作台的左侧项目导航与模块目标钻取
-  const [projectRailQuery, setProjectRailQuery] = useState('');
+  // 方案三：模块目标钻取；项目列表由 App 原有左侧栏承载，不再占用页面宽度。
   const [moduleFocus, setModuleFocus] = useState<string | null>(null);
-  const [negotiationOpen, setNegotiationOpen] = useState(true);
+  const [negotiationOpen, setNegotiationOpen] = useState(false);
   const [bomSearch, setBomSearch] = useState('');
-  const [bomTableMode, setBomTableMode] = useState<'module' | 'flat'>('module');
+  const [bomTableMode, setBomTableMode] = useState<'module' | 'flat'>('flat');
+  const [inlineBomCell, setInlineBomCell] = useState<{ id: number; field: 'part_cost' | 'quantity'; value: number } | null>(null);
 
   // ====== SKU 变体（基座项目 + 差异规则） ======
   const [skus, setSkus] = useState<any[]>([]);
@@ -118,6 +117,11 @@ export default function Projects() {
       } catch (e) { console.warn('状态点计算失败:', e); }
     })();
   }, []);
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('costhub-project-nav-data', {
+      detail: { projects, statuses: projectStatuses, selectedPid },
+    }));
+  }, [projects, projectStatuses, selectedPid]);
   // 加载品类列表
   useEffect(() => {
     import('../db').then(async (m) => {
@@ -1183,44 +1187,60 @@ export default function Projects() {
     )},
   ];
 
-  const visibleProjects = projects.filter((p: any) => {
-    const q = projectRailQuery.trim().toLowerCase();
-    if (!q) return true;
-    return `${p.code || ''} ${p.name || ''}`.toLowerCase().includes(q);
-  });
+  const commitInlineBomCell = async (row: any, field: 'part_cost' | 'quantity', value: number | null) => {
+    if (!selectedPid || value == null || !Number.isFinite(Number(value))) { setInlineBomCell(null); return; }
+    const nextCost = field === 'part_cost' ? Number(value) : Number(row.part_cost || 0);
+    const nextQuantity = field === 'quantity' ? Number(value) : Number(row.quantity || 0);
+    setInlineBomCell(null);
+    await updateBOMItem(row.id, nextQuantity, row.module_name || '', row.remark || '', true, {
+      partName: row.part_name || '', partModel: row.part_model || '', cost: nextCost,
+      mainCategory: row.main_category || '', subCategory: row.sub_category || '',
+    });
+    await Promise.all([loadBOM(selectedPid), loadCostSnapshots(selectedPid)]);
+    scheduleAutoCompare();
+  };
+
+  const spreadsheetBomCols: any[] = [
+    { title: '#', key: 'row_no', width: 46, fixed: 'left' as const, align: 'center' as const, render: (_: any, __: any, index: number) => <span className="bom-row-number">{index + 1}</span> },
+    ...bomCols.map((column: any) => {
+      if (column.dataIndex !== 'part_cost' && column.dataIndex !== 'quantity') return column;
+      const field = column.dataIndex as 'part_cost' | 'quantity';
+      return {
+        ...column,
+        onCell: (row: any) => ({
+          className: 'bom-editable-cell',
+          onDoubleClick: () => setInlineBomCell({ id: row.id, field, value: Number(row[field] || 0) }),
+        }),
+        render: (value: number, row: any) => inlineBomCell?.id === row.id && inlineBomCell?.field === field
+          ? <InputNumber
+              autoFocus
+              size="small"
+              min={0}
+              precision={field === 'part_cost' ? 4 : 6}
+              controls={false}
+              value={inlineBomCell?.value ?? Number(value || 0)}
+              onChange={next => setInlineBomCell(current => current ? { ...current, value: Number(next || 0) } : current)}
+              onPressEnter={event => event.currentTarget.blur()}
+              onBlur={() => commitInlineBomCell(row, field, inlineBomCell?.value ?? Number(value || 0))}
+            />
+          : field === 'part_cost'
+            ? Number(value || 0).toFixed(4)
+            : (value != null ? (Number.isInteger(value) ? value : Number(value).toFixed(6).replace(/0+$/, '').replace(/\.$/, '')) : '-'),
+      };
+    }),
+  ];
+
+  const negotiationRows = boms.map((row: any) => {
+    const refs = modRefMap[row.module_name || '未归类']?.items || [];
+    const ref = refs.find((item: any) => item.part_name === row.part_name && (item.part_model || '') === (row.part_model || ''));
+    const saving = ref ? Math.max(0, (row.part_cost || 0) - (ref.part_cost || 0)) * (row.quantity || 1) : 0;
+    return { row, ref, saving };
+  }).sort((a: any, b: any) => b.saving - a.saving || ((b.row.part_cost || 0) * (b.row.quantity || 1)) - ((a.row.part_cost || 0) * (a.row.quantity || 1))).slice(0, 8);
 
   return (
     <div className="projects-page">
-      <div className="page-title"><FileTextOutlined /> 项目管理</div>
-      <div className="projects-workbench">
-        <aside className={`project-rail ${navExpanded ? 'is-expanded' : ''}`}>
-          <div className="project-rail-head">
-            <div><b>项目与版本</b><span>{projects.length} 个项目</span></div>
-            <Button type="text" size="small" aria-label={navExpanded ? '收起项目导航' : '展开项目导航'} onClick={() => setNavExpanded(v => !v)}>{navExpanded ? '‹' : '›'}</Button>
-          </div>
-          {navExpanded && <Input size="small" allowClear prefix={<span style={{ color: '#94A3B8' }}>⌕</span>} placeholder="搜索项目" value={projectRailQuery} onChange={e => setProjectRailQuery(e.target.value)} />}
-          {navExpanded && <div className="project-rail-actions">
-            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => { setEditing(null); form.resetFields(); setModalOpen(true); }}>新建项目</Button>
-            <Button size="small" icon={<TagOutlined />} onClick={() => { setCatModalOpen(true); setNewCatName(''); }}>品类管理</Button>
-          </div>}
-          <div className="project-rail-section"><span>置顶项目</span></div>
-          <div className="project-rail-list">
-            {visibleProjects.filter(p => p.project_type !== '已完成').map((p: any) => {
-              const sp = projectStatuses[p.id];
-              const meta = sp && sp.level !== 'none' ? statusPointMeta(sp.level) : null;
-              return <button key={p.id} className={`project-rail-item ${selectedPid === p.id ? 'is-active' : ''}`} onClick={() => selectProject(p.id)} title={`${p.code} ${p.name}`}>
-                <span className="project-rail-dot" style={{ background: meta?.color || '#94A3B8' }} />
-                <span className="project-rail-copy"><b>{p.code}</b><small>{p.name}</small></span>
-                {navExpanded && <span className="project-rail-status">{p.project_type === '已完成' ? '完成' : p.status || '在研'}</span>}
-              </button>;
-            })}
-          </div>
-          {navExpanded && <div className="project-rail-section"><span>已完成项目</span></div>}
-          {navExpanded && <div className="project-rail-list completed">{visibleProjects.filter(p => p.project_type === '已完成').map((p: any) => <button key={p.id} className={`project-rail-item ${selectedPid === p.id ? 'is-active' : ''}`} onClick={() => selectProject(p.id)}><span className="project-rail-dot" style={{ background: '#34C759' }} /><span className="project-rail-copy"><b>{p.code}</b><small>{p.name}</small></span><span className="project-rail-status">已完成</span></button>)}</div>}
-          {!selectedPid && navExpanded && <div className="project-rail-empty">选择项目后在此处继续处理 BOM、报价和复盘。</div>}
-        </aside>
-
-        <main className="projects-main">
+      <div className="page-title projects-page-title"><FileTextOutlined /> 项目管理 <span className="projects-page-actions"><Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => { setEditing(null); form.resetFields(); setModalOpen(true); }}>新建项目</Button><Button size="small" icon={<TagOutlined />} onClick={() => { setCatModalOpen(true); setNewCatName(''); }}>品类管理</Button></span></div>
+        <main className="projects-main projects-main-full">
           {!selectedPid && (
             <div className="project-empty-state content-card"><FileTextOutlined /><h2>选择一个项目开始</h2><p>从左侧项目导航进入 BOM、目标成本、报价和复盘工作区。</p></div>
           )}
@@ -1280,8 +1300,8 @@ export default function Projects() {
             },
             {
               key: 'bom', label: <span><InboxOutlined /> BOM清单 ({boms.length}件)</span>, children: (
-                <div style={{ position: 'relative', display: 'flex', gap: 12 }}>
-                  <div className="bom-workspace-main" style={{ flex: 1, minWidth: 0 }}>
+                <div className="bom-tab-layout">
+                  <div className="bom-workspace-main">
                   <div className="bom-command-bar" style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
                     <Space>
                       <Button type="primary" size="small" icon={<PlusOutlined />} onClick={async () => { setAllParts(await getParts('', '', '')); setBomEdit(null); setPreviewModItems([]); bomForm.resetFields(); bomForm.setFieldsValue({ _addMode: 'module', quantity: 1, _quantity: 1, _cost: 0 }); setBomModal(true); }}>添加器件</Button>
@@ -1289,6 +1309,7 @@ export default function Projects() {
                       <Button size="small" icon={<DownloadOutlined />} onClick={() => { const data = boms.map(b => ({ 模块: b.module_name, 大类: b.main_category, 子类: b.sub_category, 器件名称: b.part_name, 型号: b.part_model, 单价: b.part_cost, 数量: b.quantity, 小计: (b.part_cost || 0) * b.quantity, 备注: b.remark })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'BOM'); XLSX.writeFile(wb, `BOM_${projects.find(p => p.id === selectedPid)?.code || 'export'}.xlsx`); message.success('已导出'); }}>导出</Button>
                       <Input size="small" allowClear value={bomSearch} onChange={e => setBomSearch(e.target.value)} placeholder="搜索器件 / 型号 / 规格" style={{ width: 210 }} />
                       <Segmented size="small" value={bomTableMode} onChange={v => setBomTableMode(v as 'module' | 'flat')} options={[{ label: '模块分组', value: 'module' }, { label: '全量表格', value: 'flat' }]} />
+                      <Button size="small" icon={<BulbOutlined />} onClick={() => setNegotiationOpen(true)}>议价机会</Button>
                     </Space>
                     {bomSelKeys.length > 0 && (
                       <Space>
@@ -1311,18 +1332,18 @@ export default function Projects() {
                       options={projects.filter((p: any) => p.id !== selectedPid).map((p: any) => ({ label: `[${p.code}] ${p.name}${p.project_type === '已完成' ? ' ✓' : ''}`, value: p.id }))}
                       />
                   </div>
+                  {bomTableMode === 'flat' && <div className="bom-spreadsheet-hint">连续表格模式 · 双击“单价”或“数量”直接编辑，Enter 保存 · 可横向滚动查看完整字段</div>}
                   {bomTableMode === 'flat' ? (
                     <DataTable
                       tableId="bom_flat_detail"
                       hideToolbar
                       dataSource={visibleBoms}
-                      columns={bomCols}
+                      columns={spreadsheetBomCols}
                       rowKey="id"
                       size="small"
                       pagination={false}
-                      scroll={{ x: 1100, y: 480 }}
+                      scroll={{ x: 1240, y: 560 }}
                       rowSelection={{ selectedRowKeys: bomSelKeys, onChange: keys => setBomSelKeys(keys) }}
-                      onRow={(r: any) => ({ onDoubleClick: () => { setBomEdit(r); bomForm.setFieldsValue({ ...r, _part_name: r.part_name, _part_model: r.part_model, _main_category: r.main_category, _sub_category: r.sub_category, _cost: r.part_cost }); setBomModal(true); } })}
                     />
                   ) : sortedModNames.map((modName: string) => {
                     const items = groupedBOMs[modName];
@@ -1401,23 +1422,6 @@ export default function Projects() {
                   })}
                   {boms.length === 0 && <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>暂无BOM数据</div>}
                   </div>
-
-                  {/* 方案三：可收缩议价工作区。没有参照价时只显示“待核价”，不编造 AI 结论。 */}
-                  <aside className={`negotiation-panel ${negotiationOpen ? '' : 'is-collapsed'}`}>
-                    <div className="negotiation-panel-head"><b>{negotiationOpen ? '议价工作区' : '议价'}</b><Button type="text" size="small" aria-label={negotiationOpen ? '收起议价工作区' : '展开议价工作区'} onClick={() => setNegotiationOpen(v => !v)}>{negotiationOpen ? '›' : '‹'}</Button></div>
-                    {negotiationOpen && (() => {
-                      const rows = boms.map((row: any) => {
-                        const refs = modRefMap[row.module_name || '未归类']?.items || [];
-                        const ref = refs.find((x: any) => x.part_name === row.part_name && (x.part_model || '') === (row.part_model || ''));
-                        const saving = ref ? Math.max(0, (row.part_cost || 0) - (ref.part_cost || 0)) * (row.quantity || 1) : 0;
-                        return { row, ref, saving };
-                      }).sort((a: any, b: any) => b.saving - a.saving || ((b.row.part_cost || 0) * (b.row.quantity || 1)) - ((a.row.part_cost || 0) * (a.row.quantity || 1))).slice(0, 5);
-                      return <>
-                        <div className="negotiation-summary"><span>当前已识别机会</span><strong>¥{rows.reduce((s: number, x: any) => s + x.saving, 0).toFixed(2)}</strong><small>基于已选择的参照项目</small></div>
-                        <div className="negotiation-list">{rows.map(({ row, ref, saving }: any, idx: number) => <div className="negotiation-item" key={row.id || idx}><div className="negotiation-item-top"><b>{row.part_name || '未命名器件'}</b><span className={saving > 0 ? 'is-saving' : ''}>{saving > 0 ? `可降 ¥${saving.toFixed(2)}` : '待核价'}</span></div><div className="negotiation-item-meta">{row.part_model || '无型号'} · {row.module_name || '未归类'}</div><div className="negotiation-item-evidence">当前 ¥{Number(row.part_cost || 0).toFixed(2)} {ref ? `· 参考 ¥${Number(ref.part_cost || 0).toFixed(2)}` : '· 请选择参照项目获取证据'}</div><Button size="small" type="link" onClick={() => setActiveTab('tender')}>查看报价证据 →</Button></div>)}</div><Button type="primary" block size="small" onClick={() => setActiveTab('tender')}>进入招标工作台</Button>
-                      </>;
-                    })()}
-                  </aside>
                 </div>
               ),
             },
@@ -2227,7 +2231,31 @@ export default function Projects() {
         </div>
       )}
         </main>
-      </div>
+
+      <Drawer
+        title="议价机会"
+        open={negotiationOpen}
+        onClose={() => setNegotiationOpen(false)}
+        width={380}
+        className="negotiation-drawer"
+      >
+        <div className="negotiation-summary">
+          <span>当前已识别机会</span>
+          <strong>¥{negotiationRows.reduce((sum: number, item: any) => sum + item.saving, 0).toFixed(2)}</strong>
+          <small>{refProjPid ? '基于已选择的参照项目' : '选择参照项目后生成可核验机会'}</small>
+        </div>
+        <div className="negotiation-list">
+          {negotiationRows.map(({ row, ref, saving }: any, index: number) => (
+            <div className="negotiation-item" key={row.id || index}>
+              <div className="negotiation-item-top"><b>{row.part_name || '未命名器件'}</b><span className={saving > 0 ? 'is-saving' : ''}>{saving > 0 ? `可降 ¥${saving.toFixed(2)}` : '待核价'}</span></div>
+              <div className="negotiation-item-meta">{row.part_model || '无型号'} · {row.module_name || '未归类'}</div>
+              <div className="negotiation-item-evidence">当前 ¥{Number(row.part_cost || 0).toFixed(2)} {ref ? `· 参考 ¥${Number(ref.part_cost || 0).toFixed(2)}` : '· 暂无参照证据'}</div>
+            </div>
+          ))}
+          {negotiationRows.length === 0 && <div className="project-rail-empty">当前 BOM 暂无可分析器件。</div>}
+        </div>
+        <Button type="primary" block onClick={() => { setNegotiationOpen(false); setActiveTab('tender'); }}>进入招标工作台查看报价证据</Button>
+      </Drawer>
 
       {/* Project edit modal */}
       <Modal title={editing?.id ? '编辑项目' : '新建项目'} open={modalOpen} onOk={handleSaveProject} onCancel={() => { setModalOpen(false); setEditing(null); }} width={640} destroyOnClose>
