@@ -338,3 +338,8 @@
 - **安全与验收**：解析器无网络代码；工作台和 AI 工具不发送原始报价到云端。详细目录、接口、组件职责、验收标准和禁止事项见 `docs/招标工作台实施方案.md`。
 - **过程确认补充**：报价行详情支持直接标记 `exact/equivalent/reference/incomparable/unmatched`，只有跨供应商可比关系计入底价；历史批次抽屉与过程时间线展示版本，不覆盖原文。
 - **议价与复盘闭环**：机会项生成时同步写入 `negotiation_items`（草稿/已发起/已达成/已关闭）并导出 Excel；`tender_decisions` 保存最终定点供应商、整机报价、依据和复盘摘要。两者都不自动修改 BOM、器件价格或采购指令。
+
+## 三·补26、PowerShell 无窗口运行（2026-08-31 用户：无窗口运行）
+
+- 防火墙状态查询与本地加固脚本仍复用既有 Rust 安全边界，但 Windows 下通过 `CREATE_NO_WINDOW` 启动 PowerShell，提权子进程追加 `-WindowStyle Hidden`。
+- 普通打开设置页、刷新 Ollama 状态不再闪出 PowerShell 控制台；用户主动点击“一键锁定 Ollama 外网”时仍会出现系统 UAC 授权，这是 Windows 的权限确认，不是应用控制台窗口。

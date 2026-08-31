@@ -289,11 +289,20 @@ fn run_ps1_elevated(script: &str) -> Result<String, String> {
     drop(f);
 
     // 通过 UAC 提权执行
-    let status = std::process::Command::new("powershell.exe")
+    let mut command = std::process::Command::new("powershell.exe");
+    // PowerShell is used only as a short-lived helper. Keep its console hidden
+    // so checking or applying the local firewall policy never interrupts the
+    // desktop workflow with a flashing terminal window.
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let status = command
         .args([
             "-NoProfile", "-Command",
             &format!(
-                "Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','{}'",
+                "Start-Process powershell -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','{}'",
                 ps_path
             ),
         ])
@@ -329,7 +338,13 @@ fn ollama_net_status() -> Result<serde_json::Value, String> {
         "$r=Get-NetFirewallRule -DisplayName '{}' -ErrorAction SilentlyContinue | Where-Object {{$_.Enabled -eq 'True' -and $_.Direction -eq 'Outbound' -and $_.Action -eq 'Block'}}; if($r){{'BLOCKED'}}",
         OLLAMA_BLOCK_RULE
     );
-    let out = std::process::Command::new("powershell.exe")
+    let mut command = std::process::Command::new("powershell.exe");
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let out = command
         .args(["-NoProfile", "-Command", &query])
         .output()
         .map_err(|e| format!("无法查询防火墙规则: {e}"))?;
