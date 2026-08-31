@@ -430,9 +430,9 @@ export default function App() {
       )}
       {/* 受控云端研究：仅显示已通过敏感审查、等待条件审批的公开主题 */}
       <CloudConfirmBar />
-      <aside className="sidebar" style={{ width: sidebarCollapsed ? 52 : 204, minWidth: sidebarCollapsed ? 52 : 204, overflow: 'hidden' }}>
+      <aside className={`sidebar ${sidebarCollapsed ? 'sidebar-collapsed' : 'sidebar-expanded'}`} style={{ width: sidebarCollapsed ? 52 : 204, minWidth: sidebarCollapsed ? 52 : 204, overflow: 'hidden' }}>
         {sidebarCollapsed ? (
-          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 0', gap: 6 }}>
+          <div className="sidebar-collapsed-content" style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 0', gap: 6 }}>
             <div style={{ width: 30, height: 30, borderRadius: 8, background: '#181713', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, marginBottom: 12, flexShrink: 0 }}>C</div>
             <Tooltip title="驾驶舱" placement="right"><div onClick={() => navigate('dashboard')} style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: active === 'dashboard' ? '#181713' : '#5F5D54', background: active === 'dashboard' ? '#F4F3EE' : 'transparent' }}><BarChartOutlined style={{ fontSize: 16 }} /></div></Tooltip>
             <Tooltip title="项目管理" placement="right"><div onClick={() => navigate('projects')} style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: active === 'projects' ? '#181713' : '#5F5D54', background: active === 'projects' ? '#F4F3EE' : 'transparent' }}><ProjectOutlined style={{ fontSize: 16 }} /></div></Tooltip>
@@ -441,7 +441,7 @@ export default function App() {
             <Tooltip title="展开侧边栏" placement="right"><div onClick={toggleSidebar} style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#9A978B' }}><MenuUnfoldOutlined /></div></Tooltip>
           </div>
         ) : (
-          <>
+          <div className="sidebar-expanded-content">
         <div className="sidebar-logo">
           <div className="logo-img">
             {customLogo
@@ -580,7 +580,7 @@ export default function App() {
           <Tooltip title="收起侧边栏" placement="right">
             <div onClick={toggleSidebar} style={{ padding: '6px 16px', cursor: 'pointer', color: '#9A978B', fontSize: 13, borderTop: '1px solid var(--color-border)', textAlign: 'center' }}><MenuFoldOutlined /></div>
           </Tooltip>
-          </>
+          </div>
         )}
       </aside>
       <main className="main-content" style={{ zoom: `${zoom}%` }}>
