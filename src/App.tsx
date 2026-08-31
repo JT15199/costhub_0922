@@ -410,7 +410,7 @@ export default function App() {
       )}
       {/* 受控云端研究：仅显示已通过敏感审查、等待条件审批的公开主题 */}
       <CloudConfirmBar />
-      <aside className="sidebar" style={{ width: sidebarCollapsed ? 48 : 220, minWidth: sidebarCollapsed ? 48 : 220, overflow: 'hidden' }}>
+      <aside className="sidebar" style={{ width: sidebarCollapsed ? 52 : 204, minWidth: sidebarCollapsed ? 52 : 204, overflow: 'hidden' }}>
         {sidebarCollapsed ? (
           <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 0', gap: 6 }}>
             <div style={{ width: 30, height: 30, borderRadius: 8, background: '#181713', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, marginBottom: 12, flexShrink: 0 }}>C</div>

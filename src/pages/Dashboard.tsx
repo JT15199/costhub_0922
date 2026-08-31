@@ -35,6 +35,124 @@ function openAiCenter(onNavigate: ((key: string) => void) | undefined) {
   window.dispatchEvent(new CustomEvent('costhub-open-insights'));
 }
 
+interface DashboardRedesignProps {
+  stats: DashboardStats;
+  projects: any[];
+  projCosts: { name: string; cost: number }[];
+  snapshotChanges: { projectId: number; oldCost: number; newCost: number; pct: number; reason: string; at: string }[];
+  missedByProject: { projectId: number; code: string; domains: string[]; worstDomain: string; worstRate: number }[];
+  unreadInsights: any[];
+  recentPriceChanges: any[];
+  advisorInsights: any[];
+  cloudUsage: { count: number; tokens: number };
+  cloudLimit: number;
+  onNavigate?: (key: string) => void;
+  onRunAudit: () => void;
+  auditRunning: boolean;
+}
+
+function DashboardRedesign({
+  stats, projects, projCosts, snapshotChanges, missedByProject,
+  unreadInsights, recentPriceChanges, advisorInsights, cloudUsage, cloudLimit,
+  onNavigate, onRunAudit, auditRunning,
+}: DashboardRedesignProps) {
+  const projectById = new Map(projects.map(p => [p.id, p]));
+  const projectOrder = [...projects]
+    .sort((a, b) => Number(b.status === '进行中') - Number(a.status === '进行中'))
+    .slice(0, 5);
+  const recentSavings = snapshotChanges.reduce((sum, item) => sum + Math.max(0, item.oldCost - item.newCost), 0);
+  const trendRows = snapshotChanges.length > 0
+    ? snapshotChanges.slice(0, 8).reverse().map(item => ({
+        label: projectById.get(item.projectId)?.code || `项目${item.projectId}`,
+        value: item.newCost,
+      }))
+    : [...projCosts].sort((a, b) => b.cost - a.cost).slice(0, 8).reverse().map(item => ({ label: item.name, value: item.cost }));
+  const trendOption = {
+    animation: false,
+    tooltip: chartTooltip('axis'),
+    grid: { left: 48, right: 14, top: 12, bottom: 27 },
+    xAxis: { type: 'category', data: trendRows.map(row => row.label), boundaryGap: false, ...chartAxisStyle(10) },
+    yAxis: { type: 'value', name: '¥', ...chartAxisStyle(10) },
+    series: [{
+      type: 'line', smooth: 0.35, symbol: 'circle', symbolSize: 6,
+      data: trendRows.map(row => row.value),
+      lineStyle: { width: 3, color: '#3C78E5' },
+      itemStyle: { color: '#3C78E5', borderColor: '#fff', borderWidth: 2 },
+      areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(60,120,229,.22)' }, { offset: 1, color: 'rgba(60,120,229,0)' }] } },
+    }],
+  };
+  const tasks: { label: string; action: string; onClick: () => void }[] = [];
+  missedByProject.slice(0, 2).forEach(item => tasks.push({
+    label: `复核 ${item.code} 的${item.worstDomain || '目标成本'}偏差`, action: '查看项目 →', onClick: () => goProject(onNavigate, item.projectId),
+  }));
+  const firstInsight = unreadInsights[0];
+  if (firstInsight) tasks.push({
+    label: `确认报价差异：${firstInsight.module_name || '待审模块'}`, action: '打开情报 →', onClick: () => openAiCenter(onNavigate),
+  });
+  if (tasks.length === 0) tasks.push({ label: '启动一次 AI 自主巡检', action: '开始巡检 →', onClick: onRunAudit });
+  const visibleTasks = tasks.slice(0, 3);
+  const firstOpportunity = recentPriceChanges
+    .map(item => ({ name: item.name || item.model || '物料', amount: Number(item.old_cost || 0) - Number(item.new_cost || 0) }))
+    .filter(item => item.amount > 0)
+    .sort((a, b) => b.amount - a.amount)[0];
+  const aiSavingText = recentSavings > 0 ? `近期已确认降本 ¥${recentSavings.toFixed(0)}` : (firstOpportunity ? `可争取降本 ¥${firstOpportunity.amount.toFixed(0)}` : '等待新的报价机会');
+  const aiSavingHint = firstInsight?.module_name ? `${firstInsight.module_name} 存在跨供应商比价机会` : '导入报价后，AI 会自动识别可比关系与异常价差';
+
+  return (
+    <div className="dashboard-redesign">
+      <div className="dashboard-head">
+        <div>
+          <h1><BarChartOutlined /> 驾驶舱</h1>
+          <p>CDCP 招标周期 · 今天优先处理影响定点的成本事项</p>
+        </div>
+        <div className="dashboard-head-actions">
+          <AIStatusBar onNavigate={onNavigate} compact />
+          <Button type="primary" className="dashboard-primary-action" onClick={onRunAudit} loading={auditRunning} icon={<RobotOutlined />}>开始分析</Button>
+        </div>
+      </div>
+
+      <section className="dashboard-metrics">
+        <button className="dashboard-metric" onClick={() => onNavigate?.('projects')}><span>进行中项目</span><strong>{stats.active_projects}</strong><em>{projects.length} 个项目总计</em></button>
+        <button className={`dashboard-metric ${missedByProject.length > 0 ? 'is-risk' : 'is-good'}`} onClick={() => onNavigate?.('projects')}><span>目标风险</span><strong>{missedByProject.length}</strong><em>{missedByProject.length > 0 ? '需要今天处理' : '全部达标'}</em></button>
+        <button className="dashboard-metric" onClick={() => openAiCenter(onNavigate)}><span>待审报价</span><strong>{unreadInsights.length}</strong><em>{unreadInsights.length > 0 ? '来自报价情报' : '暂无待审差异'}</em></button>
+        <div className="dashboard-metric is-good"><span>近期降本</span><strong>¥{recentSavings.toFixed(0)}</strong><em>{snapshotChanges.length > 0 ? `${snapshotChanges.length} 条成本变动` : '等待数据积累'}</em></div>
+      </section>
+
+      <div className="dashboard-layout">
+        <section className="dashboard-panel dashboard-projects">
+          <div className="dashboard-panel-head"><h2>招标项目进展</h2><span>按下一行动排序</span><a onClick={() => onNavigate?.('projects')}>查看全部 →</a></div>
+          {projectOrder.length === 0 ? <div className="dashboard-empty">还没有项目，先创建一个项目开始成本管理。</div> : projectOrder.map((project, index) => {
+            const risk = missedByProject.find(item => item.projectId === project.id);
+            const cost = projCosts.find(item => item.name === project.code)?.cost;
+            const progress = project.status === '已完成' ? 100 : project.status === '暂停' ? 38 : project.project_type === '在研' ? 62 : 48;
+            const phase = project.status === '已完成' ? '已完成' : project.status === '暂停' ? '待处理' : index === 0 ? '比价中' : '摸底报价';
+            return <button className="dashboard-project-row" key={project.id} onClick={() => goProject(onNavigate, project.id)}>
+              <span className="dashboard-project-name"><strong>{project.code || '未命名项目'}　{project.name || ''}</strong><small>{cost !== undefined ? `当前 BOM ¥${cost.toFixed(0)}` : '下一步：补充报价与目标成本'}</small></span>
+              <span className={`dashboard-phase ${phase === '比价中' ? 'phase-active' : phase === '已完成' ? 'phase-done' : ''}`}>{phase}</span>
+              <span className={`dashboard-deviation ${risk ? 'is-risk' : 'is-good'}`}>{risk ? `-${Math.max(0, 100 - risk.worstRate).toFixed(1)}%` : '达标'}</span>
+              <span className="dashboard-progress"><i style={{ width: `${progress}%` }} /></span>
+            </button>;
+          })}
+        </section>
+
+        <section className="dashboard-panel dashboard-todo">
+          <div className="dashboard-panel-head"><h2>今日优先处理</h2><span>{visibleTasks.length} 项</span></div>
+          {visibleTasks.map((task, index) => <div className="dashboard-task" key={`${task.label}-${index}`}><span className="dashboard-task-num">{index + 1}</span><div><strong>{task.label}</strong><button onClick={task.onClick}>{task.action}</button></div></div>)}
+          <div className="dashboard-ai-note"><small>AI 发现的可执行机会</small><strong>{aiSavingText}</strong><p>{aiSavingHint}</p></div>
+        </section>
+
+        <section className="dashboard-panel dashboard-trend"><div className="dashboard-panel-head"><h2>成本趋势</h2><span>{snapshotChanges.length > 0 ? '最近成本变动' : '当前项目 BOM 分布'}</span><a onClick={() => onNavigate?.('compare')}>查看分析 →</a></div>{trendRows.length > 0 ? <ReactECharts echarts={echarts} option={trendOption} style={{ height: 190 }} /> : <div className="dashboard-empty">积累项目报价后，这里会出现成本趋势。</div>}</section>
+
+        <section className="dashboard-panel dashboard-opportunities"><div className="dashboard-panel-head"><h2>议价机会</h2><span>来自已确认数据</span></div>{recentPriceChanges.filter(item => Number(item.old_cost || 0) > Number(item.new_cost || 0)).slice(0, 3).map((item, _index, rows) => { const amount = Number(item.old_cost) - Number(item.new_cost); const max = Math.max(...rows.map(row => Number(row.old_cost) - Number(row.new_cost)), 1); return <div className="dashboard-opportunity" key={item.id || item.name}><span>{item.name || item.model || '物料'}</span><div><i style={{ width: `${Math.max(12, (amount / max) * 100)}%` }} /></div><strong>¥{amount.toFixed(0)}</strong></div>; })}{recentPriceChanges.filter(item => Number(item.old_cost || 0) > Number(item.new_cost || 0)).length === 0 && <div className="dashboard-empty compact">暂无已确认降本机会</div>}</section>
+      </div>
+
+      <div className="dashboard-activity"><strong>最近动态</strong><span className="dashboard-activity-dot" />{snapshotChanges[0] ? `${projectById.get(snapshotChanges[0].projectId)?.code || '项目'} 成本 ${snapshotChanges[0].pct > 0 ? '上升' : '下降'} ${Math.abs(snapshotChanges[0].pct)}%` : '数据会在导入报价、改价或 AI 识别后自动汇总'}<time>刚刚</time></div>
+      <div className="dashboard-security-note"><span>●</span> 本地数据受控 · 云端分析需脱敏并经过审批 · 云端今日 {cloudUsage.count}/{cloudLimit}</div>
+      {advisorInsights.length > 0 && <span className="dashboard-advisor-hint" aria-hidden="true">AI 建议 {advisorInsights.length}</span>}
+    </div>
+  );
+}
+
 export default function Dashboard({ onNavigate }: DashboardProps) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -233,6 +351,23 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     { title: '成本(¥)', dataIndex: 'cost', width: 100, align: 'right' as const, render: (v: number) => v?.toFixed(2) },
     { title: '更新时间', dataIndex: 'updated_at', width: 150 },
   ];
+
+  // 驾驶舱新版布局：保留旧视图代码作为回滚参考，默认使用更聚焦的招标工作台布局。
+  return <DashboardRedesign
+    stats={stats}
+    projects={projects}
+    projCosts={projCosts}
+    snapshotChanges={snapshotChanges}
+    missedByProject={missedByProject}
+    unreadInsights={unreadInsights}
+    recentPriceChanges={recentPriceChanges}
+    advisorInsights={advisorInsights}
+    cloudUsage={cloudUsage}
+    cloudLimit={cloudLimit}
+    onNavigate={onNavigate}
+    onRunAudit={() => refreshAudit(false)}
+    auditRunning={auditRunning}
+  />;
 
   return (
     <div>
@@ -437,11 +572,11 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
 
       {/* ===== ④ 统计卡（导航入口） ===== */}
       <div className="stat-cards">
-        <div className="stat-card card-a" onClick={() => onNavigate?.('parts')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">器件总数</div><div className="stat-value">{stats.total_parts}</div></div>
-        <div className="stat-card card-b" onClick={() => onNavigate?.('projects')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">项目总数</div><div className="stat-value">{stats.total_projects}</div></div>
-        <div className="stat-card card-c" onClick={() => onNavigate?.('projects')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">进行中项目</div><div className="stat-value">{stats.active_projects}</div></div>
-        <div className="stat-card card-d"><div className="stat-label">平均BOM成本</div><div className="stat-value">¥{(stats.avg_bom_cost ?? 0).toLocaleString()}</div></div>
-        <div className="stat-card card-e" onClick={() => onNavigate?.('competitors')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">竞品数量</div><div className="stat-value">{stats.total_competitors}</div></div>
+        <div className="stat-card card-a" onClick={() => onNavigate?.('parts')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">器件总数</div><div className="stat-value">{stats!.total_parts}</div></div>
+        <div className="stat-card card-b" onClick={() => onNavigate?.('projects')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">项目总数</div><div className="stat-value">{stats!.total_projects}</div></div>
+        <div className="stat-card card-c" onClick={() => onNavigate?.('projects')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">进行中项目</div><div className="stat-value">{stats!.active_projects}</div></div>
+        <div className="stat-card card-d"><div className="stat-label">平均BOM成本</div><div className="stat-value">¥{(stats!.avg_bom_cost ?? 0).toLocaleString()}</div></div>
+        <div className="stat-card card-e" onClick={() => onNavigate?.('competitors')} style={{ cursor: onNavigate ? 'pointer' : 'default' }}><div className="stat-label">竞品数量</div><div className="stat-value">{stats!.total_competitors}</div></div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
@@ -457,7 +592,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
 
       <div className="content-card">
         <div className="card-header"><h3>最近更新器件</h3></div>
-        <DataTable tableId="dash_recent_parts" dataSource={stats.recent_parts} columns={recentCols} rowKey="id" size="small" pagination={false} />
+        <DataTable tableId="dash_recent_parts" dataSource={stats!.recent_parts} columns={recentCols} rowKey="id" size="small" pagination={false} />
       </div>
     </div>
   );
