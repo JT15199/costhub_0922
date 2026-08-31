@@ -61,7 +61,7 @@ function DashboardRedesign({
     .sort((a, b) => Number(b.status === '进行中') - Number(a.status === '进行中'))
     .slice(0, 5);
   const recentSavings = snapshotChanges.reduce((sum, item) => sum + Math.max(0, item.oldCost - item.newCost), 0);
-  // 项目之间是类别比较，不使用会暗示时间连续性的曲线；改用排序式 bullet bar 展示成本层级。
+  // 项目之间是类别比较，不使用会暗示时间连续性的曲线；改用排序式成本分布展示项目层级。
   const costRows = [...projCosts].sort((a, b) => b.cost - a.cost).slice(0, 4);
   const tasks: { label: string; action: string; onClick: () => void }[] = [];
   missedByProject.slice(0, 2).forEach(item => tasks.push({
@@ -79,6 +79,32 @@ function DashboardRedesign({
     .sort((a, b) => b.amount - a.amount)[0];
   const aiSavingText = recentSavings > 0 ? `近期已确认降本 ¥${recentSavings.toFixed(0)}` : (firstOpportunity ? `可争取降本 ¥${firstOpportunity.amount.toFixed(0)}` : '等待新的报价机会');
   const aiSavingHint = firstInsight?.module_name ? `${firstInsight.module_name} 存在跨供应商比价机会` : '导入报价后，AI 会自动识别可比关系与异常价差';
+  // 将“议价机会”变成可行动的决策抓手：优先显示尚未处理的报价差异，其次显示已确认的降本记录。
+  const decisionItems = (() => {
+    const insightItems = unreadInsights.flatMap((insight: any) => {
+      let rows: any[] = [];
+      try { const parsed = JSON.parse(insight.insight_json || '[]'); rows = Array.isArray(parsed) ? parsed : []; } catch { rows = []; }
+      return rows.map((row: any) => ({
+        title: row.name || row.model || insight.module_name || '待审物料',
+        detail: `${insight.module_name || '报价模块'} · ${Array.isArray(row.rows) ? row.rows.length : 0} 条报价`,
+        amount: Number(row.diff || row.delta || row.amount || 0),
+        action: '打开情报 →',
+        onClick: () => openAiCenter(onNavigate),
+      }));
+    }).filter((item: any) => item.amount > 0);
+    if (insightItems.length > 0) return insightItems.sort((a: any, b: any) => b.amount - a.amount).slice(0, 3);
+    return recentPriceChanges
+      .map((item: any) => ({
+        title: item.name || item.model || '已降本物料',
+        detail: '历史报价已确认下降 · 可作为供应商谈价锚点',
+        amount: Number(item.old_cost || 0) - Number(item.new_cost || 0),
+        action: '查看器件 →',
+        onClick: () => onNavigate?.('parts'),
+      }))
+      .filter((item: any) => item.amount > 0)
+      .sort((a: any, b: any) => b.amount - a.amount)
+      .slice(0, 3);
+  })();
 
   return (
     <div className="dashboard-redesign">
@@ -125,7 +151,7 @@ function DashboardRedesign({
 
         <section className="dashboard-panel dashboard-cost-distribution"><div className="dashboard-panel-head"><h2>项目成本分布</h2><span>按 BOM 成本排序</span><a onClick={() => onNavigate?.('compare')}>查看分析 →</a></div>{costRows.length > 0 ? <div className="dashboard-cost-map">{costRows.map((row, index) => { const project = projects.find(item => item.code === row.name); const risk = project ? missedByProject.find(item => item.projectId === project.id) : undefined; const maxCost = costRows[0]?.cost || 1; return <button className="dashboard-cost-row" key={row.name} onClick={() => project ? goProject(onNavigate, project.id) : onNavigate?.('compare')}><span className="dashboard-cost-rank">{String(index + 1).padStart(2, '0')}</span><span className="dashboard-cost-name"><strong>{row.name}</strong><small>{project?.name || '项目 BOM'}</small></span><span className="dashboard-cost-rail"><i style={{ width: `${Math.max(8, (row.cost / maxCost) * 100)}%` }} /></span><span className="dashboard-cost-value">¥{row.cost.toFixed(0)}</span><span className={`dashboard-cost-state ${risk ? 'is-risk' : 'is-good'}`}>{risk ? '目标风险' : '已达标'}</span></button>; })}</div> : <div className="dashboard-empty">积累项目报价后，这里会出现项目成本分布。</div>}</section>
 
-        <section className="dashboard-panel dashboard-opportunities"><div className="dashboard-panel-head"><h2>议价机会</h2><span>来自已确认数据</span></div>{recentPriceChanges.filter(item => Number(item.old_cost || 0) > Number(item.new_cost || 0)).slice(0, 3).map((item, _index, rows) => { const amount = Number(item.old_cost) - Number(item.new_cost); const max = Math.max(...rows.map(row => Number(row.old_cost) - Number(row.new_cost)), 1); return <div className="dashboard-opportunity" key={item.id || item.name}><span>{item.name || item.model || '物料'}</span><div><i style={{ width: `${Math.max(12, (amount / max) * 100)}%` }} /></div><strong>¥{amount.toFixed(0)}</strong></div>; })}{recentPriceChanges.filter(item => Number(item.old_cost || 0) > Number(item.new_cost || 0)).length === 0 && <div className="dashboard-empty compact">暂无已确认降本机会</div>}</section>
+        <section className="dashboard-panel dashboard-opportunities"><div className="dashboard-panel-head"><h2>报价决策抓手</h2><span>按价差与影响范围</span><a onClick={() => openAiCenter(onNavigate)}>查看情报 →</a></div>{decisionItems.length > 0 ? <div className="dashboard-decision-list">{decisionItems.map((item: any, index: number) => <div className="dashboard-decision-item" key={`${item.title}-${index}`}><span className="dashboard-decision-rank">{String(index + 1).padStart(2, '0')}</span><div className="dashboard-decision-copy"><strong>{item.title}</strong><small>{item.detail}</small></div><span className="dashboard-decision-amount">¥{item.amount.toFixed(0)}</span><button className="dashboard-decision-action" onClick={item.onClick}>{item.action}</button></div>)}</div> : <div className="dashboard-empty compact">暂无待决报价差异，导入新报价后这里会给出谈价抓手。</div>}</section>
       </div>
 
       <div className="dashboard-activity"><strong>最近动态</strong><span className="dashboard-activity-dot" />{snapshotChanges[0] ? `${projectById.get(snapshotChanges[0].projectId)?.code || '项目'} 成本 ${snapshotChanges[0].pct > 0 ? '上升' : '下降'} ${Math.abs(snapshotChanges[0].pct)}%` : '数据会在导入报价、改价或 AI 识别后自动汇总'}<time>刚刚</time></div>

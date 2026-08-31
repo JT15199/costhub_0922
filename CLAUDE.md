@@ -217,10 +217,10 @@
 - **移除**：导航「本地AI助手」、render case、App 的 costhub-open-ai-prompt 导航监听。LocalAIAssistant.tsx 已 git rm 彻底删除；GoalsCard 挂驾驶舱 AutoThinkPanel 上方；DemoGenerator 待归位（文件保留无入口）。云端审批仍走 cloudConfirm 横幅（approveCloud=requestCloudConfirm）；runCloud=agentSearchLoop。
 - **增强（2026-08-18 用户反馈轮）**：
   · **停止生成**：runThinkLoop 加 abortRef（外部置 aborted=true → 150ms 轮询清理当前轮流式监听并结束，已输出内容当结论）；AiPanel 流式时输入区按钮变红色停止钮。
-  · **模型选择**：头部紧凑下拉（/api/tags 拉列表，切换即存 local_ai_model）；detectOllama 同步当前模型。
-  · **深度思考开关**：头部 Switch（localStorage ai-panel-deepthink 默认开）；runThinkLoop 加 think 选项（false 时 startOllamaStream think:false 更快）。
+  · **模型选择**：底部控制条下拉（/api/tags 拉列表，切换即存 local_ai_model）；detectOllama 同步当前模型。顶部只保留 AI 身份和操作按钮，窄宽度下收缩按钮始终可见。
+  · **深度思考开关**：底部控制条 Switch（localStorage ai-panel-deepthink 默认开）；runThinkLoop 加 think 选项（false 时 startOllamaStream think:false 更快）。
   · **附件**：输入区 📎 支持 Excel（XLSX 读表文本拼进提问）与图片（base64 走 Ollama images 字段，需 VL 模型如 qwen3-vl）；runThinkLoop 加 images 选项（初始 user message 带 images）。
-  · **头部压缩**：去掉「离线分析」框，模型名合并为下拉，上下文行压缩——表头不再占空间。
+  · **头部压缩**：去掉「离线分析」框，顶部只保留 AI 身份、上下文与操作按钮；模型选择和深度思考移到底部控制条，窄宽度下收缩按钮始终可见。
   · **审批三态**：runThinkLoop 的 approveCloud 返回 boolean|'pending'——''pending''=已入队等待确认（不误报"用户拒绝"，明确告知去底部横幅确认后重新提问）；AiPanel 用 getPendingConfirms 区分"入队"vs"本会话已跳过"。
   · **物料洞察历史工具**：query_material_insight（第 25 个，图标 HistoryOutlined）——按物料名查 trend_items+trend_snapshots（方向/置信度/摘要/时间/来源 免分解quick/分解/自动auto）。模型先查历史再决定查最新（用户：Scaler IC 已洞察过但 AI 不知道，且 query_price_insights 是报价情报不是物料行情）。
   · **防幻觉三件套（用户：更新Scaler IC行情却调了项目工具+编造$100-$150）**：①systemPrompt 任务-工具强映射——行情任务唯一路径 query_material_insight→insight_material_trend，严禁调用项目/器件类工具 ②executeTool 软拦截——行情任务（isTrendTask）调无关工具时 [RESULT] 附提示引导改用行情工具 ③verifyConclusionNumbers 校验——结论文本数字必须在工具结果+提问证据中，否则尾部附注「[校验] 含 N 个未能溯源的数字…请人工核对」。
@@ -349,7 +349,7 @@
 - 兼容性：低特效模式会关闭毛玻璃与背景景深但不改变业务操作；首次升级通过 `costhub-liquid-theme-v1` 标记只迁移一次，之后尊重用户选择。
 
 ### 驾驶舱布局（2026-08-31）
-- `Dashboard.tsx` 默认使用招标工作流优先的紧凑布局：顶部关键状态带、项目进展、今日优先处理、项目成本分布、议价机会和最近动态；跨项目成本使用排序式 bullet bar，不使用会暗示时间连续性的曲线；原有项目/情报/分析点击入口保持不变。
+- `Dashboard.tsx` 默认使用招标工作流优先的紧凑布局：顶部关键状态带、项目进展、今日优先处理、项目成本分布、报价决策抓手和最近动态；跨项目成本使用排序式成本分布，不使用会暗示时间连续性的曲线；决策抓手优先呈现未读报价差异，回退展示已确认降本记录，并保留项目/情报/器件库直达入口。
 - 驾驶舱项目行按下一行动展示，不将所有统计卡重复铺开；无数据时给出创建项目或积累报价的明确提示。
 - 液态玻璃主题下左侧导航调整为 204px 悬浮圆角玻璃面板，品牌区、分组导航、AI 情报入口和用户设置区保持同一视觉层级；折叠模式仍保留。
 - 右侧 `AiPanel` 在液态玻璃主题下采用独立头部/对话区/输入区层级，整体为 24px 圆角悬浮面板；输入、助手消息和上下文条使用 11–15px 圆角，保留原有模型、会话、附件、确认和发送行为。

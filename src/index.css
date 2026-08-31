@@ -2227,11 +2227,16 @@ tr:hover .sp-row-ops { opacity: 1; }
 .dashboard-ai-note p { margin: 0; color: #53677f; font-size: 9px; line-height: 1.4; }
 .dashboard-trend { min-height: 0; }
 .dashboard-opportunities { min-height: 0; }
-.dashboard-opportunity { display: grid; grid-template-columns: 58px minmax(0,1fr) 57px; align-items: center; gap: 8px; margin: 18px 0; }
-.dashboard-opportunity > span { overflow: hidden; color: var(--color-text-secondary, #536278); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.dashboard-opportunity > div { height: 7px; overflow: hidden; border-radius: 7px; background: rgba(104,133,169,.13); }
-.dashboard-opportunity i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #4a81e7, #64aed8); }
-.dashboard-opportunity strong { color: var(--color-text-primary, #293c56); font: 700 10px "Segoe UI", sans-serif; text-align: right; }
+.dashboard-decision-list { display: flex; flex-direction: column; }
+.dashboard-decision-item { display: grid; grid-template-columns: 28px minmax(0,1fr) auto; grid-template-areas: "rank copy amount" "rank copy action"; align-items: center; column-gap: 9px; row-gap: 2px; padding: 11px 0; border-bottom: 1px solid rgba(117,145,177,.13); }
+.dashboard-decision-item:last-child { border-bottom: 0; }
+.dashboard-decision-rank { grid-area: rank; display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; border-radius: 9px; background: rgba(90,136,220,.13); color: #4a77c3; font: 700 10px "Segoe UI", sans-serif; }
+.dashboard-decision-copy { grid-area: copy; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.dashboard-decision-copy strong { overflow: hidden; color: var(--color-text-primary, #293c56); font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-decision-copy small { overflow: hidden; color: var(--color-text-secondary, #71839b); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-decision-amount { grid-area: amount; color: #3271c9; font: 700 12px "Segoe UI", sans-serif; text-align: right; white-space: nowrap; }
+.dashboard-decision-action { grid-area: action; justify-self: end; padding: 0; border: 0; background: transparent; color: #5b83cf; cursor: pointer; font-size: 9px; }
+.dashboard-decision-action:hover { color: #2d62b7; text-decoration: underline; }
 .dashboard-activity { display: flex; align-items: center; min-height: 37px; margin-top: 12px; padding: 0 14px; overflow: hidden; border-radius: 12px; background: var(--color-surface, #fff); border: 1px solid var(--color-border, #e8ecf1); color: var(--color-text-secondary, #67778d); font-size: 9px; white-space: nowrap; text-overflow: ellipsis; }
 .dashboard-activity strong { margin-right: 11px; color: var(--color-text-primary, #2a3c54); }
 .dashboard-activity-dot { width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: #42a478; flex: 0 0 auto; }
@@ -2321,6 +2326,22 @@ tr:hover .sp-row-ops { opacity: 1; }
 [data-theme="liquidLight"] .sidebar .sidebar-footer { margin: 4px 8px 0; border-top-color: rgba(255,255,255,.62) !important; }
 [data-theme="liquidLight"] .sidebar > .ant-tooltip-open { border-radius: 12px; }
 
+/* 右侧 AI 工作台：顶部固定身份与操作，模型控制集中到底部；基础布局对所有主题生效。 */
+.local-ai-header-toolbar { display: flex; align-items: center; min-width: 0; gap: 8px; }
+.local-ai-identity { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.local-ai-identity strong { white-space: nowrap; }
+.local-ai-mode-label { white-space: nowrap; }
+.local-ai-header-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; flex-shrink: 0; }
+.local-ai-header-actions .ant-btn { width: 28px; min-width: 28px; padding-inline: 0 !important; }
+.local-ai-header-actions .local-ai-collapse-button { display: inline-flex !important; align-items: center; justify-content: center; width: 30px; min-width: 30px; }
+.local-ai-context-hint { margin-left: auto; white-space: nowrap; }
+.local-ai-bottom-controls { display: flex; align-items: center; gap: 8px; min-height: 32px; margin-top: 8px; padding: 4px 7px; border: 1px solid rgba(180,180,180,.4); border-radius: 12px; }
+.local-ai-bottom-controls label { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 9px; white-space: nowrap; }
+.local-ai-bottom-controls > label:first-child { flex: 1; }
+.local-ai-bottom-controls .ant-select { min-width: 0; flex: 1; }
+.local-ai-deepthink-control { cursor: pointer; }
+.local-ai-bottom-note { margin-left: auto; font-size: 9px; white-space: nowrap; }
+
 /* 右侧 AI 工作台：从直角分栏改为与主界面同一套悬浮圆角玻璃容器。 */
 [data-theme="liquidLight"] .local-ai-root {
   height: calc(100vh - 20px) !important;
@@ -2336,10 +2357,13 @@ tr:hover .sp-row-ops { opacity: 1; }
   border-bottom: 1px solid rgba(255,255,255,.62) !important;
   background: rgba(255,255,255,.22) !important;
 }
-[data-theme="liquidLight"] .local-ai-header .ant-select-selector {
-  border-radius: 11px !important;
-  background: rgba(255,255,255,.5) !important;
-}
+[data-theme="liquidLight"] .local-ai-header-toolbar { display: flex; align-items: center; min-width: 0; gap: 8px; }
+[data-theme="liquidLight"] .local-ai-identity { display: flex; align-items: center; gap: 7px; min-width: 0; }
+[data-theme="liquidLight"] .local-ai-identity strong { color: #2d527f; font-size: 12px; letter-spacing: .01em; white-space: nowrap; }
+[data-theme="liquidLight"] .local-ai-mode-label { padding: 2px 6px; border: 1px solid rgba(255,255,255,.72); border-radius: 999px; color: #71839b; font-size: 9px; white-space: nowrap; }
+[data-theme="liquidLight"] .local-ai-header-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; flex-shrink: 0; }
+[data-theme="liquidLight"] .local-ai-header-actions .ant-btn { width: 28px; min-width: 28px; padding: 0 !important; }
+[data-theme="liquidLight"] .local-ai-header-actions .local-ai-collapse-button { display: inline-flex !important; align-items: center; justify-content: center; width: 30px; min-width: 30px; }
 [data-theme="liquidLight"] .local-ai-header .ant-btn {
   border-radius: 9px;
 }
@@ -2350,6 +2374,7 @@ tr:hover .sp-row-ops { opacity: 1; }
   background: rgba(255,255,255,.42) !important;
   border-color: rgba(255,255,255,.72) !important;
 }
+[data-theme="liquidLight"] .local-ai-context-hint { margin-left: auto; color: #8b9cb0; font-size: 9px; white-space: nowrap; }
 [data-theme="liquidLight"] .local-ai-conversation {
   padding: 14px 13px !important;
   gap: 12px !important;
@@ -2394,8 +2419,26 @@ tr:hover .sp-row-ops { opacity: 1; }
   height: 32px;
   border-radius: 11px !important;
 }
+[data-theme="liquidLight"] .local-ai-bottom-controls { display: flex; align-items: center; gap: 8px; min-height: 32px; margin-top: 8px; padding: 4px 7px; border: 1px solid rgba(255,255,255,.72); border-radius: 12px; background: rgba(255,255,255,.3); }
+[data-theme="liquidLight"] .local-ai-bottom-controls label { display: flex; align-items: center; gap: 5px; min-width: 0; color: #71839b; font-size: 9px; white-space: nowrap; }
+[data-theme="liquidLight"] .local-ai-bottom-controls > label:first-child { flex: 1; }
+[data-theme="liquidLight"] .local-ai-bottom-controls .ant-select { min-width: 0; flex: 1; }
+[data-theme="liquidLight"] .local-ai-bottom-controls .ant-select-selector { min-height: 23px !important; padding-inline: 7px !important; border-radius: 9px !important; background: rgba(255,255,255,.54) !important; }
+[data-theme="liquidLight"] .local-ai-deepthink-control { cursor: pointer; }
+[data-theme="liquidLight"] .local-ai-deepthink-control .ant-switch { flex-shrink: 0; }
+[data-theme="liquidLight"] .local-ai-bottom-note { margin-left: auto; color: #3a8e68; font-size: 9px; white-space: nowrap; }
 [data-theme="liquidLight"] .local-ai-composer-area > div:last-child {
   padding-inline: 2px;
+}
+
+@media (max-width: 380px) {
+  [data-theme="liquidLight"] .local-ai-mode-label,
+  [data-theme="liquidLight"] .local-ai-context-hint,
+  [data-theme="liquidLight"] .local-ai-bottom-note { display: none; }
+  [data-theme="liquidLight"] .local-ai-header-actions { gap: 0; }
+  [data-theme="liquidLight"] .local-ai-header-actions .ant-btn { width: 26px; min-width: 26px; }
+  [data-theme="liquidLight"] .local-ai-header-actions .local-ai-collapse-button { width: 30px; min-width: 30px; }
+  [data-theme="liquidLight"] .local-ai-bottom-controls { gap: 5px; padding-inline: 6px; }
 }
 
 @media (max-width: 1180px) {

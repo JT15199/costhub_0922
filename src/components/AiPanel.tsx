@@ -763,7 +763,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     return (
       <div className="local-ai-root" style={{ width: 42, height: '100vh', flexShrink: 0, background: 'var(--ai-panel-bg, #F4F3EE)', borderLeft: '1px solid var(--ai-panel-border, #E6E4DC)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0', overflow: 'hidden' }}>
         <Tooltip title="展开 AI 协作窗">
-          <Button type="text" icon={<LeftOutlined />} onClick={toggleCollapse} style={{ color: '#181713' }} />
+          <Button type="text" aria-label="展开 AI 协作窗" icon={<LeftOutlined />} onClick={toggleCollapse} style={{ color: '#181713' }} />
         </Tooltip>
         <div style={{ writingMode: 'vertical-rl', fontSize: 11, color: '#9A978B', letterSpacing: '0.2em', marginTop: 18, userSelect: 'none' }}>协作分析</div>
         <div style={{ flex: 1 }} />
@@ -786,28 +786,15 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         style={{ position: 'absolute', left: -3, top: 0, bottom: 0, width: 6, cursor: 'col-resize', zIndex: 5 }}
       />
 
-      {/* 头部（紧凑：模型选择 + 深度思考 + 操作按钮） */}
+      {/* 头部：只保留身份、上下文与操作，模型控制统一放到底部，窄宽度也能保留收缩按钮 */}
       <div className="local-ai-header" style={{ padding: '8px 10px 6px', borderBottom: '1px solid #E6E4DC', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div className="local-ai-header-toolbar">
+          <div className="local-ai-identity">
           <span style={{ width: 6, height: 6, borderRadius: 3, background: modelInfo.ready ? '#1F7A4C' : '#C0392B', flexShrink: 0 }} />
-          <Select
-            size="small" variant="borderless" showSearch
-            style={{ width: 136, flexShrink: 0 }}
-            value={model || undefined}
-            placeholder={modelInfo.ready ? '选择模型' : '未连接'}
-            options={models.map(m => ({ value: m, label: m }))}
-            onChange={(v: string) => { setModel(v); setSetting('local_ai_model', v).catch(() => {}); setModelInfo(prev => ({ ...prev, model: v, ready: true })); }}
-            popupMatchSelectWidth={false}
-            title={modelInfo.ready ? '本地模型（Ollama）' : '本地模型未连接'}
-          />
-          <Tooltip title="深度思考：打开则模型先思考再回答（更深入，较慢）">
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: deepThink ? '#181713' : '#9A978B', cursor: 'pointer', flexShrink: 0, userSelect: 'none' }}
-              onClick={() => { const v = !deepThink; setDeepThink(v); localStorage.setItem('ai-panel-deepthink', v ? '1' : '0'); }}>
-              <Switch size="small" checked={deepThink} style={{ background: deepThink ? '#181713' : '#B8B5AA' }} />
-              深度思考
-            </span>
-          </Tooltip>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 1 }}>
+            <strong>AI 协作</strong>
+            <span className="local-ai-mode-label">本地模型</span>
+          </div>
+          <div className="local-ai-header-actions">
             <Tooltip title="AI 使用指南"><Button type="text" size="small" icon={<QuestionCircleOutlined />} style={{ color: '#9A978B' }} onClick={() => window.dispatchEvent(new Event('costhub-open-ai-guide'))} /></Tooltip>
             <Tooltip title="新对话"><Button type="text" size="small" icon={<PlusOutlined />} style={{ color: '#5F5D54' }} onClick={newChat} /></Tooltip>
             <Dropdown menu={{ items: [
@@ -817,11 +804,11 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
             ] }} placement="bottomRight">
               <Tooltip title="历史会话"><Button type="text" size="small" icon={<HistoryOutlined />} style={{ color: '#5F5D54' }} /></Tooltip>
             </Dropdown>
-            <Tooltip title="折叠"><Button type="text" size="small" icon={<RightOutlined />} style={{ color: '#5F5D54' }} onClick={toggleCollapse} /></Tooltip>
+            <Tooltip title="收起 AI 协作窗"><Button className="local-ai-collapse-button" type="text" size="small" aria-label="收起 AI 协作窗" icon={<RightOutlined />} style={{ color: '#5F5D54' }} onClick={toggleCollapse} /></Tooltip>
           </div>
         </div>
         <div className="local-ai-context" style={{ marginTop: 4, fontSize: 11, color: '#5F5D54', background: '#FFFFFF', border: '1px solid #E6E4DC', borderRadius: 6, padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ color: '#9A978B' }}>当前</span><b style={{ color: '#181713', fontWeight: 600 }}>{ctxLabel}</b>
+          <span style={{ color: '#9A978B' }}>上下文</span><b style={{ color: '#181713', fontWeight: 600 }}>{ctxLabel}</b><span className="local-ai-context-hint">用于本次分析</span>
         </div>
       </div>
       {/* 对话区 */}
@@ -974,6 +961,27 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
               style={{ background: '#181713', borderColor: '#181713', borderRadius: 7 }}
             />
           )}
+        </div>
+        <div className="local-ai-bottom-controls">
+          <label title={modelInfo.ready ? '本地模型（Ollama）' : '本地模型未连接'}>
+            <span>模型</span>
+            <Select
+              size="small" variant="borderless" showSearch
+              value={model || undefined}
+              placeholder={modelInfo.ready ? '选择模型' : '未连接'}
+              options={models.map(m => ({ value: m, label: m }))}
+              onChange={(v: string) => { setModel(v); setSetting('local_ai_model', v).catch(() => {}); setModelInfo(prev => ({ ...prev, model: v, ready: true })); }}
+              popupMatchSelectWidth={false}
+              aria-label="选择本地模型"
+            />
+          </label>
+          <Tooltip title="打开则模型先思考再回答（更深入，较慢）">
+            <label className="local-ai-deepthink-control">
+              <Switch size="small" checked={deepThink} onChange={(v) => { setDeepThink(v); localStorage.setItem('ai-panel-deepthink', v ? '1' : '0'); }} />
+              <span>深度思考</span>
+            </label>
+          </Tooltip>
+          <span className="local-ai-bottom-note">{modelInfo.ready ? '本地运行' : '未连接'}</span>
         </div>
         <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', fontSize: 10.5, color: '#9A978B' }}>
           <span>数据就绪度</span>
