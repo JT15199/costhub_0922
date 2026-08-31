@@ -1345,14 +1345,14 @@ body {
   box-shadow: 0 28px 90px rgba(55,91,130,.2), inset 0 1px 0 rgba(255,255,255,.88), inset 0 -1px 0 rgba(255,255,255,.46);
   backdrop-filter: blur(28px) saturate(150%);
   -webkit-backdrop-filter: blur(28px) saturate(150%);
-  animation: loginShellIn 480ms cubic-bezier(.22,1,.36,1) both;
-  transition: opacity 360ms ease, transform 420ms cubic-bezier(.32,.72,0,1), filter 420ms ease;
+  animation: loginShellIn 560ms cubic-bezier(.22,1,.36,1) both;
+  transition: opacity 620ms ease, transform 680ms cubic-bezier(.32,.72,0,1), filter 680ms ease;
 }
 @keyframes loginShellIn {
   from { opacity: 0; transform: translateY(16px) scale(.985); filter: blur(5px); }
   to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
 }
-.login-screen.is-entering .login-shell { opacity: 0; transform: translateY(-8px) scale(.985); filter: blur(7px); }
+.login-screen.is-entering .login-shell { opacity: 0; transform: translateY(-12px) scale(.965); filter: blur(9px); }
 .login-brand-pane {
   display: flex;
   flex-direction: column;
@@ -1391,7 +1391,7 @@ body {
 .login-form-heading h1 { color: #142b4c; font-size: 31px; font-weight: 800; letter-spacing: -.035em; line-height: 1.15; }
 .login-form-heading p { margin-top: 9px; color: #70849a; font-size: 14px; }
 .login-field { display: block; margin-top: 21px; color: #5e7690; font-size: 11px; font-weight: 600; letter-spacing: .04em; }
-.login-field > span { display: block; margin: 0 0 7px 3px; }
+.login-field > .login-field-label { display: block; margin: 0 0 7px 3px; }
 .login-field .ant-input-affix-wrapper,
 .login-field > .ant-input { height: 48px; border: 1px solid rgba(148,181,210,.5) !important; border-radius: 14px !important; background: rgba(255,255,255,.42) !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.6); color: #1b3556; }
 .login-field .ant-input-affix-wrapper:hover,
@@ -1410,9 +1410,14 @@ body {
 .login-note svg { margin-right: 6px; color: #2ba7aa; }
 .login-note b { color: #2c66bd; font-weight: 700; }
 .login-password-reveal { display: inline-flex; align-items: center; gap: 6px; margin-top: 15px; padding: 7px 10px; border: 1px solid rgba(235,176,75,.34); border-radius: 10px; background: rgba(255,220,147,.18); color: #8a5a00; font-size: 11px; }
-.login-transition { position: absolute; top: 50%; left: 50%; display: flex; flex-direction: column; align-items: center; gap: 5px; opacity: 0; pointer-events: none; transform: translate(-50%, calc(-50% + 12px)) scale(.98); color: #214c83; transition: opacity 220ms ease, transform 360ms cubic-bezier(.32,.72,0,1); }
+.login-transition { position: absolute; top: 50%; left: 50%; display: flex; flex-direction: column; align-items: center; gap: 5px; opacity: 0; pointer-events: none; transform: translate(-50%, calc(-50% + 16px)) scale(.96); color: #214c83; transition: opacity 360ms ease 170ms, transform 520ms cubic-bezier(.32,.72,0,1) 170ms; }
 .login-screen.is-entering .login-transition { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 .login-transition-mark { display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px; border: 1px solid rgba(255,255,255,.8); border-radius: 14px; background: rgba(255,255,255,.48); box-shadow: 0 8px 22px rgba(56,116,171,.14); color: #2f76d3; font-size: 20px; }
+.login-screen.is-entering .login-transition-mark { animation: loginMarkIn 620ms cubic-bezier(.32,.72,0,1) 180ms both; }
+@keyframes loginMarkIn {
+  from { opacity: 0; transform: scale(.74) rotate(-8deg); box-shadow: 0 0 0 rgba(56,116,171,0); }
+  to { opacity: 1; transform: scale(1) rotate(0); box-shadow: 0 8px 22px rgba(56,116,171,.14); }
+}
 .login-transition strong { font-size: 13px; }
 .login-transition small { color: #7890a8; font-size: 10px; }
 

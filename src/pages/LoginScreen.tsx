@@ -36,7 +36,7 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
       setEntering(true);
       const reduced = document.documentElement.dataset.lowfx === 'on'
         || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-      if (!reduced) await new Promise(resolve => window.setTimeout(resolve, 420));
+      if (!reduced) await new Promise(resolve => window.setTimeout(resolve, 680));
       onUnlock();
     } else {
       message.warning('用户名或密码不正确，将以受限模式进入（不显示数据）');
@@ -103,7 +103,7 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
           )}
 
           <label className="login-field">
-            <span>用户名</span>
+            <span className="login-field-label">用户名</span>
             <Input
               size="large"
               prefix={<UserOutlined />}
@@ -115,7 +115,7 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
             />
           </label>
           <label className="login-field">
-            <span>密码</span>
+            <span className="login-field-label">密码</span>
             <Input.Password
               size="large"
               prefix={<LockOutlined />}
