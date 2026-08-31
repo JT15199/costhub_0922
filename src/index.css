@@ -1935,42 +1935,58 @@ tr:hover .sp-row-ops { opacity: 1; }
   box-shadow: var(--color-shadow-hover), 0 10px 34px rgba(73,125,206,0.1) !important;
 }
 
-/* 数据表面保持高不透明度，避免玻璃效果损害成本数字辨识度 */
+/*
+ * 数据列表采用单层玻璃：外层卡片负责玻璃底色，表格本体不再叠加白色面板。
+ * 这样横向滚动区、固定列与表格外的分页区会保持同一透光程度。
+ */
+[data-theme="liquidLight"] .ant-table-wrapper,
+[data-theme="liquidLight"] .ant-table-container,
+[data-theme="liquidLight"] .ant-table,
+[data-theme="liquidLight"] .ant-table-content,
+[data-theme="liquidLight"] .ant-table-body,
+[data-theme="liquidLight"] .ant-table-sticky-holder,
+[data-theme="liquidLight"] .ant-table-placeholder,
+[data-theme="liquidLight"] .ant-table-pagination {
+  background: transparent !important;
+}
 [data-theme="liquidLight"] .ant-table-wrapper,
 [data-theme="liquidLight"] .ant-table-container,
 [data-theme="liquidLight"] .ant-table {
-  background: rgba(255,255,255,var(--glass-table-opacity)) !important;
   border-radius: 10px;
 }
-[data-theme="liquidLight"] .ant-table-thead > tr > th {
-  background: rgba(235,242,251,0.58) !important;
+[data-theme="liquidLight"] .ant-table-thead > tr > th,
+[data-theme="liquidLight"] .ant-table-thead > tr > td,
+[data-theme="liquidLight"] .ant-table-thead > tr > th.ant-table-cell-fix-left,
+[data-theme="liquidLight"] .ant-table-thead > tr > th.ant-table-cell-fix-right {
+  background: rgba(235,242,251,0.46) !important;
   color: #53637A !important;
   border-bottom-color: rgba(100,130,175,0.16) !important;
 }
-[data-theme="liquidLight"] .ant-table-tbody > tr > td {
-  background: rgba(255,255,255,0.26) !important;
+[data-theme="liquidLight"] .ant-table-tbody > tr > td,
+[data-theme="liquidLight"] .ant-table-tbody > tr > td.ant-table-cell-fix-left,
+[data-theme="liquidLight"] .ant-table-tbody > tr > td.ant-table-cell-fix-right {
+  background: transparent !important;
   border-bottom-color: rgba(100,130,175,0.11) !important;
 }
-[data-theme="liquidLight"] .ant-table-tbody > tr:hover > td { background: rgba(226,238,255,0.62) !important; }
+[data-theme="liquidLight"] .ant-table-tbody > tr:hover > td,
+[data-theme="liquidLight"] .ant-table-tbody > tr:hover > td.ant-table-cell-fix-left,
+[data-theme="liquidLight"] .ant-table-tbody > tr:hover > td.ant-table-cell-fix-right {
+  background: rgba(226,238,255,0.46) !important;
+}
+[data-theme="liquidLight"] .ant-table-tbody > tr.ant-table-row-selected > td,
+[data-theme="liquidLight"] .ant-table-tbody > tr.ant-table-row-selected > td.ant-table-cell-fix-left,
+[data-theme="liquidLight"] .ant-table-tbody > tr.ant-table-row-selected > td.ant-table-cell-fix-right {
+  background: rgba(216,233,255,0.52) !important;
+}
+[data-theme="liquidLight"] .ant-table-ping-left .ant-table-cell-fix-left-last::after,
+[data-theme="liquidLight"] .ant-table-ping-right .ant-table-cell-fix-right-first::after {
+  box-shadow: inset 8px 0 8px -8px rgba(69,94,128,0.14) !important;
+}
 
-/* 项目列表专用：让列表本身透出背景图，而不是左侧一整块纯白；数字仍保留轻微白底保证可读性。 */
+/* 项目列表沿用同一层玻璃，不再覆盖全局表格的透明底色。 */
 [data-theme="liquidLight"] .project-list-card {
-  background: rgba(255,255,255,0.42) !important;
+  background: var(--glass-surface) !important;
   box-shadow: 0 18px 48px rgba(75,113,164,0.10), inset 0 1px 0 rgba(255,255,255,0.66) !important;
-}
-[data-theme="liquidLight"] .project-list-card .ant-table-wrapper,
-[data-theme="liquidLight"] .project-list-card .ant-table-container,
-[data-theme="liquidLight"] .project-list-card .ant-table {
-  background: rgba(255,255,255,var(--glass-table-opacity)) !important;
-}
-[data-theme="liquidLight"] .project-list-card .ant-table-thead > tr > th {
-  background: rgba(235,242,251,0.56) !important;
-}
-[data-theme="liquidLight"] .project-list-card .ant-table-tbody > tr > td {
-  background: rgba(255,255,255,0.28) !important;
-}
-[data-theme="liquidLight"] .project-list-card .ant-table-tbody > tr:hover > td {
-  background: rgba(226,238,255,0.54) !important;
 }
 
 [data-theme="liquidLight"] .ant-btn-primary {
