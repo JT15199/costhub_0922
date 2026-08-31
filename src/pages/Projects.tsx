@@ -78,6 +78,7 @@ export default function Projects() {
   const [moduleFocus, setModuleFocus] = useState<string | null>(null);
   const [negotiationOpen, setNegotiationOpen] = useState(true);
   const [bomSearch, setBomSearch] = useState('');
+  const [bomTableMode, setBomTableMode] = useState<'module' | 'flat'>('module');
 
   // ====== SKU 变体（基座项目 + 差异规则） ======
   const [skus, setSkus] = useState<any[]>([]);
@@ -1287,6 +1288,7 @@ export default function Projects() {
                       <Upload beforeUpload={handleImportFile} showUploadList={false} accept=".xlsx,.xls"><Button size="small" icon={<UploadOutlined />}>导入</Button></Upload>
                       <Button size="small" icon={<DownloadOutlined />} onClick={() => { const data = boms.map(b => ({ 模块: b.module_name, 大类: b.main_category, 子类: b.sub_category, 器件名称: b.part_name, 型号: b.part_model, 单价: b.part_cost, 数量: b.quantity, 小计: (b.part_cost || 0) * b.quantity, 备注: b.remark })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'BOM'); XLSX.writeFile(wb, `BOM_${projects.find(p => p.id === selectedPid)?.code || 'export'}.xlsx`); message.success('已导出'); }}>导出</Button>
                       <Input size="small" allowClear value={bomSearch} onChange={e => setBomSearch(e.target.value)} placeholder="搜索器件 / 型号 / 规格" style={{ width: 210 }} />
+                      <Segmented size="small" value={bomTableMode} onChange={v => setBomTableMode(v as 'module' | 'flat')} options={[{ label: '模块分组', value: 'module' }, { label: '全量表格', value: 'flat' }]} />
                     </Space>
                     {bomSelKeys.length > 0 && (
                       <Space>
@@ -1309,8 +1311,20 @@ export default function Projects() {
                       options={projects.filter((p: any) => p.id !== selectedPid).map((p: any) => ({ label: `[${p.code}] ${p.name}${p.project_type === '已完成' ? ' ✓' : ''}`, value: p.id }))}
                       />
                   </div>
-                  {/* Module-grouped BOM with per-module reference */}
-                  {sortedModNames.map((modName: string) => {
+                  {bomTableMode === 'flat' ? (
+                    <DataTable
+                      tableId="bom_flat_detail"
+                      hideToolbar
+                      dataSource={visibleBoms}
+                      columns={bomCols}
+                      rowKey="id"
+                      size="small"
+                      pagination={false}
+                      scroll={{ x: 1100, y: 480 }}
+                      rowSelection={{ selectedRowKeys: bomSelKeys, onChange: keys => setBomSelKeys(keys) }}
+                      onRow={(r: any) => ({ onDoubleClick: () => { setBomEdit(r); bomForm.setFieldsValue({ ...r, _part_name: r.part_name, _part_model: r.part_model, _main_category: r.main_category, _sub_category: r.sub_category, _cost: r.part_cost }); setBomModal(true); } })}
+                    />
+                  ) : sortedModNames.map((modName: string) => {
                     const items = groupedBOMs[modName];
                     const modTotal = items.reduce((s: number, b: any) => s + (b.part_cost || 0) * b.quantity, 0);
                     const ref = modRefMap[modName];
