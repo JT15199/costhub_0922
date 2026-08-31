@@ -105,7 +105,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
 
     // 保存到localStorage
     localStorage.setItem('app-theme', currentTheme);
-  }, [currentTheme, theme, backgroundImage]);
+  }, [currentTheme, theme, backgroundImage, glassOpacity]);
 
   const setTheme = (themeName: string) => {
     if (themes[themeName]) {

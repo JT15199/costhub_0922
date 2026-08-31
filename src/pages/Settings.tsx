@@ -1749,10 +1749,25 @@ export default function Settings({embedded }: { embedded?: boolean }) {
                   if (file.size > 2 * 1024 * 1024) { message.error('背景图片不能超过 2MB'); return Upload.LIST_IGNORE; }
                   const reader = new FileReader();
                   reader.onload = (event) => {
-                    const dataUrl = event.target?.result as string;
-                    if (!dataUrl) { message.error('图片读取失败，请重试'); return; }
-                    setBackgroundImage(dataUrl);
-                    message.success('背景已更新');
+                    const source = event.target?.result as string;
+                    if (!source) { message.error('图片读取失败，请重试'); return; }
+                    // 图片可能未超过 2MB，但 Base64 + CSS 变量会放大体积；统一缩放压缩后再保存，避免部分壁纸不生效。
+                    const image = new Image();
+                    image.onload = () => {
+                      const maxEdge = 1920;
+                      const scale = Math.min(1, maxEdge / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height));
+                      const canvas = document.createElement('canvas');
+                      canvas.width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
+                      canvas.height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
+                      const ctx = canvas.getContext('2d');
+                      if (!ctx) { message.error('图片处理失败，请重试'); return; }
+                      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+                      const optimized = canvas.toDataURL('image/jpeg', 0.84);
+                      setBackgroundImage(optimized);
+                      message.success('背景已更新');
+                    };
+                    image.onerror = () => message.error('图片处理失败，请重试');
+                    image.src = source;
                   };
                   reader.onerror = () => message.error('图片读取失败，请重试');
                   reader.readAsDataURL(file);
