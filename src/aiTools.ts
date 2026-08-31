@@ -30,6 +30,7 @@ export const TOOL_ICONS: Record<string, React.ComponentType> = {
   query_project_cost: DollarOutlined,
   query_part_suppliers: ShopOutlined,
   query_supplier_trend: LineChartOutlined,
+  visualize_cost_analysis: BarChartOutlined,
   query_target_status: AimOutlined,
   query_cost_snapshots: HistoryOutlined,
   query_price_insights: FundOutlined,
@@ -907,9 +908,40 @@ const tools: AiTool[] = [
       return msg;
     },
   },
+  {
+    id: 'visualize_cost_analysis',
+    name: '生成成本分析图表',
+    desc: '基于数据库真实 BOM 生成成本图表。project_codes 必填（项目代号，多个用逗号分隔）；dimension 可选 module/main_category/sub_category；chart_type 可选 auto/pie/bar/pareto。单项目构成默认饼图，多项目对比默认柱状图，找成本大头用 pareto。只读，不接受模型自带数据。',
+    params: [
+      { key: 'project_codes', type: 'string', required: true, desc: '项目代号，多个用逗号分隔，如 M270,M320' },
+      { key: 'dimension', type: 'string', desc: 'module/main_category/sub_category，默认 module' },
+      { key: 'chart_type', type: 'string', desc: 'auto/pie/bar/pareto，默认 auto' },
+    ],
+    execute: async (a) => {
+      const codes = String(a.project_codes || '').split(/[,，]/).map((x: string) => x.trim()).filter(Boolean).slice(0, 8);
+      const dimension = ['module', 'main_category', 'sub_category'].includes(String(a.dimension)) ? String(a.dimension) : 'module';
+      const projects = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted && codes.includes(String(p.code || '')));
+      if (!projects.length) return '未找到项目：' + codes.join('、');
+      const out: string[] = [];
+      for (const p of projects) {
+        const boms = (await getProjectBOMs(p.id)).filter((b: any) => !b.is_deleted);
+        const groups = new Map<string, number>();
+        for (const b of boms) {
+          const key = dimension === 'module' ? (b.module_name || '未分模块') : (b[dimension] || '未分类');
+          const value = (Number(b.part_cost ?? b.cost) || 0) * (Number(b.quantity) || 1);
+          groups.set(key, (groups.get(key) || 0) + value);
+        }
+        const rows = [...groups.entries()].sort((x, y) => y[1] - x[1]);
+        out.push(p.code + '｜' + rows.map(([k, v]) => k + ' ¥' + v.toFixed(2)).join('；'));
+      }
+      return '图表数据已从本地 BOM 按 ' + dimension + ' 聚合（前端将直接渲染，不采用模型生成数字）：\n' + out.join('\n');
+    },
+  },
 ];
 
-export function listTools(): AiTool[] { return tools; }
+export function listTools(): AiTool[] {
+  return tools;
+}
 
 export function getTool(id: string): AiTool | undefined { return tools.find(t => t.id === id); }
 

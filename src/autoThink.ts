@@ -93,7 +93,7 @@ export async function buildThinkOverview(): Promise<string> {
     const adv = await getAdvisorInsights('open');
     if (adv.length > 0) lines.push('自主建议：' + adv.length + ' 条待处理机会/风险点。');
   } catch { /* 忽略 */ }
-  lines.push('注：你拥有 13 个本地只读工具可深挖（BOM/供应商/规格/目标/快照/工作手账等）；如需市场行情可申请 cloud_market_query（会请求用户审批）。');
+  lines.push('注：你拥有本地白名单工具可深挖（BOM/供应商/规格/目标/快照/工作手账/图表等）；确需公开行情可申请受控云端，但严禁携带任何本地数据。');
   return lines.join('\n');
 }
 
@@ -138,7 +138,7 @@ export async function runAutoThink(opts?: {
         ? '\n【当前目标】用户下达了目标：' + activeGoals.slice(0, 3).map((g: any) => '「' + g.text + '」' + (g.linked_project ? '(' + g.linked_project + ')' : '')).join('、') + '。请优先围绕这些目标做深入分析，结论要直接回应目标。'
         : '') +
       '\n【任务】你现在是后台成本分析员：聚焦 1-2 个最关键的分析方向深挖到底（候选：目标达成差距核实 / 模块成本结构与关键依赖 / 跨项目同模块价差与议价机会 / 大额物料供应商集中度 / 成本异常数字核实），' +
-      '先选定方向再逐个调用本地工具核实（每个判断都要有数据支撑，交叉验证后再下结论）；本地数据能回答的就不要申请云端；只有决策确实需要外部行情（如某物料近期市场价趋势）时才申请 cloud_market_query；' +
+      '先选定方向再逐个调用本地工具核实（每个判断都要有数据支撑，交叉验证后再下结论）；只有本地数据无法回答的公开行情，才可申请受控云端并等待审查/审批；' +
       '最后输出一段 200-400 字的分析结论：①发现（事实+数字依据）②判断（机会/风险/正常）③建议行动（具体到项目/物料）。没有值得深挖的就说明并结束。';
     const logId = await saveThinkLog({ status: 'running', topic: '', overview, thoughts: '', tools_json: '[]', clouds_json: '[]', conclusion: '', started_at: '' });
     opts?.onEvent?.({ kind: 'start', logId });

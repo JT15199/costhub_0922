@@ -16,7 +16,6 @@ export default function AIGuide({ open, onClose, onOpenSettings }: Props) {
   const [llmReady, setLlmReady] = useState(false);
   const [llmName, setLlmName] = useState('');
   const [localModel, setLocalModel] = useState('');
-  const [nativeSearch, setNativeSearch] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -27,7 +26,6 @@ export default function AIGuide({ open, onClose, onOpenSettings }: Props) {
         setLlmReady(!!active);
         setLlmName(active?.provider_name || '');
         setLocalModel(await getSetting('local_ai_model', ''));
-        setNativeSearch((await getSetting('ai_native_search', '1')) === '1');
       } catch { /* ignore */ }
     })();
   }, [open]);
@@ -53,7 +51,7 @@ export default function AIGuide({ open, onClose, onOpenSettings }: Props) {
       footer={(
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontSize: 12, color: '#94A3B8' }}>
-            云端模型 {llmReady ? <>已就绪（{llmName}）</> : '未配置'} · 本地模型 {localModel ? <>已配置（{localModel}）</> : '未配置'} · 原生联网搜索 {nativeSearch ? '已开启' : '已关闭'}
+            本地主脑 {localModel ? <>已配置（{localModel}）</> : '未配置'} · 受控云端 {llmReady ? <>已配置（{llmName}）</> : '未配置'} · 外发需审查/条件审批
           </span>
           <div>
             <Button onClick={onClose}>知道了</Button>
@@ -79,10 +77,10 @@ export default function AIGuide({ open, onClose, onOpenSettings }: Props) {
       />
       <Cap
         title='物料趋势洞察'
-        desc='物料行情 AI 洞察（9 种分析框架 + 联网搜索 + 历史留档），走云端模型'
-        ready={llmReady}
-        readyText={llmReady ? '云端模型已就绪（' + llmName + '）' : '未配置云端模型'}
-        warnText='未配置云端模型——在「系统设置 → AI 服务」配置后可用'
+        desc='先查本地历史，再按需调用云端补充公开行情；云端仅收到通用物料名、品类与问题'
+        ready={!!localModel && llmReady}
+        readyText='本地分析 + 受控云端均可用'
+        warnText={!localModel ? '需配置本地模型' : '未配置云端模型，仍可分析本地历史'}
       />
       <Cap
         title='全局 AI 问询'
@@ -106,11 +104,11 @@ export default function AIGuide({ open, onClose, onOpenSettings }: Props) {
         warnText=''
       />
       <Cap
-        title='双向 AI 洞察（本地↔云端桥）'
-        desc='本地判断意图 → 脱敏审计 → 云端查实时行情 → 本地结合数据出建议；发送前自动拦截敏感信息（型号/金额/供应商），全程留痕可查，每日调用有阈值管控'
-        ready={llmReady && !!localModel}
-        readyText='云端 + 本地均已就绪（可在「本地 AI」设置调整预览/阈值）'
-        warnText={!llmReady ? '未配置云端模型——在「系统设置 → AI 服务」配置后可用' : '未配置本地模型——在「系统设置 → 连接设置」配置'}
+        title='Skill 数据分析与图表'
+        desc='本地模型先调白名单工具取真实数据，再按构成/对比/大头分析自动选择饼图、柱状图或帕累托图'
+        ready={!!localModel}
+        readyText='本地 Skill 可用，图表数字由代码从数据库聚合'
+        warnText='配置本地模型后可用'
       />
       <Cap
         title='物料洞察树（升级）'

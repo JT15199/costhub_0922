@@ -9,7 +9,6 @@
     "sql:allow-load",
     "sql:allow-execute",
     "sql:allow-select",
-    "sql:allow-close",
-    "shell:allow-open"
+    "sql:allow-close"
   ]
 }

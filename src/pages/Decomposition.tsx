@@ -89,14 +89,9 @@ function parseDecompositionItems(response: string): any[] {
 async function openExternal(url: string) {
   if (!url) return;
   try {
-    // 直接导入 Tauri shell 插件
-    const { open } = await import('@tauri-apps/plugin-shell');
-    await open(url);
-  } catch (err) {
-    console.error('打开链接失败:', err);
-    // 降级：尝试用window.open
-    window.open(url, '_blank', 'noopener,noreferrer');
-  }
+    await navigator.clipboard.writeText(url);
+    message.info('机密模式禁止应用访问外网，来源地址已复制；如需查看请在独立浏览器中手动打开');
+  } catch { message.warning('机密模式禁止应用访问外网'); }
 }
 
 const TREND_COLORS: Record<string, string> = { '上涨': '#EF4444', '下降': '#10B981', '震荡': '#F59E0B', '信号不明确': '#94A3B8' };
@@ -2643,9 +2638,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                         <List.Item style={{ alignItems: 'flex-start', padding: '8px 0' }}>
                           <div style={{ width: '100%' }}>
                             <a
-                              href={source.source_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                              href="#"
                               onClick={(e) => {
                                 e.preventDefault();
                                 openExternal(source.source_url);

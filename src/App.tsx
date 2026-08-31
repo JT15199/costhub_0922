@@ -408,7 +408,7 @@ export default function App() {
           <span>正在后台识别物料报价差异（{autoProgress.done}/{autoProgress.total}）· 当前：{autoProgress.current}{autoProgress.remaining ? `· 剩余 ${autoProgress.remaining} 个模块分批自动继续` : ''}…发现异常会通过「报价情报」提醒</span>
         </div>
       )}
-      {/* 云端洞察待确认横幅（非打断式，底部固定，任何页面可见） */}
+      {/* 受控云端研究：仅显示已通过敏感审查、等待条件审批的公开主题 */}
       <CloudConfirmBar />
       <aside className="sidebar" style={{ width: sidebarCollapsed ? 48 : 220, minWidth: sidebarCollapsed ? 48 : 220, overflow: 'hidden' }}>
         {sidebarCollapsed ? (

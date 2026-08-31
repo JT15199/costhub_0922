@@ -14,7 +14,8 @@ const EXAMPLES: { label: string; prompt: string; note: string; icon: any }[] = [
   { label: '降本', prompt: '分析 M270 为什么贵、哪里能降本', note: 'AI 调体检+成本工具后自己推理', icon: <ExperimentOutlined /> },
   { label: '对标', prompt: '对比竞品 A 和 M270 的 BOM 成本差异', note: 'AI 调竞品BOM+项目BOM 逐规格分析', icon: <RobotOutlined /> },
   { label: '原声', prompt: '查这款显示器原声里用户最在意什么', note: 'AI 调 query_voice_dims', icon: <RobotOutlined /> },
-  { label: '行情', prompt: '查液晶面板近期市场行情', note: '云端调用需底部横幅确认', icon: <ThunderboltOutlined /> },
+  { label: '做图', prompt: '把 M270 的模块成本做成帕累托图', note: '本地 Skill 查库聚合，代码直接渲染真实数据', icon: <ThunderboltOutlined /> },
+  { label: '行情', prompt: '查液晶面板近期市场行情', note: '敏感审查通过后进入条件审批，仅发公开主题', icon: <ThunderboltOutlined /> },
   { label: '目标', prompt: '给我下达一个目标：把 M270 整机成本降到 ¥900', note: 'AI 调 add_goal，自主分析优先推进', icon: <ExperimentOutlined /> },
   { label: '待办', prompt: '把"去谈驱动板价格"记成待办', note: 'AI 调 create_todo 写入工作手账', icon: <CopyOutlined /> },
   { label: '算数', prompt: '算一下 (520*1+185*2)*1.05 是多少', note: 'AI 调 calc 核验，不口算', icon: <CalculatorOutlined /> },
@@ -62,8 +63,8 @@ export default function AIUsageGuide({ open, onClose, onOpenSettings }: Props) {
         {/* 1. 连接状态 */}
         <div style={{ fontSize: 12, color: '#475569', background: '#F8FAFC', border: '1px solid #E8ECF1', borderRadius: 8, padding: '8px 12px', marginBottom: 12, lineHeight: 1.7 }}>
           {localModel ? <Tag color="green">本地模型已配置：{localModel}</Tag> : <Tag color="orange">未配置本地模型</Tag>}
-          {llmReady ? <Tag color="green">云端已就绪：{llmName}</Tag> : <Tag color="default">云端未配置</Tag>}
-          <span style={{ marginLeft: 8, color: '#94A3B8' }}>本地模型是大脑（离线分析），云端仅查行情（需确认）</span>
+          {llmReady ? <Tag color="blue">受控云端：{llmName}</Tag> : <Tag>云端未配置</Tag>}
+          <span style={{ marginLeft: 8, color: '#64748B' }}>本地模型是主脑；云端只补充公开知识，先敏感审查再条件审批</span>
         </div>
 
         {/* 1.5 数据就绪度：缺什么数据 → 能做到什么样 → 建议补什么（引导客户如何使用） */}

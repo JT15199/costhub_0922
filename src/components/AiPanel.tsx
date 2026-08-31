@@ -16,7 +16,7 @@ import { loadSessions, newSession, loadMessages, saveMsg, type Session } from '.
 import { getDataReadiness } from '../dataReadiness';
 import ToolResultView from './ToolResultView';
 // 支持结果可视化的工具（分析结果直接看图，不依赖模型）
-const VISUAL_TOOLS = ['query_project_cost', 'query_project_bom', 'query_target_status', 'compare_subcategory_cost', 'query_project_module_value', 'query_competitor_bom', 'insight_material_trend', 'query_material_insight', 'query_supplier_profile'];
+const VISUAL_TOOLS = ['query_project_cost', 'query_project_bom', 'query_target_status', 'compare_subcategory_cost', 'query_project_module_value', 'query_competitor_bom', 'insight_material_trend', 'query_material_insight', 'query_supplier_profile', 'visualize_cost_analysis'];
 import { detectSkills } from '../aiSkills';
 import { buildDataMap } from '../dataMap';
 import { verifyConclusionNumbers } from '../verifyConclusion';
@@ -327,17 +327,14 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     try { sys = (await buildDataMap()) + '\n\n'; } catch { sys = ''; } // 数据库地图：先看数据在哪再选工具（用户：AI 能否清晰知道什么内容在哪里）
     sys = sys + buildThinkSystemPrompt(toolList, prefCtx) + '\n\n【任务执行】用户让你做任何查询/分析/洞察时，必须先用工具获取真实数据再回答：\n' +
       '· 复杂任务（多步骤/多物料/分析+生成）先输出计划标记拆解步骤：[PLAN] {"steps":["步骤1","步骤2"]}——前端会显示执行进度，每完成一个工具自动勾选。\n' +
-      '· 更新/查询某物料的最新行情洞察（如"更新 Scaler IC 行情"）→ 必须两步都做完，缺一不可：\n' +
-      '   ① query_material_insight({"material_name":"物料名"}) 查历史结论\n' +
-      '   ② insight_material_trend({"material_name":"物料名","category":"品类"}) 查最新行情（云端，需底部横幅审批；审批确认后会自动续跑）\n' +
-      '   注意：即使①已有历史结论，也必须做②——"更新"就是要最新行情，不能只复述历史后说"请提供更多数据"就结束。\n' +
+      '· 更新物料行情必须先 query_material_insight 查本地历史，再用 insight_material_trend 申请公开行情；外发仅通用物料名/品类/问题，先审查再条件审批。\n' +
       '· 保持物料一致：用户指定什么物料就用什么（如 Scaler IC），严禁擅自换成其他物料（如液晶面板）。\n' +
       '· 查项目/器件/供应商/竞品/原声/目标 → 对应 query_* 工具\n' +
       '· 计算核验 → calc\n' +
       '【严禁】行情/洞察类任务调用 query_project_bom / query_project_cost / query_part_suppliers / query_project_health / compare_subcategory_cost 等与物料行情无关的工具。\n' +
       '【禁止自言自语】不要输出"让我先查看…""现在我需要…"这类计划性独白——需要数据就直接输出 [TOOL] 调用标记，否则直接给结论。\n' +
       '【数据铁律】所有价格/百分比/份额/趋势数字必须来自工具 [RESULT] 返回的真实数据；禁止编造（如"$100-$150"）；工具没查到就明确说"未查到该物料行情数据"；输出前自检每个数字都能在工具结果里找到。\n' +
-      '· 工具返回"等待确认/需审批"时【绝对禁止编造行情数据】——告诉用户"已提交云端审批，底部横幅确认后会自动续跑获取真实行情"，然后等待，不要自己编价格区间。\n' +
+      '· 用户要求分析做图时，先查真实数据，再调用 visualize_cost_analysis；单项目构成用饼图、多项目对比用柱状图、找成本大头用帕累托图。\n' +
       '· 用户给的是品类级物料（如 Scaler IC）时，先用 query_material_insight 查看库内关联的具体型号，确认用户要查哪个型号，不要笼统编造。\n' +
       '【写回结论】分析类任务完成后，可把结论落库供以后参考（落库后对话显示"✅ 已记录"，对应面板自动展示）：\n' +
       '· 卖点/模块价值分析 → save_selling_analysis({"project_code":"项目代号","conclusion":"结论要点"})——如哪个卖点值得保留/哪个模块该降本减配\n' +

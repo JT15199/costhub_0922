@@ -103,10 +103,10 @@ export function cleanProtocolText(text: string): string {
     .replace(/\[(TOOL|CLOUD)\]\s*\{[\s\S]*?\}\s*/g, '');
 }
 
-// 自主思考 system prompt：本地思考不限、云端申请、灵活思路 + 文本协议说明
+// 自主思考 system prompt：本地模型为主脑，公开行情只能经受控云端审批
 export function buildThinkSystemPrompt(toolNames: string[], prefCtx = ''): string {
   return (
-    '你是 CostHub 的自主分析助手。你可以：1) 调用本地工具读取项目成本数据；2) 申请调用云端模型查询市场行情；3) 基于两者综合分析，给出结论。\n' +
+    '你是 CostHub 的本地自主分析助手。成本数据绝密：数据库只能通过本地白名单工具读取；需要公开市场行情时可申请受控云端查询，但云端只允许通用物料名、品类和公开问题。\n' +
     '【思考原则】本地单路高质量：一次聚焦一个核心线索深挖到底，不要同一轮并排列多个浅问题、浅尝辄止——把 1 个问题分析透 好过 5 个问题各碰一下。\n' +
     '  ① 先定义问题：你想回答什么（如某项目降本空间 / 某物料是否该换供应商），再查数据。\n' +
     '  ② 每个判断必须有实际查到的数据支撑（引用项目/模块/数字），禁止凭空推断；查不到就明确说"数据不足"。\n' +
@@ -116,10 +116,10 @@ export function buildThinkSystemPrompt(toolNames: string[], prefCtx = ''): strin
     '【工具调用协议】需要数据时，在输出中单独一行写（严格格式）：\n' +
     '[TOOL] 工具名 {"参数名":"值"}\n' +
     '例如：[TOOL] query_project_bom {"project_id":1}\n' +
-    '需要云端行情时写：[CLOUD] {"material_name":"物料通用名","category":"品类","question":"行情问题"}\n' +
+    '需要公开行情时写：[CLOUD] {"material_name":"不含型号的通用物料名","category":"品类","question":"公开行情问题"}\n' +
     '每次只写一个调用标记；调用结果会在下一轮以 [RESULT] 返回，你基于结果继续分析。\n' +
     '【工具】可用工具（名+参数说明）：\n' + toolNames.join('；') + '\n' +
-    '【云端】仅当本地数据不足以判断行情时才申请 [CLOUD]。每次申请都会请求用户审批并展示将发送的提示词（已脱敏，仅物料名/品类/问题），申请时要说明为什么需要。\n' +
+    '【数据边界】严禁把型号、金额、项目代号、供应商、BOM 或本地工具结果放入 [CLOUD]；发送前还会代码审查并按条件审批。审查/审批未通过就说明缺口，绝不编造。\n' +
     '【输出】思考过程可以持续；当你得出最终结论时，直接输出结论文本，不要再写调用标记。' +
     (prefCtx ? '\n\n【用户偏好】\n' + prefCtx : '')
   );
@@ -286,7 +286,7 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
     }
     messages.push({ role: 'assistant', content: buffer });
     const roundHint = round >= maxRounds - 1 ? '（注意：这是最后一轮——如果你已有足够信息，请直接输出最终结论，不要再调用工具）' : '';
-    const followUp = toolResults.map(r => r.content).join('\n---\n') + '\n继续你的分析：如需更多数据再输出 [TOOL]/[CLOUD] 调用，否则直接给出最终结论。' + roundHint;
+    const followUp = toolResults.map(r => r.content).join('\n---\n') + '\n继续你的分析：如需本地数据输出 [TOOL]，确需公开行情且参数已脱敏才输出 [CLOUD]，否则直接给出最终结论。' + roundHint;
     opts.onEvent?.onPrompt?.('user', followUp); // 轨迹：工具结果回填后继续发给模型
     messages.push({ role: 'user', content: followUp });
     // ⚠️ 上下文预算（阶段②）：超过 9000 字符即折叠最旧轮次，保住最近一轮完整

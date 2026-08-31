@@ -240,9 +240,16 @@ async function invokeWithRequestLog(method: 'GET' | 'POST', url: string, headers
   const started = Date.now();
   let result: HttpResponse;
   try {
-    result = await invoke<HttpResponse>(method === 'POST' ? 'http_post' : 'http_get', {
-      request: { url, headers, body },
-    });
+    const parsed = new URL(url);
+    const loopback = ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase());
+    if (loopback) {
+      result = await invoke<HttpResponse>(method === 'POST' ? 'http_post' : 'http_get', { request: { url, headers, body } });
+    } else {
+      const { findCloudApprovalForRequest } = await import('./cloudConfirm');
+      const approval = findCloudApprovalForRequest(url + '\n' + (body || ''));
+      if (!approval) throw new Error('云端请求已拦截：未找到与当前公开主题匹配的发送前审批');
+      result = await invoke<HttpResponse>('cloud_http_request', { request: { url, method, headers, body, approval } });
+    }
   } catch (e: any) {
     result = { status: 0, body: e?.message || String(e), success: false };
   }
@@ -1671,6 +1678,22 @@ export async function agentSearchLoop(
   allSources: SearchResult[];
   searchRounds: number;
 }> {
+  const { validateCloudQueryArgs } = await import('./aiBridge');
+  const validation = validateCloudQueryArgs({
+    material: materialName,
+    category: categoryType,
+    question: '查询该物料近 1-3 月公开市场价格趋势、供需与影响因素',
+  });
+  if (!validation.ok || !validation.clean) throw new Error('云端敏感审查未通过：' + (validation.reason || '请改用不含型号/金额/项目/供应商的物料通用名'));
+  materialName = validation.clean.material;
+  categoryType = validation.clean.category;
+  const { requestCloudConfirm } = await import('./cloudConfirm');
+  const approved = await requestCloudConfirm({
+    material: materialName,
+    category: categoryType,
+    question: '查询该物料近 1-3 月公开市场价格趋势、供需与影响因素',
+  });
+  if (!approved) throw new Error('云端查询已进入条件审批队列；请在底部安全横幅核对物料、品类和问题后确认');
   const llmConfig = await resolveLLMConfig();
   if (!llmConfig) throw new Error('LLM API Key 未配置');
   const searchConfig = await resolveSearchConfig();
@@ -1979,6 +2002,10 @@ export async function testSearchConnection(): Promise<TestResult> {
     }
 
     console.log('使用搜索供应商:', activeSearch.provider_name);
+    // 用户点击“测试搜索”即明确批准本次固定公开主题的连接测试。
+    // 审批范围由 cloudConfirm 内部写死，无法携带数据库或页面中的动态数据。
+    const { approveSafeConnectionTest } = await import('./cloudConfirm');
+    approveSafeConnectionTest();
     const testQuery = '2026 铜价 上海有色网 LME copper price';
     let results: SearchResult[];
 
@@ -2027,10 +2054,14 @@ export async function testLLMConnection(): Promise<TestResult> {
     console.log('使用LLM供应商:', activeLLM.provider_name, 'model:', activeLLM.model_name);
     console.log('Base URL:', activeLLM.base_url);
 
+    // 与搜索连接测试相同：只放行固定的公开测试主题，不读取任何本地业务数据。
+    const { approveSafeConnectionTest } = await import('./cloudConfirm');
+    approveSafeConnectionTest();
+
     const response = await callSingleLLMProvider(
       activeLLM,
-      '你是一个助手。只回复"OK"两个字，不要回复其他内容。',
-      '请回复OK',
+      '这是“铜 / 原材料”的云端服务连接测试，不包含任何本地数据。只回复"OK"两个字，不要回复其他内容。',
+      '铜，原材料，连接测试。请回复OK。',
       0,
       32,
     );

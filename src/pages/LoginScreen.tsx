@@ -14,12 +14,16 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
   const [checking, setChecking] = useState(false);
   // 首次使用提示（改过密码后不再显示）
   const [firstUse, setFirstUse] = useState(false);
+  // 双击 Logo 显示真实密码（单机使用的防遗忘机制）
+  const [showPwd, setShowPwd] = useState(false);
+  const [plainPwd, setPlainPwd] = useState('');
   useEffect(() => {
     (async () => {
       try {
-        const { isFirstUse, getUsername } = await import('../db');
+        const { isFirstUse, getUsername, getPlainPassword } = await import('../db');
         setFirstUse(await isFirstUse());
         setUsername(await getUsername());
+        setPlainPwd(await getPlainPassword());
       } catch { }
     })();
   }, []);
@@ -32,6 +36,11 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
       message.warning('用户名或密码不正确，将以受限模式进入（不显示数据）');
       onEnterRestricted();
     }
+  };
+
+  const revealPassword = () => {
+    setShowPwd(!showPwd);
+    if (!showPwd) message.info(`密码：${plainPwd}（仅本机可见）`);
   };
 
   const handleSubmit = async () => {
@@ -134,9 +143,10 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
           }
         `}</style>
 
-        {/* Logo */}
+        {/* Logo（双击显示本机密码，防止遗忘） */}
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <div
+            onDoubleClick={revealPassword}
             style={{
               width: 68, height: 68, margin: '0 auto 14px', borderRadius: 20,
               overflow: 'hidden',
@@ -144,6 +154,7 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
               background: 'linear-gradient(135deg, #EEF0FF 0%, #F8F7FF 100%)',
               boxShadow: '0 8px 24px rgba(99,102,241,0.18), inset 0 0 0 1px rgba(99,102,241,0.10)',
               transition: 'transform 200ms cubic-bezier(0.32,0.72,0,1)',
+              cursor: 'pointer',
             }}
             onMouseEnter={e => (e.currentTarget.style.transform = 'translateY(-2px)')}
             onMouseLeave={e => (e.currentTarget.style.transform = 'none')}
@@ -152,6 +163,15 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
           </div>
           <div style={{ fontSize: 23, fontWeight: 800, color: '#201F1D', letterSpacing: '-0.02em' }}>CostHub</div>
           <div style={{ fontSize: 12, color: '#8A857E', marginTop: 3, letterSpacing: '0.02em' }}>成本管理平台 · 数据受密码保护</div>
+          {showPwd && (
+            <div style={{
+              marginTop: 10, padding: '6px 10px', borderRadius: 8,
+              background: 'rgba(245,165,36,0.10)', color: '#8A5A00',
+              fontSize: 12, border: '1px solid rgba(245,165,36,0.18)',
+            }}>
+              当前密码：{plainPwd}
+            </div>
+          )}
         </div>
 
         {/* 用户名 + 密码输入 */}

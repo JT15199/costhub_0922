@@ -1,6 +1,8 @@
 // 附件文件工具（v2.3.19，2026-08-19 用户：都加上——CSV/TXT/PDF 报价读取 + OCR 拍照提取）
 // 提供：文本→表格尝试、PDF 文本提取、OCR 图片识别；配合 AiPanel 附件流程（detectSheetType 识别类型 → import_* 工具处理）
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import ocrWorkerUrl from 'tesseract.js/dist/worker.min.js?url';
+import ocrCoreUrl from 'tesseract.js-core/tesseract-core-simd-lstm.wasm.js?url';
 
 /** 文本 → 表格尝试：按 多个空格/tab/逗号 拆行；若每行列数一致且 ≥2 列 → 返回表格，否则 null（当纯文本） */
 export function textToRows(text: string): any[][] | null {
@@ -33,10 +35,12 @@ export async function extractPdfText(buf: ArrayBuffer): Promise<string> {
   return text;
 }
 
-/** OCR 图片识别（tesseract.js，语言包本地 public/tessdata/，引擎默认 CDN 需联网） */
+/** OCR 图片识别：worker、WASM 引擎、语言包全部随应用打包，不触发 CDN。 */
 export async function ocrImage(base64: string): Promise<string> {
   const Tesseract = await import('tesseract.js');
   const result = await Tesseract.recognize(base64, 'eng+chi_sim', {
+    workerPath: ocrWorkerUrl,
+    corePath: ocrCoreUrl,
     langPath: '/tessdata',
     logger: () => {},
   });

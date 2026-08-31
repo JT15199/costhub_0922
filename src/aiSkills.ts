@@ -5,7 +5,7 @@ export interface AiSkill { id: string; name: string; triggers: string[]; guide: 
 export const AI_SKILLS: AiSkill[] = [
   {
     id: 'trend', name: '行情洞察', triggers: ['行情', '洞察', '最新.*价格', '走势'],
-    guide: '两步必做：① query_material_insight 查历史（含关联型号）② insight_material_trend 查最新（需底部横幅审批；确认后系统自动续跑并更新洞察卡片）。审批待确认时禁止编造行情数据。',
+    guide: '两步必做：① query_material_insight 查本地历史与关联型号；②确需最新公开行情时调用 insight_material_trend。第二步只发送不含型号的通用物料名/品类/问题，先敏感审查再条件审批；未获批准禁止编造。',
   },
   {
     id: 'quote', name: '审价', triggers: ['审价', '审这份', '报价合理', '议价'],
@@ -26,6 +26,10 @@ export const AI_SKILLS: AiSkill[] = [
   {
     id: 'report', name: '报告生成', triggers: ['报告', '演示', 'ppt', 'pptx', '导出.*excel'],
     guide: '分析完成后组织 3-6 节（heading+points）→ generate_report（HTML/PPTX）；表格数据 → write_excel。报告保存在导出目录 exports/。',
+  },
+  {
+    id: 'data-viz', name: '数据分析与图表', triggers: ['图表', '图标', '画图', '可视化', '柱状图', '饼图', '帕累托', '趋势图', '成本结构图'],
+    guide: '先用本地查询工具取得真实数据，再调用 visualize_cost_analysis。图形选择：单项目构成→饼图；多项目同维度→分组柱状图；寻找成本大头→帕累托图。标题必须写清项目与口径，金额从工具结果读取，禁止模型手填或编造。',
   },
 ];
 

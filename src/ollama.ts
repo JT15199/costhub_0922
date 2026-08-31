@@ -1,6 +1,7 @@
 // 本地 Ollama 流式调用（供右侧 AI 协作窗与演示生成器共用）
 // 纯搬移，行为不变
 import { invoke } from '@tauri-apps/api/core';
+import { normalizeLocalAiBaseUrl } from './securityPolicy';
 
 export interface OllamaStreamOpts {
   num_predict?: number;
@@ -29,7 +30,7 @@ export async function startOllamaStream(
 ): Promise<() => void> {
   const { listen: listenEvent } = await import('@tauri-apps/api/event');
   const eventId = `ollama_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  const base = baseUrl.replace(/\/$/, '');
+  const base = normalizeLocalAiBaseUrl(baseUrl);
   // 原生 /api/chat 端点：think:false 确定生效（解决 qwen3 思考型模型复述规则的问题）
   const url = opts?.endpoint === 'native' ? `${base}/api/chat` : `${base}/v1/chat/completions`;
   const unlisteners: (() => void)[] = [];

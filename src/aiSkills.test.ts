@@ -18,6 +18,10 @@ describe('detectSkills', () => {
     const s = detectSkills('生成一份降本分析报告');
     expect(s.some(x => x.id === 'report')).toBe(true);
   });
+  it('做图提问命中数据可视化技能', () => {
+    const s = detectSkills('把 M270 的模块成本做成帕累托图');
+    expect(s.some(x => x.id === 'data-viz')).toBe(true);
+  });
   it('无关提问不命中', () => {
     expect(detectSkills('你好')).toEqual([]);
   });

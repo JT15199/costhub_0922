@@ -188,7 +188,7 @@ export default function AutoThinkPanel({ mode = 'summary', onNavigate: _onNaviga
       {logs.length === 0 ? (
         <div style={{ fontSize: 12, color: '#94A3B8', padding: '6px 2px' }}>
           暂无自主分析记录——AI 会在后台自发开始（也可点「现在分析一轮」立即触发）。
-          <Tooltip title="本地模型自主阅读数据概览→决定深挖方向→调用工具核实→需要行情时申请云端→输出结论；全程留痕可展开查看">
+          <Tooltip title="本地模型自主阅读数据概览→决定深挖方向→调用白名单工具核实→输出结论；全程本机运行并留痕可查看">
             <a style={{ marginLeft: 6 }}>什么是自主分析？</a>
           </Tooltip>
         </div>

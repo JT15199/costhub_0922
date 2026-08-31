@@ -21,6 +21,8 @@ import {
   getAllChecklistWithLogs, updateChecklistActive, deleteAnalysisChecklistItem,
 getWriteAuditLogs } from '../db';
 import { encryptText } from '../apiConfig';
+import LocalAISecurityStatus from '../components/LocalAISecurityStatus';
+import CloudPolicyControl from '../components/CloudPolicyControl';
 
 const STRENGTH_COLORS: Record<string, string> = {
   'observing': '#94A3B8',
@@ -60,12 +62,12 @@ export default function Settings({embedded }: { embedded?: boolean }) {
   // ====== 左侧导航分类（Claude 风格设置页） ======
   const [activeSection, setActiveSection] = useState('ai');
   const SECTIONS = [
-    { key: 'ai', label: 'AI 服务', icon: <RobotOutlined />, desc: '搜索 / 大模型 / 分析记忆' },
+    { key: 'ai', label: '本地 AI', icon: <RobotOutlined />, desc: '本机模型 / 分析记忆' },
     { key: 'skills', label: '分析框架', icon: <RadarChartOutlined />, desc: 'Skill 方法论配置' },
     { key: 'security', label: '安全设置', icon: <LockOutlined />, desc: '用户名 / 密码' },
     { key: 'appearance', label: '个性化', icon: <SafetyCertificateOutlined />, desc: 'Logo 自定义' },
     { key: 'data', label: '数据管理', icon: <DatabaseOutlined />, desc: '备份 / 恢复 / 导入导出' },
-    { key: 'audit', label: '审计日志', icon: <HistoryOutlined />, desc: '外部请求 / AI 请求记录' },
+    { key: 'audit', label: '安全审计', icon: <HistoryOutlined />, desc: '模型读取 / AI 写入 / 外发拦截' },
     { key: 'about', label: '关于', icon: <BookOutlined />, desc: '存储与费用说明' },
   ];
   // ====== 安全设置：修改密码 ======
@@ -719,7 +721,13 @@ export default function Settings({embedded }: { embedded?: boolean }) {
                 )}
                 {provider.registration_url && (
                   <div>
-                    <a href={provider.registration_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>
+                    <a href="#" onClick={async (e) => {
+                      e.preventDefault();
+                      try {
+                        await navigator.clipboard.writeText(String(provider.registration_url));
+                        message.info('注册链接已复制，请在独立浏览器中打开');
+                      } catch { message.warning('无法访问剪贴板，请手动复制注册链接'); }
+                    }} style={{ fontSize: 11 }}>
                       <LinkOutlined /> 注册链接
                     </a>
                   </div>
@@ -809,6 +817,15 @@ export default function Settings({embedded }: { embedded?: boolean }) {
       {/* ====== AI 服务区（搜索/LLM/记忆/安全） ====== */}
       {activeSection === 'ai' && (
       <>
+      <Alert
+        type="success"
+        showIcon
+        message="本地 27B 主脑 + 受控云端研究"
+        description="成本数据库只交给本机 Ollama。云端只能通过专用网关查询公开行情：先做敏感字段审查，再按条件进入审批；普通 HTTP、Skill 和模型无法直接访问公网。"
+        style={{ marginBottom: 16 }}
+      />
+      <LocalAISecurityStatus />
+      <CloudPolicyControl />
       {/* 顶部提示卡片 */}
       <div style={{
         display: 'grid',
@@ -828,7 +845,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
             <div style={{ fontSize: 16, fontWeight: 600 }}>工作模式</div>
           </div>
           <div style={{ fontSize: 13, opacity: 0.95 }}>
-            按需手动触发查询，无自动定时任务
+            本地 27B 模型 + 白名单数据工具，不允许原始 SQL 与外部网络
           </div>
         </div>
 
@@ -844,7 +861,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
             <div style={{ fontSize: 16, fontWeight: 600 }}>隐私保护</div>
           </div>
           <div style={{ fontSize: 13, opacity: 0.95 }}>
-            仅发送物料名称，不上传价格、供应商等敏感数据
+            成本、物料、供应商、项目与提示词均不得离开本机
           </div>
         </div>
       </div>
@@ -2046,10 +2063,10 @@ export default function Settings({embedded }: { embedded?: boolean }) {
           ))}
         </div>
       </div>
-      {/* ====== AI 外发安全中心（2026-08-18：逐条可验证外发边界） ====== */}
+      {/* ====== 网络隔离审计：历史外发记录保留，只读核对 ====== */}
       <div className="content-card" style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h3 style={{ margin: 0 }}><RadarChartOutlined /> AI 外发安全中心</h3>
+          <h3 style={{ margin: 0 }}><RadarChartOutlined /> 网络隔离与历史外发记录</h3>
           <Space>
             <Button size="small" icon={<ApiOutlined />} onClick={loadRequestLogs}>刷新</Button>
             <Popconfirm title="清空所有外发记录？" onConfirm={async () => {
@@ -2065,16 +2082,15 @@ export default function Settings({embedded }: { embedded?: boolean }) {
         {/* 安全摘要条：今日外发次数 + 边界说明 */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 12, alignItems: 'center' }}>
           <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 10, padding: '8px 14px' }}>
-            <div style={{ fontSize: 11, color: '#047857' }}>今日已外发（可逐条验证）</div>
-            <b style={{ fontSize: 18, color: '#047857' }}>{(() => { const today = new Date().toLocaleDateString('zh-CN'); return requestLogs.filter((r: any) => String(r.timestamp || r.requested_at || '').startsWith(today.slice(0, 10))).length; })()}</b>
+            <div style={{ fontSize: 11, color: '#047857' }}>当前网络策略</div>
+            <b style={{ fontSize: 16, color: '#047857' }}>受控云端 · 条件审批</b>
           </div>
           <div style={{ flex: 1, minWidth: 240, fontSize: 11.5, color: '#166534', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 10, padding: '8px 12px', lineHeight: 1.6 }}>
-            <b>🔒 每次外发仅包含：物料名 / 品类 / 问题</b>（如「锂电池 · 元器件类 · 近1-3月价格趋势」）。
-            金额、型号、供应商、项目代号在模板结构上无位置可传；下方每一条都可核对实际发出的内容摘要。
+            <b>🔒 外发只允许：通用物料名 / 品类 / 公开行情问题。</b> 型号、金额、项目、供应商、BOM 等字段先由代码审查；通过后首次进入审批，同主题本会话可复用。目标域名必须在云端白名单内。
           </div>
         </div>
         {requestLogs.length === 0 ? (
-          <Empty description="暂无外发记录——所有云端调用（行情洞察/原生搜索）会自动记录在此，本地模型调用不经过云端、不记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          <Empty description="暂无受控云端外发记录；每次实际发送都会在这里留痕。" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         ) : (
           <Table dataSource={requestLogs} rowKey="id" size="small" pagination={{ pageSize: 10 }}
             columns={[
@@ -2094,10 +2110,10 @@ export default function Settings({embedded }: { embedded?: boolean }) {
           <div>
             <h3 style={{ margin: 0 }}><SearchOutlined /> AI请求日志</h3>
             <p style={{ margin: '4px 0 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
-              只记录本地模型（Ollama）的访问（本地数据不涉外发）；云端外发见上方「AI 外发安全中心」
+              本地模型读取审计：逐条查看模型、任务类型、发送给模型的完整提示词与响应摘要
             </p>
             <div style={{ marginTop: 8, padding: '8px 12px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 8, fontSize: 12, color: '#166534', lineHeight: 1.7 }}>
-              <EmojiIcon e="🔒" /> <b>数据安全边界：</b>本地模型（Ollama）可读取项目数据辅助分析，此处记录每一次本地访问（供审查）；云端只有 HTTP 转发通道、无法访问本地数据库，云端外发内容见上方「AI 外发安全中心」（逐条可验证，仅物料名/品类/问题）。
+              <EmojiIcon e="🔒" /> <b>简单审核逻辑：</b>先看“模型读取”确认本地 AI 看了什么，再看“AI 写入记录”确认改了什么并可撤销；云端只看上方实际外发摘要，审批横幅只展示三项安全字段。
             </div>
           </div>
           <Space>
@@ -2180,8 +2196,8 @@ export default function Settings({embedded }: { embedded?: boolean }) {
                         </div>
                         {/* 提示词/响应：label 在上，内容独立成块可滚动 */}
                         {[
-                          { label: 'System Prompt（发送给外部 AI 的系统提示词）', content: record.system_prompt },
-                          { label: 'User Prompt（发送给外部 AI 的用户提示词）', content: record.user_prompt },
+                          { label: 'System Prompt（发送给本机模型）', content: record.system_prompt },
+                          { label: 'User Prompt（发送给本机模型）', content: record.user_prompt },
                           { label: '响应摘要', content: record.response_summary },
                           ...(!record.success && record.error_message ? [{ label: '错误信息', content: record.error_message }] : []),
                         ].map(section => (
@@ -2226,7 +2242,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
             API Key 使用 AES-GCM 加密后存储于本地数据库中，同一设备可解密，不同设备无法解密。
           </Descriptions.Item>
           <Descriptions.Item label="数据发送范围">
-            趋势查询时仅向外部 API 发送物料的通用名称，不发送采购价/供应商/BOM等内部数据。
+            成本/BOM/项目/供应商数据仅发送给本机 Ollama；云端仅可接收审查通过并获条件审批的通用物料名、品类与公开行情问题。
           </Descriptions.Item>
           <Descriptions.Item label="费用说明">
             各供应商免费额度以官网为准。预置列表中已标注参考额度，实际可能有变动。

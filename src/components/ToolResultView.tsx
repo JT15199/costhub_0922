@@ -13,7 +13,7 @@ const COLORS = ['#3B82F6', '#8B5CF6', '#F97316', '#34C759', '#0891B2', '#AF52DE'
 const mono = { fontVariantNumeric: 'tabular-nums' } as const;
 
 interface ViewData {
-  type: 'pie' | 'bar' | 'table' | 'matrix' | 'card' | 'competitor' | 'canonical';
+  type: 'pie' | 'bar' | 'chart' | 'table' | 'matrix' | 'card' | 'competitor' | 'canonical';
   title?: string;
   // pie
   pie?: { name: string; value: number }[];
@@ -25,6 +25,7 @@ interface ViewData {
   matrixRows?: ModuleValueRow[]; modRows?: ModuleValueRow[];
   // card
   card?: { label: string; value: string; color?: string }[]; text?: string;
+  chartOption?: any;
 }
 
 async function loadData(toolId: string, args: any): Promise<ViewData | null> {
@@ -168,6 +169,56 @@ async function loadData(toolId: string, args: any): Promise<ViewData | null> {
         rows: rows.map((r: any) => { const st = statusOf(r); let specs: any[] = []; try { specs = JSON.parse(r.canonical_specs || '[]'); } catch { } return { ...r, specsText: specs.join(' / '), status: st }; }),
       } as ViewData;
     }
+    if (toolId === 'visualize_cost_analysis') {
+      const codes = String(args?.project_codes || '').split(/[,，]/).map((x: string) => x.trim()).filter(Boolean).slice(0, 8);
+      const dimension = ['module', 'main_category', 'sub_category'].includes(String(args?.dimension)) ? String(args.dimension) : 'module';
+      const chartType = ['pie', 'bar', 'pareto'].includes(String(args?.chart_type)) ? String(args.chart_type) : (codes.length > 1 ? 'bar' : 'pie');
+      const projects = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted && codes.includes(String(p.code || '')));
+      if (!projects.length) return null;
+      const rowsByProject: { code: string; values: Map<string, number> }[] = [];
+      for (const p of projects) {
+        const values = new Map<string, number>();
+        const boms = (await getProjectBOMs(p.id)).filter((b: any) => !b.is_deleted);
+        for (const b of boms) {
+          const key = dimension === 'module' ? (b.module_name || '未分模块') : (b[dimension] || '未分类');
+          const value = (Number(b.part_cost ?? b.cost) || 0) * (Number(b.quantity) || 1);
+          values.set(key, (values.get(key) || 0) + value);
+        }
+        rowsByProject.push({ code: p.code, values });
+      }
+      const dimensionLabel = dimension === 'module' ? '模块' : dimension === 'main_category' ? '大类' : '子类';
+      const title = codes.join(' vs ') + ' · 按' + dimensionLabel + '成本';
+      if (chartType === 'pie' && rowsByProject.length === 1) {
+        const data = [...rowsByProject[0].values.entries()].sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value: Number(value.toFixed(2)) }));
+        return { type: 'chart', title, chartOption: {
+          tooltip: { trigger: 'item', formatter: '{b}<br/>¥{c}（{d}%）' }, color: COLORS,
+          legend: { type: 'scroll', bottom: 0, textStyle: { fontSize: 10 } },
+          series: [{ type: 'pie', radius: ['38%', '68%'], center: ['50%', '43%'], data, label: { formatter: '{b}\n{d}%', fontSize: 10 }, itemStyle: { borderRadius: 4 } }],
+        } };
+      }
+      if (chartType === 'pareto' && rowsByProject.length === 1) {
+        const sorted = [...rowsByProject[0].values.entries()].sort((a, b) => b[1] - a[1]);
+        const total = sorted.reduce((s, x) => s + x[1], 0) || 1;
+        let running = 0;
+        const cumulative = sorted.map(x => Number(((running += x[1]) / total * 100).toFixed(1)));
+        return { type: 'chart', title: title + ' · 帕累托', chartOption: {
+          tooltip: { trigger: 'axis' }, grid: { left: 52, right: 42, top: 24, bottom: 58 },
+          xAxis: { type: 'category', data: sorted.map(x => x[0]), axisLabel: { rotate: 28, fontSize: 10 } },
+          yAxis: [{ type: 'value', name: '成本 ¥' }, { type: 'value', name: '累计占比', min: 0, max: 100, axisLabel: { formatter: '{value}%' } }],
+          series: [
+            { name: '成本', type: 'bar', data: sorted.map(x => Number(x[1].toFixed(2))), itemStyle: { color: '#6366F1', borderRadius: [4, 4, 0, 0] } },
+            { name: '累计占比', type: 'line', yAxisIndex: 1, data: cumulative, smooth: true, symbolSize: 5, lineStyle: { color: '#F59E0B', width: 2 } },
+          ],
+        } };
+      }
+      const cats = [...new Set(rowsByProject.flatMap(r => [...r.values.keys()]))]
+        .sort((a, b) => Math.max(...rowsByProject.map(r => r.values.get(b) || 0)) - Math.max(...rowsByProject.map(r => r.values.get(a) || 0)));
+      return { type: 'chart', title, chartOption: {
+        tooltip: { trigger: 'axis' }, legend: { bottom: 0 }, grid: { left: 52, right: 16, top: 24, bottom: 58 },
+        xAxis: { type: 'category', data: cats, axisLabel: { rotate: 28, fontSize: 10 } }, yAxis: { type: 'value', name: '成本 ¥' },
+        series: rowsByProject.map((r, i) => ({ name: r.code, type: 'bar', data: cats.map(c => Number((r.values.get(c) || 0).toFixed(2))), itemStyle: { color: COLORS[i % COLORS.length], borderRadius: [3, 3, 0, 0] } })),
+      } };
+    }
     if (toolId === 'insight_material_trend' || toolId === 'query_material_insight') {
       const db = await (await import('../db')).getDb();
       const items = await db.select<any[]>('SELECT * FROM trend_items WHERE query_category LIKE ? ORDER BY id DESC LIMIT 1', ['%' + (args?.material_name || '') + '%']);
@@ -243,6 +294,9 @@ export default function ToolResultView({ toolId, args }: { toolId: string; args:
           yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
           series: [{ type: 'bar', data: data.vals, barWidth: 22, itemStyle: { color: (p: any) => (data.barColors || [])[p.dataIndex] || '#B0895A', borderRadius: 3 } }],
         }} style={{ height: 150 }} />
+      )}
+      {data.type === 'chart' && data.chartOption && (
+        <ReactECharts echarts={echarts} option={data.chartOption} style={{ height: 270 }} />
       )}
       {(data.type === 'table' || data.type === 'competitor') && (
         <Table size="small" pagination={false} rowKey={(_, i) => String(i)} dataSource={data.rows} columns={data.columns} scroll={{ x: 320 }} />

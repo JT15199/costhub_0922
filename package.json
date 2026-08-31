@@ -16,7 +16,6 @@
   "dependencies": {
     "@ant-design/icons": "^6.2.5",
     "@tauri-apps/api": "^2.11.0",
-    "@tauri-apps/plugin-shell": "^2.2.0",
     "@tauri-apps/plugin-sql": "^2.4.0",
     "@xyflow/react": "^12.3.5",
     "antd": "6.6.0",
