@@ -13,6 +13,9 @@ interface ThemeContextType {
   setLowFx: (v: boolean) => void;
   backgroundImage: string;
   setBackgroundImage: (dataUrl: string | null) => void;
+  /** 玻璃表面不透明度（0.46–0.86），仅影响液态玻璃主题的外壳/卡片/AI侧栏 */
+  glassOpacity: number;
+  setGlassOpacity: (value: number) => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -30,6 +33,7 @@ interface ThemeProviderProps {
 }
 
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
+  const clampGlassOpacity = (value: number) => Math.min(0.86, Math.max(0.46, Number.isFinite(value) ? value : 0.66));
   const [currentTheme, setCurrentTheme] = useState<string>(() => {
     const saved = localStorage.getItem('app-theme');
     // 首次升级到全局玻璃工作台时切换一次默认视觉；之后仍尊重用户在设置中选择的主题。
@@ -42,6 +46,10 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   // 低特效模式（兼容低配/远程桌面/老 WebView2 环境）：关毛玻璃 + 关动画，根治"界面发灰卡住/弹窗打不开"
   const [lowFx, setLowFxState] = useState<boolean>(() => localStorage.getItem('app-lowfx') === '1');
   const [backgroundImage, setBackgroundImageState] = useState<string>(() => localStorage.getItem('costhub_custom_background') || '');
+  const [glassOpacity, setGlassOpacityState] = useState<number>(() => {
+    const saved = Number(localStorage.getItem('costhub_glass_opacity'));
+    return clampGlassOpacity(saved);
+  });
 
   const theme = themes[currentTheme] || themes.red;
 
@@ -72,6 +80,12 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
       document.body.style.backgroundColor = theme.colors.canvas;
     }
     root.style.setProperty('--costhub-bg-image', backgroundImage ? `url("${backgroundImage}")` : 'none');
+    // 液态玻璃的统一透光层：由设置页滑杆控制，使用派生值维持层级和数据可读性。
+    root.style.setProperty('--glass-opacity', glassOpacity.toFixed(2));
+    root.style.setProperty('--glass-hover-opacity', clampGlassOpacity(glassOpacity + 0.12).toFixed(2));
+    root.style.setProperty('--glass-sidebar-opacity', clampGlassOpacity(glassOpacity - 0.12).toFixed(2));
+    root.style.setProperty('--glass-elevated-opacity', clampGlassOpacity(glassOpacity + 0.18).toFixed(2));
+    root.style.setProperty('--glass-input-opacity', clampGlassOpacity(glassOpacity + 0.04).toFixed(2));
     document.body.style.color = theme.colors.textPrimary;
     document.body.style.fontFamily = theme.typography.fontSans;
 
@@ -97,6 +111,11 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     } catch {
       // localStorage 额度不足时仍保留当前会话内的背景，不阻断其它设置
     }
+  };
+  const setGlassOpacity = (value: number) => {
+    const next = clampGlassOpacity(value);
+    setGlassOpacityState(next);
+    localStorage.setItem('costhub_glass_opacity', next.toFixed(2));
   };
 
   // Ant Design 主题配置（适配minimalist设计）
@@ -159,7 +178,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   };
 
   return (
-    <ThemeContext.Provider value={{ currentTheme, theme, setTheme, availableThemes: themes, lowFx, setLowFx, backgroundImage, setBackgroundImage }}>
+    <ThemeContext.Provider value={{ currentTheme, theme, setTheme, availableThemes: themes, lowFx, setLowFx, backgroundImage, setBackgroundImage, glassOpacity, setGlassOpacity }}>
       <ConfigProvider theme={antdThemeConfig}>
         {children}
       </ConfigProvider>

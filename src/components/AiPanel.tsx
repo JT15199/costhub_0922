@@ -820,7 +820,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
             <Tooltip title="折叠"><Button type="text" size="small" icon={<RightOutlined />} style={{ color: '#5F5D54' }} onClick={toggleCollapse} /></Tooltip>
           </div>
         </div>
-        <div style={{ marginTop: 4, fontSize: 11, color: '#5F5D54', background: '#FFFFFF', border: '1px solid #E6E4DC', borderRadius: 6, padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 5 }}>
+        <div className="local-ai-context" style={{ marginTop: 4, fontSize: 11, color: '#5F5D54', background: '#FFFFFF', border: '1px solid #E6E4DC', borderRadius: 6, padding: '3px 8px', display: 'flex', alignItems: 'center', gap: 5 }}>
           <span style={{ color: '#9A978B' }}>当前</span><b style={{ color: '#181713', fontWeight: 600 }}>{ctxLabel}</b>
         </div>
       </div>
@@ -828,13 +828,13 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       <div ref={scrollRef} onScroll={onScroll} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {/* 批量云端更新进度 */}
         {batchProgress && (
-          <div style={{ background: '#EDF6F0', border: '1px solid #CDE3D4', borderRadius: 9, padding: '7px 11px', fontSize: 11, color: '#1F7A4C', lineHeight: 1.7 }}>
+          <div className="local-ai-status" style={{ background: '#EDF6F0', border: '1px solid #CDE3D4', borderRadius: 9, padding: '7px 11px', fontSize: 11, color: '#1F7A4C', lineHeight: 1.7 }}>
             🔄 批量更新行情：第 {batchProgress.done + 1}/{batchProgress.total} 个 · {batchProgress.current}
           </div>
         )}
         {/* 任务清单（[PLAN] 协议，借鉴 DSH todo_write/workflow） */}
         {plan && (
-          <div style={{ background: '#FBFAF6', border: '1px solid #E6E4DC', borderRadius: 9, padding: '8px 11px', fontSize: 11, color: '#5F5D54', lineHeight: 1.8 }}>
+          <div className="local-ai-plan" style={{ background: '#FBFAF6', border: '1px solid #E6E4DC', borderRadius: 9, padding: '8px 11px', fontSize: 11, color: '#5F5D54', lineHeight: 1.8 }}>
             <div style={{ fontWeight: 700, color: '#181713', marginBottom: 3 }}>📋 执行计划</div>
             {plan.steps.map((s, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -857,19 +857,19 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           messages.map((m, i) => (
             <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start', gap: 6 }}>
               {m.role === 'user' ? (
-                <div style={{ maxWidth: '88%', background: '#181713', color: '#fff', borderRadius: 9, padding: '7px 11px', fontSize: 12.5, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{m.content}</div>
+                <div className="local-ai-user-bubble" style={{ maxWidth: '88%', background: '#181713', color: '#fff', borderRadius: 9, padding: '7px 11px', fontSize: 12.5, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{m.content}</div>
               ) : (
                 <>
                   {m.reasoning ? (
                     <details style={{ width: '100%' }}>
                       <summary style={{ fontSize: 10.5, color: '#9A978B', cursor: 'pointer', userSelect: 'none' }}>思考过程（{m.reasoning.length} 字）</summary>
-                      <div style={{ fontSize: 11, color: '#8B7355', whiteSpace: 'pre-wrap', lineHeight: 1.7, marginTop: 4, background: '#FBFAF6', border: '1px solid #E6E4DC', borderRadius: 7, padding: 7 }}>{m.reasoning}</div>
+                      <div className="local-ai-reasoning" style={{ fontSize: 11, color: '#8B7355', whiteSpace: 'pre-wrap', lineHeight: 1.7, marginTop: 4, background: '#FBFAF6', border: '1px solid #E6E4DC', borderRadius: 7, padding: 7 }}>{m.reasoning}</div>
                     </details>
                   ) : null}
                   {m.steps && m.steps.length > 0 ? (
                     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 4 }}>
                       {m.steps.map((s, si) => (
-                        <div key={si} style={{ background: '#FBFAF6', border: '1px dashed #D5D2C6', borderRadius: 7, padding: '5px 9px', fontSize: 10.5, color: '#5F5D54', lineHeight: 1.6 }}>
+                        <div className="local-ai-step" key={si} style={{ background: '#FBFAF6', border: '1px dashed #D5D2C6', borderRadius: 7, padding: '5px 9px', fontSize: 10.5, color: '#5F5D54', lineHeight: 1.6 }}>
                           <span>{s.kind === 'tool' ? '🔧' : '🔐'}</span> <b style={{ color: '#181713' }}>{s.name}</b> {s.ok ? '' : <span style={{ color: '#C0392B' }}>失败</span>}
                           <span style={{ marginLeft: 4, color: '#9A978B' }}>{s.detail}</span>
                           {/* 2026-08-19 结果可视化：查询类工具结果直接渲染图表/表格（不依赖模型） */}
@@ -880,7 +880,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
                       ))}
                     </div>
                   ) : null}
-                  <div style={{ maxWidth: '92%', background: '#FFFFFF', border: '1px solid #E6E4DC', borderRadius: 9, padding: '7px 11px', fontSize: 12.5, lineHeight: 1.65, color: '#2B2925', whiteSpace: 'pre-wrap' }}>
+                  <div className="local-ai-assistant-bubble" style={{ maxWidth: '92%', background: '#FFFFFF', border: '1px solid #E6E4DC', borderRadius: 9, padding: '7px 11px', fontSize: 12.5, lineHeight: 1.65, color: '#2B2925', whiteSpace: 'pre-wrap' }}>
                     {m.content || (streaming ? '正在分析…' : '')}
                   </div>
                 </>
@@ -898,7 +898,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       {/* 输入区 */}
       <div style={{ padding: '8px 10px', borderTop: '1px solid #E6E4DC', flexShrink: 0 }}>
         {pendingWrite && (
-          <div style={{ background: '#FFF3EC', border: '1px solid #F0C9B5', borderRadius: 9, padding: '9px 12px', marginBottom: 6 }}>
+          <div className="local-ai-write-confirm" style={{ background: '#FFF3EC', border: '1px solid #F0C9B5', borderRadius: 9, padding: '9px 12px', marginBottom: 6 }}>
             <div style={{ fontSize: 12, color: '#181713', fontWeight: 700, marginBottom: 5 }}>⚠️ 确认写入数据库</div>
             <div style={{ fontSize: 11.5, color: '#5F5D54', marginBottom: 8, lineHeight: 1.6 }}>{pendingWrite.summary}</div>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -908,7 +908,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           </div>
         )}
         {pendingAsk && (
-          <div style={{ background: '#FFF8EC', border: '1px solid #F0D9B5', borderRadius: 9, padding: '9px 12px', marginBottom: 6 }}>
+          <div className="local-ai-ask" style={{ background: '#FFF8EC', border: '1px solid #F0D9B5', borderRadius: 9, padding: '9px 12px', marginBottom: 6 }}>
             <div style={{ fontSize: 12, color: '#181713', fontWeight: 600, marginBottom: 7 }}>🤔 {pendingAsk.question}</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {pendingAsk.options.length > 0 ? (
@@ -940,7 +940,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         {attachments.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 5 }}>
             {attachments.map((a, ai) => (
-              <span key={ai} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#FBFAF6', border: '1px solid #E6E4DC', borderRadius: 5, padding: '2px 7px', fontSize: 10.5, color: '#5F5D54' }}>
+              <span className="local-ai-attachment" key={ai} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#FBFAF6', border: '1px solid #E6E4DC', borderRadius: 5, padding: '2px 7px', fontSize: 10.5, color: '#5F5D54' }}>
                 <span>{a.kind === 'image' ? '🖼' : '📄'}</span>
                 <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
                 <Button type="text" size="small" icon={<DeleteOutlined />} style={{ fontSize: 10, width: 16, height: 16, padding: 0, color: '#9A978B' }} onClick={() => setAttachments(prev => prev.filter((_, i) => i !== ai))} />
@@ -948,7 +948,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
             ))}
           </div>
         )}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', background: '#FFFFFF', border: '1px solid #D5D2C6', borderRadius: 9, padding: '3px 3px 3px 6px' }}>
+        <div className="local-ai-composer" style={{ display: 'flex', gap: 6, alignItems: 'center', background: '#FFFFFF', border: '1px solid #D5D2C6', borderRadius: 9, padding: '3px 3px 3px 6px' }}>
           <Tooltip title="附加文件（Excel / 图片）">
             <Button type="text" size="small" icon={<PaperClipOutlined />} style={{ color: '#9A978B', flexShrink: 0 }} onClick={pickAttachment} />
           </Tooltip>

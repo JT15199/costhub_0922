@@ -1821,9 +1821,16 @@ tr:hover .sp-row-ops { opacity: 1; }
   --radius-sm: 6px;
   --radius: 9px;
   --radius-lg: 14px;
-  --glass-border: rgba(255,255,255,0.72);
-  --glass-surface: rgba(255,255,255,0.66);
-  --glass-elevated: rgba(255,255,255,0.86);
+  /* 由 ThemeContext 注入 --glass-opacity；保留 fallback 让旧状态/SSR 仍可渲染 */
+  --glass-opacity: 0.66;
+  --glass-hover-opacity: 0.78;
+  --glass-sidebar-opacity: 0.54;
+  --glass-elevated-opacity: 0.84;
+  --glass-input-opacity: 0.70;
+  --glass-border: rgba(255,255,255,0.76);
+  --glass-surface: rgba(255,255,255,var(--glass-opacity));
+  --glass-hover-surface: rgba(255,255,255,var(--glass-hover-opacity));
+  --glass-elevated: rgba(255,255,255,var(--glass-elevated-opacity));
 }
 
 [data-theme="liquidLight"] body {
@@ -1863,11 +1870,11 @@ tr:hover .sp-row-ops { opacity: 1; }
 [data-theme="liquidLight"] #root { position: relative; z-index: 0; }
 
 [data-theme="liquidLight"] .sidebar {
-  background: rgba(255,255,255,0.52) !important;
-  backdrop-filter: blur(30px) saturate(165%);
-  -webkit-backdrop-filter: blur(30px) saturate(165%);
+  background: rgba(255,255,255,var(--glass-sidebar-opacity)) !important;
+  backdrop-filter: blur(34px) saturate(178%);
+  -webkit-backdrop-filter: blur(34px) saturate(178%);
   border-right: 1px solid var(--glass-border) !important;
-  box-shadow: 8px 0 30px rgba(92,120,164,0.08);
+  box-shadow: 8px 0 30px rgba(92,120,164,0.12), inset -1px 0 0 rgba(255,255,255,0.3);
 }
 
 [data-theme="liquidLight"] .sidebar-logo {
@@ -1885,11 +1892,11 @@ tr:hover .sp-row-ops { opacity: 1; }
 }
 [data-theme="liquidLight"] .nav-item:hover {
   color: #1D2A3D;
-  background: rgba(255,255,255,0.5) !important;
+  background: rgba(255,255,255,var(--glass-hover-opacity)) !important;
 }
 [data-theme="liquidLight"] .nav-item.active {
   color: #245ED2;
-  background: rgba(255,255,255,0.78) !important;
+  background: var(--glass-hover-surface) !important;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.9), 0 4px 14px rgba(69,105,159,0.1);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -1920,8 +1927,8 @@ tr:hover .sp-row-ops { opacity: 1; }
 [data-theme="liquidLight"] .content-card:hover,
 [data-theme="liquidLight"] .stat-card:hover,
 [data-theme="liquidLight"] .ant-card:hover {
-  background: rgba(255,255,255,0.78) !important;
-  box-shadow: var(--color-shadow-hover) !important;
+  background: var(--glass-hover-surface) !important;
+  box-shadow: var(--color-shadow-hover), 0 10px 34px rgba(73,125,206,0.1) !important;
 }
 
 /* 数据表面保持高不透明度，避免玻璃效果损害成本数字辨识度 */
@@ -1989,14 +1996,61 @@ tr:hover .sp-row-ops { opacity: 1; }
 
 [data-theme="liquidLight"] .local-ai-root,
 [data-theme="liquidLight"] .local-ai-left {
-  background: rgba(255,255,255,0.58) !important;
-  border-color: rgba(255,255,255,0.78) !important;
-  backdrop-filter: blur(28px) saturate(160%);
-  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  background: var(--glass-surface) !important;
+  border-color: rgba(255,255,255,0.84) !important;
+  backdrop-filter: blur(34px) saturate(185%);
+  -webkit-backdrop-filter: blur(34px) saturate(185%);
+  box-shadow: -14px 0 42px rgba(68,112,183,0.12), inset 1px 0 0 rgba(255,255,255,0.62), inset 0 1px 0 rgba(255,255,255,0.72);
+}
+
+/* AI 协作窗的炫彩折射层：保持内容可读，只增加边缘高光与非常克制的蓝/青光晕 */
+[data-theme="liquidLight"] .local-ai-root::before,
+[data-theme="liquidLight"] .local-ai-left::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(120% 28% at 100% 0%, rgba(117,177,255,0.18), transparent 62%),
+    radial-gradient(80% 22% at 0% 100%, rgba(107,231,217,0.10), transparent 68%),
+    linear-gradient(180deg, rgba(255,255,255,0.22), transparent 23%, transparent 78%, rgba(255,255,255,0.10));
+  mix-blend-mode: screen;
+}
+[data-theme="liquidLight"] .local-ai-root > *,
+[data-theme="liquidLight"] .local-ai-left > * { position: relative; z-index: 1; }
+[data-theme="liquidLight"] .local-ai-context,
+[data-theme="liquidLight"] .local-ai-plan,
+[data-theme="liquidLight"] .local-ai-reasoning,
+[data-theme="liquidLight"] .local-ai-step,
+[data-theme="liquidLight"] .local-ai-assistant-bubble,
+[data-theme="liquidLight"] .local-ai-attachment {
+  background: rgba(255,255,255,var(--glass-input-opacity)) !important;
+  border-color: rgba(255,255,255,0.76) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+}
+[data-theme="liquidLight"] .local-ai-status {
+  background: rgba(207,244,225,var(--glass-input-opacity)) !important;
+  border-color: rgba(114,202,157,0.42) !important;
+}
+[data-theme="liquidLight"] .local-ai-user-bubble {
+  background: linear-gradient(135deg, #2F6FED, #4B8EFF) !important;
+  box-shadow: 0 8px 22px rgba(47,111,237,0.22), inset 0 1px 0 rgba(255,255,255,0.26);
+}
+[data-theme="liquidLight"] .local-ai-composer {
+  background: rgba(255,255,255,var(--glass-elevated-opacity)) !important;
+  border-color: rgba(255,255,255,0.9) !important;
+  box-shadow: 0 10px 28px rgba(76,121,186,0.14), inset 0 1px 0 rgba(255,255,255,0.86);
+}
+[data-theme="liquidLight"] .local-ai-write-confirm,
+[data-theme="liquidLight"] .local-ai-ask {
+  background: rgba(255,248,236,var(--glass-elevated-opacity)) !important;
+  border-color: rgba(241,190,128,0.58) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.74);
 }
 [data-theme="liquidLight"] .local-ai-root .ant-input,
 [data-theme="liquidLight"] .local-ai-root .ant-input-affix-wrapper {
-  background: rgba(255,255,255,0.68) !important;
+  background: rgba(255,255,255,var(--glass-input-opacity)) !important;
 }
 
 [data-theme="liquidLight"][data-lowfx="on"] body::before { opacity: 0.55; }
@@ -2009,4 +2063,8 @@ tr:hover .sp-row-ops { opacity: 1; }
 [data-theme="liquidLight"][data-lowfx="on"] .ant-drawer-content {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+}
+[data-theme="liquidLight"][data-lowfx="on"] .local-ai-root::before,
+[data-theme="liquidLight"][data-lowfx="on"] .local-ai-left::before {
+  display: none;
 }

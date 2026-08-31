@@ -3,7 +3,7 @@ import { EmojiIcon } from '../iconMap';
 import * as XLSX from 'xlsx';
 import {
   Button, Space, Alert, message, Spin, Descriptions, Modal, Tag, Empty, Select, Input, Tooltip,
-  Card, Row, Col, Switch, Tabs, Form, Popconfirm, Table, Checkbox, InputNumber, Radio,
+  Card, Row, Col, Switch, Tabs, Form, Popconfirm, Table, Checkbox, InputNumber, Radio, Slider,
 } from 'antd';
 import {
   ApiOutlined, CheckCircleOutlined, DeleteOutlined, EditOutlined,
@@ -50,7 +50,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
     } catch { message.error('撤销失败'); }
   };
  
-  const { lowFx, setLowFx, backgroundImage, setBackgroundImage } = useTheme();
+  const { lowFx, setLowFx, backgroundImage, setBackgroundImage, glassOpacity, setGlassOpacity } = useTheme();
   const [loading, setLoading] = useState(true);
   const [testingSearch, setTestingSearch] = useState(false);
   const [testingLLM, setTestingLLM] = useState(false);
@@ -1772,6 +1772,45 @@ export default function Settings({embedded }: { embedded?: boolean }) {
               支持 PNG、JPG、WebP，建议使用低饱和、浅色图片，大小不超过 2MB
             </div>
           </div>
+        </div>
+      </div>
+      {/* ====== 玻璃质感（统一透明度） ====== */}
+      <div style={{
+        background: 'white',
+        borderRadius: 16,
+        padding: 32,
+        marginBottom: 24,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06)'
+      }}>
+        <div style={{ marginBottom: 18 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0, color: '#111827', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ color: '#2F6FED', fontSize: 18 }}>◈</span> 玻璃质感
+          </h2>
+          <p style={{ margin: '4px 0 0 28px', color: '#6b7280', fontSize: 13 }}>
+            调整应用外壳、卡片和 AI 协作窗的透光程度。成本表格会保留更高不透明度，确保数字始终清晰。
+          </p>
+        </div>
+        <div style={{ maxWidth: 560, display: 'flex', alignItems: 'center', gap: 16 }}>
+          <span style={{ fontSize: 12, color: '#7A8799', minWidth: 54 }}>更通透</span>
+          <Slider
+            min={46}
+            max={86}
+            step={1}
+            value={Math.round(glassOpacity * 100)}
+            onChange={(value) => setGlassOpacity(Number(value) / 100)}
+            style={{ flex: 1, margin: '6px 0' }}
+            tooltip={{ formatter: (value) => `${value}%` }}
+            aria-label="玻璃透明度"
+          />
+          <span style={{ fontSize: 12, color: '#2F6FED', fontWeight: 600, minWidth: 42, textAlign: 'right' }}>
+            {Math.round((1 - glassOpacity) * 100)}% 透明
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14 }}>
+          <div style={{ width: 210, height: 46, borderRadius: 12, position: 'relative', overflow: 'hidden', background: backgroundImage ? `url(${backgroundImage}) center / cover` : 'linear-gradient(135deg,#DCEBFF,#F8FBFF 52%,#C7DDF8)', border: '1px solid #D7E1EF' }}>
+            <div style={{ position: 'absolute', inset: 6, borderRadius: 8, background: `rgba(255,255,255,${glassOpacity})`, border: '1px solid rgba(255,255,255,.88)', boxShadow: '0 6px 18px rgba(58,105,170,.16)' }} />
+          </div>
+          <span style={{ fontSize: 12, color: '#8C98A8' }}>实时预览 · 当前玻璃表面</span>
         </div>
       </div>
       {/* ====== 低特效模式（兼容模式） ====== */}
