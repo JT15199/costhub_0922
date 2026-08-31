@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Descriptions, Divider, Drawer, Empty, Input, Modal, Progress, Radio, Segmented, Space, Spin, Statistic, Steps, Table, Tag, Tooltip, Upload, message } from 'antd';
+import { Alert, Button, Card, Descriptions, Divider, Drawer, Empty, Input, Modal, Progress, Radio, Segmented, Select, Space, Spin, Statistic, Steps, Table, Tag, Timeline, Tooltip, Upload, message } from 'antd';
 import { AimOutlined, CheckCircleOutlined, ClockCircleOutlined, DownloadOutlined, FileExcelOutlined, HistoryOutlined, InboxOutlined, ReloadOutlined, UploadOutlined, WarningOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
-import { getTenderMatrix, getTenderOverview, importTenderQuoteBatch, type TenderMatrixRow, type TenderOverview } from '../db';
+import { getTenderMatrix, getTenderOverview, importTenderQuoteBatch, updateTenderLineMatch, type MatchRelation, type TenderMatrixRow, type TenderOffer, type TenderOverview } from '../db';
 import { parseTenderQuoteFile, type ParsedTenderQuote } from '../tenderImport';
 
 interface TenderWorkspaceProps { projectId: number; project?: any; }
@@ -25,6 +25,8 @@ export default function TenderWorkspace({ projectId, project }: TenderWorkspaceP
   const [stage, setStage] = useState('摸底报价');
   const [importing, setImporting] = useState(false);
   const [selectedRow, setSelectedRow] = useState<TenderMatrixRow | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [matchSaving, setMatchSaving] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -55,6 +57,16 @@ export default function TenderWorkspace({ projectId, project }: TenderWorkspaceP
       setPreview(null); await load();
     } catch (error: any) { message.error(`报价导入失败：${String(error?.message || error).slice(0, 160)}`); }
     finally { setImporting(false); }
+  };
+  const confirmRelation = async (lineId: number, relation: MatchRelation) => {
+    setMatchSaving(lineId);
+    try {
+      await updateTenderLineMatch(lineId, relation, relation === 'exact' ? 0.98 : relation === 'equivalent' ? 0.75 : 0.5, relation === 'exact' ? '用户确认可比' : '用户在报价行详情中确认');
+      message.success('匹配关系已保存，理论组合底价将按新关系刷新');
+      setSelectedRow(null);
+      await load();
+    } catch (error: any) { message.error(`匹配关系保存失败：${String(error?.message || error).slice(0, 120)}`); }
+    finally { setMatchSaving(null); }
   };
 
   const suppliers = useMemo(() => {
@@ -88,6 +100,7 @@ export default function TenderWorkspace({ projectId, project }: TenderWorkspaceP
         <Space wrap>
           <Upload beforeUpload={handleFile} showUploadList={false} accept=".xlsx,.xls"><Button type="primary" icon={<UploadOutlined />}>导入报价</Button></Upload>
           <Button icon={<HistoryOutlined />} onClick={() => setFilter('all')}>查看比价</Button>
+          <Button icon={<ClockCircleOutlined />} onClick={() => setHistoryOpen(true)}>历史批次</Button>
           <Button icon={<DownloadOutlined />} onClick={exportNegotiation}>生成议价清单</Button>
           <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>刷新</Button>
         </Space>
@@ -110,14 +123,17 @@ export default function TenderWorkspace({ projectId, project }: TenderWorkspaceP
       {loading ? <div style={{ textAlign: 'center', padding: 50 }}><Spin /></div> : visibleRows.length ? <Table size="small" rowKey="key" columns={columns} dataSource={visibleRows} scroll={{ x: 1080 }} pagination={{ pageSize: 20, showSizeChanger: false, showTotal: total => `共 ${total} 行` }} onRow={row => ({ onDoubleClick: () => setSelectedRow(row) })} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={matrix.length ? '当前筛选没有匹配项' : '还没有报价批次'}><Upload beforeUpload={handleFile} showUploadList={false} accept=".xlsx,.xls"><Button type="primary" icon={<InboxOutlined />}>导入第一份报价</Button></Upload></Empty>}
     </Card>
 
-    {(overview?.batches?.length || overview?.events?.length) ? <Card size="small" title="过程留痕" extra={<span style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>报价原文不覆盖，历史批次按时间倒序</span>}><Descriptions size="small" column={{ xs: 1, sm: 2, md: 3 }} items={[{ key: 'round', label: '当前轮次', children: overview.currentRound ? `第${overview.currentRound.roundNo}轮 · ${overview.currentRound.name}` : '尚未开始' }, { key: 'batches', label: '报价批次', children: `${overview.batches.length} 份` }, { key: 'events', label: '过程事件', children: `${overview.events.length} 条` }]} /></Card> : null}
+    {(overview?.batches?.length || overview?.events?.length) ? <Card size="small" title="过程留痕" extra={<span style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>报价原文不覆盖，历史批次按时间倒序</span>}><Descriptions size="small" column={{ xs: 1, sm: 2, md: 3 }} items={[{ key: 'round', label: '当前轮次', children: overview.currentRound ? `第${overview.currentRound.roundNo}轮 · ${overview.currentRound.name}` : '尚未开始' }, { key: 'batches', label: '报价批次', children: `${overview.batches.length} 份` }, { key: 'events', label: '过程事件', children: `${overview.events.length} 条` }]} /><Divider style={{ margin: '10px 0' }} /><Timeline items={overview.events.slice(0, 6).map(event => ({ color: event.eventType === 'quote_match_confirmed' ? 'green' : event.eventType === 'quote_imported' ? 'blue' : 'gray', children: <div><div style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>{event.summary}</div><div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{event.createdAt || '时间待补'}</div></div> }))} /></Card> : null}
 
     <Modal title="导入报价预览" open={!!preview} onCancel={() => !importing && setPreview(null)} onOk={() => void confirmImport()} okText="确认导入" confirmLoading={importing} width={820} destroyOnHidden>
       {preview && <div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 12 }}><div><div style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>文件</div><div style={{ fontWeight: 600 }}>{preview.sourceFileName}</div></div><div><div style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>供应商</div><Input size="small" value={supplierName} onChange={event => setSupplierName(event.target.value)} placeholder="例如：A供应商" /></div><div><div style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>所属阶段</div><Radio.Group size="small" value={stage} onChange={event => setStage(event.target.value)} options={['摸底报价', '谈价', '定点'].map(value => ({ label: value, value }))} /></div></div><Alert type="info" showIcon message={`识别到 ${preview.lines.length} 行，合计 ${money(preview.totalAmount)}；表头第 ${preview.headerRow + 1} 行`} description={preview.warnings.length ? preview.warnings.join('；') : '将按人民币、未税、一口价保存；原始单元格会保留在批次中。'} style={{ marginBottom: 12 }} /><Table size="small" rowKey="source_row" dataSource={preview.lines.slice(0, 8)} pagination={false} columns={[{ title: '来源行', dataIndex: 'source_row', width: 65 }, { title: '模块', dataIndex: 'module_name' }, { title: '器件名称', dataIndex: 'raw_name' }, { title: '规格', dataIndex: 'raw_specs', ellipsis: true }, { title: '数量', dataIndex: 'quantity', width: 60 }, { title: '单价', dataIndex: 'unit_price', width: 90, render: money }, { title: '小计', dataIndex: 'line_total', width: 90, render: money }]} /></div>}
     </Modal>
 
-    <Drawer title="报价行详情" open={!!selectedRow} onClose={() => setSelectedRow(null)} width={480}>
-      {selectedRow && <div><div style={{ fontSize: 17, fontWeight: 700 }}>{selectedRow.materialName}</div><div style={{ color: 'var(--color-text-secondary)', margin: '4px 0 14px' }}>{selectedRow.model || '型号待补'} · {selectedRow.specs || '规格待补'}</div><Alert type="warning" showIcon icon={<WarningOutlined />} message="可比判断需基于名称+规格核实" description="当前工作台只把标准化键一致的报价计入底价；等价/参考关系请在后续确认流程中标记。" style={{ marginBottom: 14 }} /><Table size="small" rowKey="supplierName" pagination={false} dataSource={Object.values(selectedRow.offers)} columns={[{ title: '供应商', dataIndex: 'supplierName' }, { title: '报价', dataIndex: 'lineTotal', render: money }, { title: '关系', dataIndex: 'relationType', render: value => <Tag color={relationColor[value] || 'default'}>{relationLabel[value] || value}</Tag> }, { title: '来源', dataIndex: 'sourceFileName', ellipsis: true }]} /><Divider /><Progress percent={selectedRow.comparableLow ? 100 : 0} size="small" status={selectedRow.comparableLow ? 'success' : 'exception'} format={() => selectedRow.comparableLow ? `最低：${selectedRow.comparableLow.supplierName}` : '待确认可比关系'} /></div>}
+    <Drawer title="报价行详情" open={!!selectedRow} onClose={() => setSelectedRow(null)} width={560}>
+      {selectedRow && <div><div style={{ fontSize: 17, fontWeight: 700 }}>{selectedRow.materialName}</div><div style={{ color: 'var(--color-text-secondary)', margin: '4px 0 14px' }}>{selectedRow.model || '型号待补'} · {selectedRow.specs || '规格待补'}</div><Alert type="warning" showIcon icon={<WarningOutlined />} message="可比判断需基于名称+规格核实" description="确认关系后会写入匹配历史并刷新理论组合底价；原始报价行不会被覆盖。" style={{ marginBottom: 14 }} /><Table size="small" rowKey="supplierName" pagination={false} dataSource={Object.values(selectedRow.offers)} columns={[{ title: '供应商', dataIndex: 'supplierName' }, { title: '报价', dataIndex: 'lineTotal', render: money }, { title: '关系', dataIndex: 'relationType', render: (value, offer: TenderOffer) => <Select size="small" value={value} loading={matchSaving === offer.quoteLineId} style={{ width: 92 }} options={Object.entries(relationLabel).map(([key, label]) => ({ value: key, label }))} onChange={next => void confirmRelation(offer.quoteLineId, next as MatchRelation)} aria-label={`${offer.supplierName}匹配关系`} /> }, { title: '来源', dataIndex: 'sourceFileName', ellipsis: true }]} /><Divider /><Progress percent={selectedRow.comparableLow ? 100 : 0} size="small" status={selectedRow.comparableLow ? 'success' : 'exception'} format={() => selectedRow.comparableLow ? `最低：${selectedRow.comparableLow.supplierName}` : '待确认可比关系'} /></div>}
+    </Drawer>
+    <Drawer title="历史报价批次" open={historyOpen} onClose={() => setHistoryOpen(false)} width={520}>
+      {overview?.batches?.length ? <Table size="small" rowKey="id" pagination={{ pageSize: 10, showSizeChanger: false }} dataSource={overview.batches} columns={[{ title: '供应商', dataIndex: 'supplierName' }, { title: '轮次', dataIndex: 'roundNo', render: (v: number, row: any) => `第${v}轮 · ${row.roundName}` }, { title: '批次', dataIndex: 'batchNo', render: (v: number) => `第${v}份` }, { title: '总价', dataIndex: 'totalAmount', align: 'right', render: money }, { title: '文件', dataIndex: 'sourceFileName', ellipsis: true }, { title: '导入时间', dataIndex: 'createdAt', width: 130 }]} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有历史报价批次" />}
     </Drawer>
   </div>;
 }

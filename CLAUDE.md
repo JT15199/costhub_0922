@@ -336,3 +336,4 @@
 - **导入与页面**：`src/tenderImport.ts` 负责本地 xlsx/xls 表头探测、金额标准化、文件哈希和供应商名推断；`src/components/TenderWorkspace.tsx` 以新增页签接入项目详情，默认仍打开 BOM 页签，主流程为“导入→预览→确认”。
 - **AI**：新增 `query_tender_analysis` 只读工具与 `tender` Skill；模型只能读取当前轮次矩阵，必须区分可比/等价/参考/待确认，不能把待确认价格计入底价或擅自写回。
 - **安全与验收**：解析器无网络代码；工作台和 AI 工具不发送原始报价到云端。详细目录、接口、组件职责、验收标准和禁止事项见 `docs/招标工作台实施方案.md`。
+- **过程确认补充**：报价行详情支持直接标记 `exact/equivalent/reference/incomparable/unmatched`，只有跨供应商可比关系计入底价；历史批次抽屉与过程时间线展示版本，不覆盖原文。
