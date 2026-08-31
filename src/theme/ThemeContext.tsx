@@ -100,6 +100,8 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     root.style.setProperty('--glass-sidebar-opacity', clampGlassOpacity(glassOpacity - 0.12).toFixed(2));
     root.style.setProperty('--glass-elevated-opacity', clampGlassOpacity(glassOpacity + 0.18).toFixed(2));
     root.style.setProperty('--glass-input-opacity', clampGlassOpacity(glassOpacity + 0.04).toFixed(2));
+    // 表格单独使用略高于完全透明的底色，兼顾背景透出和成本数字可读性。
+    root.style.setProperty('--glass-table-opacity', Math.min(0.70, Math.max(0.42, glassOpacity - 0.14)).toFixed(2));
     document.body.style.color = theme.colors.textPrimary;
     document.body.style.fontFamily = theme.typography.fontSans;
 

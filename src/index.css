@@ -1827,6 +1827,7 @@ tr:hover .sp-row-ops { opacity: 1; }
   --glass-sidebar-opacity: 0.54;
   --glass-elevated-opacity: 0.84;
   --glass-input-opacity: 0.70;
+  --glass-table-opacity: 0.52;
   --glass-border: rgba(255,255,255,0.76);
   --glass-surface: rgba(255,255,255,var(--glass-opacity));
   --glass-hover-surface: rgba(255,255,255,var(--glass-hover-opacity));
@@ -1938,16 +1939,16 @@ tr:hover .sp-row-ops { opacity: 1; }
 [data-theme="liquidLight"] .ant-table-wrapper,
 [data-theme="liquidLight"] .ant-table-container,
 [data-theme="liquidLight"] .ant-table {
-  background: rgba(255,255,255,0.82) !important;
+  background: rgba(255,255,255,var(--glass-table-opacity)) !important;
   border-radius: 10px;
 }
 [data-theme="liquidLight"] .ant-table-thead > tr > th {
-  background: rgba(235,242,251,0.78) !important;
+  background: rgba(235,242,251,0.58) !important;
   color: #53637A !important;
   border-bottom-color: rgba(100,130,175,0.16) !important;
 }
 [data-theme="liquidLight"] .ant-table-tbody > tr > td {
-  background: rgba(255,255,255,0.2) !important;
+  background: rgba(255,255,255,0.26) !important;
   border-bottom-color: rgba(100,130,175,0.11) !important;
 }
 [data-theme="liquidLight"] .ant-table-tbody > tr:hover > td { background: rgba(226,238,255,0.62) !important; }
@@ -1960,7 +1961,7 @@ tr:hover .sp-row-ops { opacity: 1; }
 [data-theme="liquidLight"] .project-list-card .ant-table-wrapper,
 [data-theme="liquidLight"] .project-list-card .ant-table-container,
 [data-theme="liquidLight"] .project-list-card .ant-table {
-  background: transparent !important;
+  background: rgba(255,255,255,var(--glass-table-opacity)) !important;
 }
 [data-theme="liquidLight"] .project-list-card .ant-table-thead > tr > th {
   background: rgba(235,242,251,0.56) !important;
