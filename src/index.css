@@ -2748,6 +2748,7 @@ tr:hover .sp-row-ops { opacity: 1; }
 .module-target-section { margin-bottom:10px; padding:10px; border:1px solid rgba(255,255,255,.8); border-radius:15px; background:rgba(255,255,255,.46); }
 .section-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
 .section-heading h2 { margin:0; color:var(--project-ink); font-size:15px; }
+.section-caption { display:block; margin-top:3px; color:#7e95aa; font-size:10px; }
 .section-heading .eyebrow { margin-bottom:2px; }
 .section-heading .ant-btn { padding-inline:4px; font-size:11px; }
 .module-target-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; }
@@ -2769,6 +2770,9 @@ tr:hover .sp-row-ops { opacity: 1; }
 .bom-command-bar .ant-input { border-radius:8px; }
 .bom-tab-layout,.bom-workspace-main { width:100%; min-width:0; }
 .bom-spreadsheet-hint { margin:-4px 2px 8px; color:#7790aa; font-size:10px; }
+.bom-spreadsheet-statusbar { display:flex; align-items:center; gap:16px; min-height:32px; padding:5px 10px; border:1px solid rgba(137,177,210,.2); border-top:0; border-radius:0 0 10px 10px; background:rgba(239,247,253,.68); color:#6d849a; font-size:10px; }
+.bom-spreadsheet-statusbar b { color:#234a70; font-variant-numeric:tabular-nums; }
+.bom-spreadsheet-status-note { margin-left:auto; color:#8aa0b6; }
 .bom-workspace-main .ant-table-wrapper { border:1px solid rgba(137,177,210,.24); border-radius:12px; overflow:hidden; background:rgba(255,255,255,.58); }
 .bom-workspace-main .ant-table-thead > tr > th { padding:7px 8px !important; background:rgba(234,243,251,.9) !important; color:#48647e; font-size:11px; white-space:nowrap; }
 .bom-workspace-main .ant-table-tbody > tr > td { padding:6px 8px !important; font-size:11px; }

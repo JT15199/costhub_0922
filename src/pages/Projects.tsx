@@ -72,8 +72,8 @@ export default function Projects() {
   const [modList, setModList] = useState<any[]>([]);
   const [previewModItems, setPreviewModItems] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState('bom');
-  // 方案三：模块目标钻取；项目列表由 App 原有左侧栏承载，不再占用页面宽度。
-  const [moduleFocus, setModuleFocus] = useState<string | null>(null);
+  // 方案三：领域目标钻取；项目列表由 App 原有左侧栏承载，不再占用页面宽度。
+  const [domainFocus, setDomainFocus] = useState<string | null>(null);
   const [negotiationOpen, setNegotiationOpen] = useState(false);
   const [bomSearch, setBomSearch] = useState('');
   const [bomTableMode, setBomTableMode] = useState<'module' | 'flat'>('flat');
@@ -810,7 +810,7 @@ export default function Projects() {
   };
 
   const selectProject = (pid: number) => {
-    setSelectedPid(pid); setModuleFocus(null); setActiveTab('bom');
+    setSelectedPid(pid); setDomainFocus(null); setActiveTab('bom');
     loadBOM(pid); loadReviews(pid); loadCostSnapshots(pid); loadMeasures(pid); loadTargets(pid); loadProjectSuppliers(pid); loadSkus(pid);
     // 切换项目时自动退出参照对比模式（要对比再重新选择参照项目）
     setRefProjPid(null); setRefProjBoms([]); setModRefMap({});
@@ -1110,15 +1110,21 @@ export default function Projects() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPid, boms, targets, costSnapshots, projects, selectedProject?.category]);
-  // Module grouping
+  // 领域聚合用于顶部目标达成；模块聚合继续用于 BOM 分组和成本分析。
   const moduleSummary: Record<string, number> = {};
+  const domainSummary: Record<string, number> = {};
   const groupedBOMs: Record<string, any[]> = {};
-  boms.forEach(b => { const m = b.module_name || '未归类'; moduleSummary[m] = (moduleSummary[m] || 0) + (b.part_cost || 0) * b.quantity; });
+  boms.forEach(b => {
+    const module = b.module_name || '未归类';
+    const domain = b.main_category || '其他';
+    moduleSummary[module] = (moduleSummary[module] || 0) + (b.part_cost || 0) * b.quantity;
+    domainSummary[domain] = (domainSummary[domain] || 0) + (b.part_cost || 0) * b.quantity;
+  });
   const visibleBoms = boms.filter(b => {
-    const matchesModule = !moduleFocus || (b.module_name || '未归类') === moduleFocus;
+    const matchesDomain = !domainFocus || (b.main_category || '其他') === domainFocus;
     const q = bomSearch.trim().toLowerCase();
     const matchesSearch = !q || `${b.module_name || ''} ${b.part_name || ''} ${b.part_model || ''} ${b.part_specs || ''}`.toLowerCase().includes(q);
-    return matchesModule && matchesSearch;
+    return matchesDomain && matchesSearch;
   });
   visibleBoms.forEach(b => { const m = b.module_name || '未归类'; if (!groupedBOMs[m]) groupedBOMs[m] = []; groupedBOMs[m].push(b); });
   // BOM 模块排序：与模块库一致（分类顺序优先 + 分类内按名称）
@@ -1203,7 +1209,7 @@ export default function Projects() {
   const spreadsheetBomCols: any[] = [
     { title: '#', key: 'row_no', width: 46, fixed: 'left' as const, align: 'center' as const, render: (_: any, __: any, index: number) => <span className="bom-row-number">{index + 1}</span> },
     ...bomCols.map((column: any) => {
-      if (column.dataIndex !== 'part_cost' && column.dataIndex !== 'quantity') return column;
+      if (column.dataIndex !== 'part_cost' && column.dataIndex !== 'quantity') return column.dataIndex === 'module_name' ? { ...column, fixed: 'left' as const } : column;
       const field = column.dataIndex as 'part_cost' | 'quantity';
       return {
         ...column,
@@ -1237,6 +1243,20 @@ export default function Projects() {
     return { row, ref, saving };
   }).sort((a: any, b: any) => b.saving - a.saving || ((b.row.part_cost || 0) * (b.row.quantity || 1)) - ((a.row.part_cost || 0) * (a.row.quantity || 1))).slice(0, 8);
 
+  const copySelectedBomRows = async () => {
+    const rows = visibleBoms.filter((row: any) => bomSelKeys.includes(row.id));
+    if (rows.length === 0) { message.info('请先选择要复制的行'); return; }
+    const header = ['模块', '大类', '子类', '名称', '型号', '单价', '数量', '小计', '备注'];
+    const body = rows.map((row: any) => [
+      row.module_name || '未归类', row.main_category || '', row.sub_category || '', row.part_name || '', row.part_model || '',
+      Number(row.part_cost || 0).toFixed(4), row.quantity ?? '', ((row.part_cost || 0) * (row.quantity || 0)).toFixed(4), row.remark || '',
+    ]);
+    try {
+      await navigator.clipboard.writeText([header, ...body].map(line => line.join('\t')).join('\n'));
+      message.success(`已复制 ${rows.length} 行，可直接粘贴到 Excel`);
+    } catch { message.warning('当前环境不允许访问剪贴板，请使用导出 Excel'); }
+  };
+
   return (
     <div className="projects-page">
       <div className="page-title projects-page-title"><FileTextOutlined /> 项目管理 <span className="projects-page-actions"><Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => { setEditing(null); form.resetFields(); setModalOpen(true); }}>新建项目</Button><Button size="small" icon={<TagOutlined />} onClick={() => { setCatModalOpen(true); setNewCatName(''); }}>品类管理</Button></span></div>
@@ -1252,7 +1272,7 @@ export default function Projects() {
             <div className="project-detail-actions"><Button size="small" icon={<UploadOutlined />} onClick={() => setActiveTab('tender')}>导入报价</Button><Button size="small" onClick={() => { setEditing(selectedProject); form.setFieldsValue(selectedProject); setModalOpen(true); }}>编辑项目</Button><Button type="primary" size="small" icon={<PlusOutlined />} onClick={async () => { setAllParts(await getParts('', '', '')); setBomEdit(null); bomForm.resetFields(); bomForm.setFieldsValue({ _addMode: 'module', quantity: 1, _quantity: 1, _cost: 0 }); setBomModal(true); }}>新增器件</Button></div>
           </div>
           <div className="project-summary-strip"><span><small>BOM成本</small><b>¥{bomTotal.toFixed(2)}</b></span><span><small>整机成本</small><b>¥{wholeMachineCost.toFixed(2)}</b></span><span><small>平台 + 利润</small><b>{selectedProject?.platform_fee_rate || 0}% + {selectedProject?.profit_rate || 0}%</b></span><span><small>器件</small><b>{boms.length} 项</b></span></div>
-          <div className="module-target-section"><div className="section-heading"><div><span className="eyebrow">成本控制</span><h2>模块目标达成</h2></div><Button size="small" type="link" onClick={() => setModuleFocus(null)}>清除筛选</Button></div><div className="module-target-grid">{Object.entries(moduleSummary).map(([name, cost]) => { const target = targets.find((t: any) => t.domain === name)?.target_cost || 0; const diff = target ? cost - target : 0; const pct = target ? Math.min(100, (cost / target) * 100) : 0; const good = target > 0 && diff <= 0; return <button key={name} className={`module-target-card ${moduleFocus === name ? 'is-selected' : ''}`} onClick={() => setModuleFocus(moduleFocus === name ? null : name)}><div className="module-target-meta"><b>{name}</b><span>{target ? (good ? `达成，可降 ¥${Math.abs(diff).toFixed(2)}` : `超目标 ¥${diff.toFixed(2)}`) : '未设目标'}</span></div><div className="module-target-values"><strong>¥{cost.toFixed(2)}</strong><small>{target ? `目标 ¥${target.toFixed(2)}` : '目标 —'}</small></div><div className="module-target-track"><i style={{ width: `${pct}%`, background: target ? (good ? '#28A56A' : '#E45A5A') : '#94A3B8' }} /><em style={{ left: target ? '100%' : '0%' }} /></div></button>; })}</div></div>
+          <div className="module-target-section"><div className="section-heading"><div><span className="eyebrow">成本控制</span><h2>领域目标达成</h2><small className="section-caption">按 BOM 大类汇总实际成本，与领域目标逐项核对</small></div><Button size="small" type="link" onClick={() => setDomainFocus(null)}>清除筛选</Button></div><div className="module-target-grid">{Object.entries(domainSummary).map(([name, cost]) => { const target = targets.find((t: any) => t.domain === name)?.target_cost || 0; const diff = target ? cost - target : 0; const pct = target ? Math.min(100, (cost / target) * 100) : 0; const good = target > 0 && diff <= 0; return <button key={name} className={`module-target-card ${domainFocus === name ? 'is-selected' : ''}`} onClick={() => setDomainFocus(domainFocus === name ? null : name)}><div className="module-target-meta"><b>{name}</b><span>{target ? (good ? `达成，可降 ¥${Math.abs(diff).toFixed(2)}` : `超目标 ¥${diff.toFixed(2)}`) : '未设目标'}</span></div><div className="module-target-values"><strong>¥{cost.toFixed(2)}</strong><small>{target ? `目标 ¥${target.toFixed(2)}` : '目标 —'}</small></div><div className="module-target-track"><i style={{ width: `${pct}%`, background: target ? (good ? '#28A56A' : '#E45A5A') : '#94A3B8' }} /><em style={{ left: target ? '100%' : '0%' }} /></div></button>; })}</div></div>
           {/* AI 体检条（规则驱动，点击问题直达对应 tab） */}
           {healthIssues.length > 0 && (
             <div style={{ marginBottom: 14, border: healthIssues.some(i => i.level === 'danger') ? '1.5px solid #FECACA' : '1px solid #FDE68A', borderRadius: 10, padding: '10px 14px', background: healthIssues.some(i => i.level === 'danger') ? '#FFF9F9' : '#FFFBEB' }}>
@@ -1310,6 +1330,7 @@ export default function Projects() {
                       <Input size="small" allowClear value={bomSearch} onChange={e => setBomSearch(e.target.value)} placeholder="搜索器件 / 型号 / 规格" style={{ width: 210 }} />
                       <Segmented size="small" value={bomTableMode} onChange={v => setBomTableMode(v as 'module' | 'flat')} options={[{ label: '模块分组', value: 'module' }, { label: '全量表格', value: 'flat' }]} />
                       <Button size="small" icon={<BulbOutlined />} onClick={() => setNegotiationOpen(true)}>议价机会</Button>
+                      {bomTableMode === 'flat' && <Tooltip title="复制选中的 BOM 行为制表符文本，可直接粘贴到 Excel"><Button size="small" icon={<CopyOutlined />} onClick={copySelectedBomRows}>复制选中</Button></Tooltip>}
                     </Space>
                     {bomSelKeys.length > 0 && (
                       <Space>
@@ -1320,7 +1341,7 @@ export default function Projects() {
                         </Popconfirm>
                       </Space>
                     )}
-                    <ColumnSettingsButton tableId="bom_module_detail" columns={bomCols} />
+                    <ColumnSettingsButton tableId={bomTableMode === 'flat' ? 'bom_flat_detail' : 'bom_module_detail'} columns={bomTableMode === 'flat' ? spreadsheetBomCols : bomCols} />
                     {/* 参照项目：所有项目都可选参照对比（在研测算/已完成复核），排除当前项目自身 */}
                     <Select
                       size="small"
@@ -1334,17 +1355,20 @@ export default function Projects() {
                   </div>
                   {bomTableMode === 'flat' && <div className="bom-spreadsheet-hint">连续表格模式 · 双击“单价”或“数量”直接编辑，Enter 保存 · 可横向滚动查看完整字段</div>}
                   {bomTableMode === 'flat' ? (
-                    <DataTable
-                      tableId="bom_flat_detail"
-                      hideToolbar
-                      dataSource={visibleBoms}
-                      columns={spreadsheetBomCols}
-                      rowKey="id"
-                      size="small"
-                      pagination={false}
-                      scroll={{ x: 1240, y: 560 }}
-                      rowSelection={{ selectedRowKeys: bomSelKeys, onChange: keys => setBomSelKeys(keys) }}
-                    />
+                    <>
+                      <DataTable
+                        tableId="bom_flat_detail"
+                        hideToolbar
+                        dataSource={visibleBoms}
+                        columns={spreadsheetBomCols}
+                        rowKey="id"
+                        size="small"
+                        pagination={false}
+                        scroll={{ x: 1240, y: 560 }}
+                        rowSelection={{ selectedRowKeys: bomSelKeys, onChange: keys => setBomSelKeys(keys) }}
+                      />
+                      <div className="bom-spreadsheet-statusbar"><span>显示 {visibleBoms.length} / {boms.length} 行</span><span>当前合计 <b>¥{visibleBoms.reduce((sum: number, row: any) => sum + (row.part_cost || 0) * (row.quantity || 0), 0).toFixed(4)}</b></span><span>已选 {bomSelKeys.filter(id => visibleBoms.some((row: any) => row.id === id)).length} 行</span><span className="bom-spreadsheet-status-note">双击单价/数量编辑 · 列宽可拖动调整</span></div>
+                    </>
                   ) : sortedModNames.map((modName: string) => {
                     const items = groupedBOMs[modName];
                     const modTotal = items.reduce((s: number, b: any) => s + (b.part_cost || 0) * b.quantity, 0);
