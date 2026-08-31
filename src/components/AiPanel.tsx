@@ -787,7 +787,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       />
 
       {/* 头部（紧凑：模型选择 + 深度思考 + 操作按钮） */}
-      <div style={{ padding: '8px 10px 6px', borderBottom: '1px solid #E6E4DC', flexShrink: 0 }}>
+      <div className="local-ai-header" style={{ padding: '8px 10px 6px', borderBottom: '1px solid #E6E4DC', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 6, height: 6, borderRadius: 3, background: modelInfo.ready ? '#1F7A4C' : '#C0392B', flexShrink: 0 }} />
           <Select
@@ -825,7 +825,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         </div>
       </div>
       {/* 对话区 */}
-      <div ref={scrollRef} onScroll={onScroll} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div className="local-ai-conversation" ref={scrollRef} onScroll={onScroll} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {/* 批量云端更新进度 */}
         {batchProgress && (
           <div className="local-ai-status" style={{ background: '#EDF6F0', border: '1px solid #CDE3D4', borderRadius: 9, padding: '7px 11px', fontSize: 11, color: '#1F7A4C', lineHeight: 1.7 }}>
@@ -845,7 +845,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           </div>
         )}
         {messages.length === 0 && !streaming ? (
-          <div style={{ fontSize: 11.5, color: '#9A978B', lineHeight: 1.9, padding: '6px 4px' }}>
+          <div className="local-ai-welcome" style={{ fontSize: 11.5, color: '#9A978B', lineHeight: 1.9, padding: '6px 4px' }}>
             <div style={{ fontWeight: 700, color: '#5F5D54', marginBottom: 2 }}>直接说需求，我自动调用工具查库分析</div>
             · 这个项目哪里贵、怎么降？<br />
             · 审这份报价：面板 ¥610、驱动板 ¥185…<br />
@@ -896,7 +896,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
       </div>
 
       {/* 输入区 */}
-      <div style={{ padding: '8px 10px', borderTop: '1px solid #E6E4DC', flexShrink: 0 }}>
+      <div className="local-ai-composer-area" style={{ padding: '8px 10px', borderTop: '1px solid #E6E4DC', flexShrink: 0 }}>
         {pendingWrite && (
           <div className="local-ai-write-confirm" style={{ background: '#FFF3EC', border: '1px solid #F0C9B5', borderRadius: 9, padding: '9px 12px', marginBottom: 6 }}>
             <div style={{ fontSize: 12, color: '#181713', fontWeight: 700, marginBottom: 5 }}>⚠️ 确认写入数据库</div>

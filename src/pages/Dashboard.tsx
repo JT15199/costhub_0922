@@ -61,26 +61,8 @@ function DashboardRedesign({
     .sort((a, b) => Number(b.status === '进行中') - Number(a.status === '进行中'))
     .slice(0, 5);
   const recentSavings = snapshotChanges.reduce((sum, item) => sum + Math.max(0, item.oldCost - item.newCost), 0);
-  const trendRows = snapshotChanges.length > 0
-    ? snapshotChanges.slice(0, 8).reverse().map(item => ({
-        label: projectById.get(item.projectId)?.code || `项目${item.projectId}`,
-        value: item.newCost,
-      }))
-    : [...projCosts].sort((a, b) => b.cost - a.cost).slice(0, 8).reverse().map(item => ({ label: item.name, value: item.cost }));
-  const trendOption = {
-    animation: false,
-    tooltip: chartTooltip('axis'),
-    grid: { left: 48, right: 14, top: 12, bottom: 27 },
-    xAxis: { type: 'category', data: trendRows.map(row => row.label), boundaryGap: false, ...chartAxisStyle(10) },
-    yAxis: { type: 'value', name: '¥', ...chartAxisStyle(10) },
-    series: [{
-      type: 'line', smooth: 0.35, symbol: 'circle', symbolSize: 6,
-      data: trendRows.map(row => row.value),
-      lineStyle: { width: 3, color: '#3C78E5' },
-      itemStyle: { color: '#3C78E5', borderColor: '#fff', borderWidth: 2 },
-      areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(60,120,229,.22)' }, { offset: 1, color: 'rgba(60,120,229,0)' }] } },
-    }],
-  };
+  // 项目之间是类别比较，不使用会暗示时间连续性的曲线；改用排序式 bullet bar 展示成本层级。
+  const costRows = [...projCosts].sort((a, b) => b.cost - a.cost).slice(0, 4);
   const tasks: { label: string; action: string; onClick: () => void }[] = [];
   missedByProject.slice(0, 2).forEach(item => tasks.push({
     label: `复核 ${item.code} 的${item.worstDomain || '目标成本'}偏差`, action: '查看项目 →', onClick: () => goProject(onNavigate, item.projectId),
@@ -141,7 +123,7 @@ function DashboardRedesign({
           <div className="dashboard-ai-note"><small>AI 发现的可执行机会</small><strong>{aiSavingText}</strong><p>{aiSavingHint}</p></div>
         </section>
 
-        <section className="dashboard-panel dashboard-trend"><div className="dashboard-panel-head"><h2>成本趋势</h2><span>{snapshotChanges.length > 0 ? '最近成本变动' : '当前项目 BOM 分布'}</span><a onClick={() => onNavigate?.('compare')}>查看分析 →</a></div>{trendRows.length > 0 ? <ReactECharts echarts={echarts} option={trendOption} style={{ height: 190 }} /> : <div className="dashboard-empty">积累项目报价后，这里会出现成本趋势。</div>}</section>
+        <section className="dashboard-panel dashboard-cost-distribution"><div className="dashboard-panel-head"><h2>项目成本分布</h2><span>按 BOM 成本排序</span><a onClick={() => onNavigate?.('compare')}>查看分析 →</a></div>{costRows.length > 0 ? <div className="dashboard-cost-map">{costRows.map((row, index) => { const project = projects.find(item => item.code === row.name); const risk = project ? missedByProject.find(item => item.projectId === project.id) : undefined; const maxCost = costRows[0]?.cost || 1; return <button className="dashboard-cost-row" key={row.name} onClick={() => project ? goProject(onNavigate, project.id) : onNavigate?.('compare')}><span className="dashboard-cost-rank">{String(index + 1).padStart(2, '0')}</span><span className="dashboard-cost-name"><strong>{row.name}</strong><small>{project?.name || '项目 BOM'}</small></span><span className="dashboard-cost-rail"><i style={{ width: `${Math.max(8, (row.cost / maxCost) * 100)}%` }} /></span><span className="dashboard-cost-value">¥{row.cost.toFixed(0)}</span><span className={`dashboard-cost-state ${risk ? 'is-risk' : 'is-good'}`}>{risk ? '目标风险' : '已达标'}</span></button>; })}</div> : <div className="dashboard-empty">积累项目报价后，这里会出现项目成本分布。</div>}</section>
 
         <section className="dashboard-panel dashboard-opportunities"><div className="dashboard-panel-head"><h2>议价机会</h2><span>来自已确认数据</span></div>{recentPriceChanges.filter(item => Number(item.old_cost || 0) > Number(item.new_cost || 0)).slice(0, 3).map((item, _index, rows) => { const amount = Number(item.old_cost) - Number(item.new_cost); const max = Math.max(...rows.map(row => Number(row.old_cost) - Number(row.new_cost)), 1); return <div className="dashboard-opportunity" key={item.id || item.name}><span>{item.name || item.model || '物料'}</span><div><i style={{ width: `${Math.max(12, (amount / max) * 100)}%` }} /></div><strong>¥{amount.toFixed(0)}</strong></div>; })}{recentPriceChanges.filter(item => Number(item.old_cost || 0) > Number(item.new_cost || 0)).length === 0 && <div className="dashboard-empty compact">暂无已确认降本机会</div>}</section>
       </div>
