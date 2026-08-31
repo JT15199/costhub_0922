@@ -1952,6 +1952,26 @@ tr:hover .sp-row-ops { opacity: 1; }
 }
 [data-theme="liquidLight"] .ant-table-tbody > tr:hover > td { background: rgba(226,238,255,0.62) !important; }
 
+/* 项目列表专用：让列表本身透出背景图，而不是左侧一整块纯白；数字仍保留轻微白底保证可读性。 */
+[data-theme="liquidLight"] .project-list-card {
+  background: rgba(255,255,255,0.42) !important;
+  box-shadow: 0 18px 48px rgba(75,113,164,0.10), inset 0 1px 0 rgba(255,255,255,0.66) !important;
+}
+[data-theme="liquidLight"] .project-list-card .ant-table-wrapper,
+[data-theme="liquidLight"] .project-list-card .ant-table-container,
+[data-theme="liquidLight"] .project-list-card .ant-table {
+  background: transparent !important;
+}
+[data-theme="liquidLight"] .project-list-card .ant-table-thead > tr > th {
+  background: rgba(235,242,251,0.56) !important;
+}
+[data-theme="liquidLight"] .project-list-card .ant-table-tbody > tr > td {
+  background: rgba(255,255,255,0.28) !important;
+}
+[data-theme="liquidLight"] .project-list-card .ant-table-tbody > tr:hover > td {
+  background: rgba(226,238,255,0.54) !important;
+}
+
 [data-theme="liquidLight"] .ant-btn-primary {
   background: #2F6FED !important;
   border-color: #2F6FED !important;

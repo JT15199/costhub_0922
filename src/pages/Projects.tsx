@@ -1300,7 +1300,7 @@ export default function Projects() {
   return (
     <div>
       <div className="page-title"><FileTextOutlined /> 项目管理</div>
-      <div className="content-card">
+      <div className="content-card project-list-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
           <Space>
             <Select placeholder="类型筛选" value={typeFilter || undefined} onChange={v => setTypeFilter(v || '')} allowClear style={{ width: 120 }} options={PROJECT_TYPES.map(s => ({ label: s, value: s }))} />
