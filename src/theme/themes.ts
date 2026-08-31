@@ -440,6 +440,48 @@ export const themes: Record<string, Theme> = {
       fontMono: "'JetBrains Mono', 'SF Mono', 'Consolas', monospace",
     },
   }, 
+  liquidLight: {
+    name: 'liquidLight',
+    label: '流光玻璃',
+    colors: {
+      primary: '#2F6FED',
+      primaryHover: '#245ED2',
+      primaryActive: '#1E4FB2',
+
+      canvas: '#EAF1FA',
+      surface: 'rgba(255,255,255,0.74)',
+      elevated: 'rgba(255,255,255,0.9)',
+
+      textPrimary: '#172033',
+      textSecondary: '#5F6C80',
+      textTertiary: '#8C98A8',
+
+      border: 'rgba(102,137,182,0.2)',
+      divider: 'rgba(73,104,150,0.12)',
+
+      accentRed: '#C75C58',
+      accentRedBg: 'rgba(199,92,88,0.1)',
+      accentBlue: '#2F6FED',
+      accentBlueBg: 'rgba(47,111,237,0.1)',
+      accentGreen: '#329174',
+      accentGreenBg: 'rgba(50,145,116,0.1)',
+      accentYellow: '#B5853A',
+      accentYellowBg: 'rgba(181,133,58,0.12)',
+
+      success: '#329174',
+      error: '#C75C58',
+      warning: '#B5853A',
+      info: '#2F6FED',
+
+      shadowCard: '0 12px 36px rgba(77,104,145,0.12), 0 2px 8px rgba(77,104,145,0.08)',
+      shadowHover: '0 18px 48px rgba(77,104,145,0.18), 0 3px 12px rgba(47,111,237,0.1)',
+    },
+    typography: {
+      fontSans: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif",
+      fontSerif: "'Newsreader', 'Georgia', serif",
+      fontMono: "'JetBrains Mono', 'SF Mono', 'Consolas', monospace",
+    },
+  },
   minimal: {
     name: 'minimal',
     label: '极简白',

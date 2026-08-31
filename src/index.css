@@ -1815,3 +1815,198 @@ tr:hover .sp-row-ops { opacity: 1; }
 /* 目标成本制定表（2026-08-28）：领域小计行浅底、特性行 hover */
 .ta-sub-row td { background: #FBF9F2 !important; }
 .ta-feat-row:hover td { background: #FBF9F2 !important; }
+
+/* ========== 流光玻璃（默认浅色全局工作台） ========== */
+[data-theme="liquidLight"] {
+  --radius-sm: 6px;
+  --radius: 9px;
+  --radius-lg: 14px;
+  --glass-border: rgba(255,255,255,0.72);
+  --glass-surface: rgba(255,255,255,0.66);
+  --glass-elevated: rgba(255,255,255,0.86);
+}
+
+[data-theme="liquidLight"] body {
+  position: relative;
+  min-height: 100vh;
+  background: #EAF1FA !important;
+  isolation: isolate;
+}
+
+[data-theme="liquidLight"] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background-image: var(--costhub-bg-image, none);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: saturate(1.06) contrast(0.96);
+  opacity: 0.82;
+  transition: opacity 220ms ease;
+}
+
+[data-theme="liquidLight"] body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(127,180,255,0.2), transparent 34%),
+    radial-gradient(circle at 86% 12%, rgba(184,156,255,0.16), transparent 32%),
+    linear-gradient(135deg, rgba(244,248,255,0.76), rgba(227,237,250,0.52));
+}
+
+[data-theme="liquidLight"] #root { position: relative; z-index: 0; }
+
+[data-theme="liquidLight"] .sidebar {
+  background: rgba(255,255,255,0.52) !important;
+  backdrop-filter: blur(30px) saturate(165%);
+  -webkit-backdrop-filter: blur(30px) saturate(165%);
+  border-right: 1px solid var(--glass-border) !important;
+  box-shadow: 8px 0 30px rgba(92,120,164,0.08);
+}
+
+[data-theme="liquidLight"] .sidebar-logo {
+  background: rgba(255,255,255,0.28) !important;
+  border-bottom-color: rgba(255,255,255,0.62) !important;
+}
+
+[data-theme="liquidLight"] .sidebar-logo h1 { color: #172033; }
+[data-theme="liquidLight"] .sidebar-logo span { color: #6B7890; }
+
+[data-theme="liquidLight"] .sidebar-nav { scrollbar-color: rgba(103,132,175,0.24) transparent; }
+[data-theme="liquidLight"] .nav-item {
+  color: #59677B;
+  border-radius: 9px;
+}
+[data-theme="liquidLight"] .nav-item:hover {
+  color: #1D2A3D;
+  background: rgba(255,255,255,0.5) !important;
+}
+[data-theme="liquidLight"] .nav-item.active {
+  color: #245ED2;
+  background: rgba(255,255,255,0.78) !important;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.9), 0 4px 14px rgba(69,105,159,0.1);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+[data-theme="liquidLight"] .nav-item .nav-icon {
+  background: rgba(255,255,255,0.34) !important;
+  color: #63758E !important;
+  box-shadow: none !important;
+}
+[data-theme="liquidLight"] .nav-item.active .nav-icon { color: #2F6FED !important; }
+
+[data-theme="liquidLight"] .main-content {
+  background: transparent !important;
+  padding: 26px 30px;
+}
+[data-theme="liquidLight"] .page-title { color: #172033; }
+
+[data-theme="liquidLight"] .content-card,
+[data-theme="liquidLight"] .stat-card,
+[data-theme="liquidLight"] .module-group,
+[data-theme="liquidLight"] .ant-card {
+  background: var(--glass-surface) !important;
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: var(--color-shadow-card) !important;
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+}
+[data-theme="liquidLight"] .content-card:hover,
+[data-theme="liquidLight"] .stat-card:hover,
+[data-theme="liquidLight"] .ant-card:hover {
+  background: rgba(255,255,255,0.78) !important;
+  box-shadow: var(--color-shadow-hover) !important;
+}
+
+/* 数据表面保持高不透明度，避免玻璃效果损害成本数字辨识度 */
+[data-theme="liquidLight"] .ant-table-wrapper,
+[data-theme="liquidLight"] .ant-table-container,
+[data-theme="liquidLight"] .ant-table {
+  background: rgba(255,255,255,0.82) !important;
+  border-radius: 10px;
+}
+[data-theme="liquidLight"] .ant-table-thead > tr > th {
+  background: rgba(235,242,251,0.78) !important;
+  color: #53637A !important;
+  border-bottom-color: rgba(100,130,175,0.16) !important;
+}
+[data-theme="liquidLight"] .ant-table-tbody > tr > td {
+  background: rgba(255,255,255,0.2) !important;
+  border-bottom-color: rgba(100,130,175,0.11) !important;
+}
+[data-theme="liquidLight"] .ant-table-tbody > tr:hover > td { background: rgba(226,238,255,0.62) !important; }
+
+[data-theme="liquidLight"] .ant-btn-primary {
+  background: #2F6FED !important;
+  border-color: #2F6FED !important;
+  box-shadow: 0 6px 16px rgba(47,111,237,0.24) !important;
+}
+[data-theme="liquidLight"] .ant-btn-primary:hover {
+  background: #245ED2 !important;
+  border-color: #245ED2 !important;
+  transform: translateY(-1px);
+}
+[data-theme="liquidLight"] .ant-btn:not(.ant-btn-primary) {
+  background: rgba(255,255,255,0.48);
+  border-color: rgba(96,128,174,0.22);
+}
+
+[data-theme="liquidLight"] .ant-input,
+[data-theme="liquidLight"] .ant-input-affix-wrapper,
+[data-theme="liquidLight"] .ant-input-number,
+[data-theme="liquidLight"] .ant-select-selector,
+[data-theme="liquidLight"] .ant-picker {
+  background: rgba(255,255,255,0.62) !important;
+  border-color: rgba(96,128,174,0.22) !important;
+}
+[data-theme="liquidLight"] .ant-input:focus,
+[data-theme="liquidLight"] .ant-input-affix-wrapper-focused,
+[data-theme="liquidLight"] .ant-select-focused .ant-select-selector,
+[data-theme="liquidLight"] .ant-picker-focused {
+  border-color: #2F6FED !important;
+  box-shadow: 0 0 0 3px rgba(47,111,237,0.13) !important;
+}
+
+[data-theme="liquidLight"] .ant-modal-content,
+[data-theme="liquidLight"] .ant-drawer-content,
+[data-theme="liquidLight"] .ant-popover-inner,
+[data-theme="liquidLight"] .ant-dropdown-menu,
+[data-theme="liquidLight"] .ant-select-dropdown {
+  background: rgba(249,252,255,0.84) !important;
+  border: 1px solid rgba(255,255,255,0.9);
+  box-shadow: 0 22px 70px rgba(55,83,124,0.2) !important;
+  backdrop-filter: blur(30px) saturate(155%);
+  -webkit-backdrop-filter: blur(30px) saturate(155%);
+}
+[data-theme="liquidLight"] .ant-modal-header,
+[data-theme="liquidLight"] .ant-drawer-header { background: transparent !important; }
+
+[data-theme="liquidLight"] .local-ai-root,
+[data-theme="liquidLight"] .local-ai-left {
+  background: rgba(255,255,255,0.58) !important;
+  border-color: rgba(255,255,255,0.78) !important;
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+}
+[data-theme="liquidLight"] .local-ai-root .ant-input,
+[data-theme="liquidLight"] .local-ai-root .ant-input-affix-wrapper {
+  background: rgba(255,255,255,0.68) !important;
+}
+
+[data-theme="liquidLight"][data-lowfx="on"] body::before { opacity: 0.55; }
+[data-theme="liquidLight"][data-lowfx="on"] .sidebar,
+[data-theme="liquidLight"][data-lowfx="on"] .content-card,
+[data-theme="liquidLight"][data-lowfx="on"] .stat-card,
+[data-theme="liquidLight"][data-lowfx="on"] .module-group,
+[data-theme="liquidLight"][data-lowfx="on"] .ant-card,
+[data-theme="liquidLight"][data-lowfx="on"] .ant-modal-content,
+[data-theme="liquidLight"][data-lowfx="on"] .ant-drawer-content {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}

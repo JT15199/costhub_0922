@@ -11,6 +11,7 @@ import {
   PlusOutlined, DragOutlined, CheckOutlined, CloseOutlined, KeyOutlined,
   StopOutlined, HistoryOutlined, SettingOutlined, SearchOutlined, RobotOutlined,
   BulbOutlined, BookOutlined, RadarChartOutlined, LockOutlined, UserOutlined, DatabaseOutlined, DownloadOutlined, FileTextOutlined, FolderOpenOutlined, QuestionCircleOutlined,
+  PictureOutlined,
 } from '@ant-design/icons';
 import { testSearchConnection, testLLMConnection, BUILTIN_SKILLS, loadSkillConfig, saveSkillConfig, getSkill } from '../trendService';
 import { useTheme } from '../theme/ThemeContext';
@@ -49,7 +50,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
     } catch { message.error('撤销失败'); }
   };
  
-  const { lowFx, setLowFx } = useTheme();
+  const { lowFx, setLowFx, backgroundImage, setBackgroundImage } = useTheme();
   const [loading, setLoading] = useState(true);
   const [testingSearch, setTestingSearch] = useState(false);
   const [testingLLM, setTestingLLM] = useState(false);
@@ -1708,6 +1709,71 @@ export default function Settings({embedded }: { embedded?: boolean }) {
       {/* ====== 个性化（Logo）分区 ====== */}
       {activeSection === 'appearance' && (
       <>
+      {/* ====== 背景氛围（本地图片） ====== */}
+      <div style={{
+        background: 'white',
+        borderRadius: 16,
+        padding: 32,
+        marginBottom: 24,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06)'
+      }}>
+        <div style={{ marginBottom: 20 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0, color: '#111827', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <PictureOutlined style={{ color: '#2F6FED' }} /> 背景氛围
+          </h2>
+          <p style={{ margin: '4px 0 0 34px', color: '#6b7280', fontSize: 13 }}>
+            选择本地图片作为玻璃界面的底层氛围。图片只保存在本机，不会上传或发送到网络。
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+          <div
+            style={{
+              width: 220, height: 92, borderRadius: 12, overflow: 'hidden',
+              border: '1px solid #D7E1EF',
+              background: backgroundImage ? `url(${backgroundImage}) center / cover` : 'linear-gradient(135deg,#EAF1FA,#F8FBFF 55%,#DDEBFA)',
+              position: 'relative',
+            }}
+          >
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(255,255,255,.28), rgba(255,255,255,.04))' }} />
+            <span style={{ position: 'absolute', left: 12, bottom: 10, fontSize: 11, color: '#52657F', background: 'rgba(255,255,255,.72)', padding: '3px 7px', borderRadius: 5 }}>
+              {backgroundImage ? '当前本地背景' : '默认流光背景'}
+            </span>
+          </div>
+          <div>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              id="background-upload"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.currentTarget.value = '';
+                if (!file) return;
+                if (!file.type.startsWith('image/')) { message.error('请选择图片文件'); return; }
+                if (file.size > 2 * 1024 * 1024) { message.error('背景图片不能超过 2MB'); return; }
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                  const dataUrl = event.target?.result as string;
+                  setBackgroundImage(dataUrl);
+                  message.success('背景已更新');
+                };
+                reader.readAsDataURL(file);
+              }}
+            />
+            <Space>
+              <Button icon={<PictureOutlined />} onClick={() => document.getElementById('background-upload')?.click()}>
+                更换背景图
+              </Button>
+              <Button disabled={!backgroundImage} onClick={() => { setBackgroundImage(null); message.success('已恢复默认背景'); }}>
+                恢复默认
+              </Button>
+            </Space>
+            <div style={{ marginTop: 8, fontSize: 12, color: '#8C98A8' }}>
+              支持 PNG、JPG、WebP，建议使用低饱和、浅色图片，大小不超过 2MB
+            </div>
+          </div>
+        </div>
+      </div>
       {/* ====== 低特效模式（兼容模式） ====== */}
       <div style={{
         background: 'white',

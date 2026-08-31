@@ -11,6 +11,8 @@ interface ThemeContextType {
   availableThemes: typeof themes;
   lowFx: boolean;
   setLowFx: (v: boolean) => void;
+  backgroundImage: string;
+  setBackgroundImage: (dataUrl: string | null) => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -29,10 +31,17 @@ interface ThemeProviderProps {
 
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const [currentTheme, setCurrentTheme] = useState<string>(() => {
-    return localStorage.getItem('app-theme') || 'red';
+    const saved = localStorage.getItem('app-theme');
+    // 首次升级到全局玻璃工作台时切换一次默认视觉；之后仍尊重用户在设置中选择的主题。
+    if (localStorage.getItem('costhub-liquid-theme-v1') !== '1') {
+      localStorage.setItem('costhub-liquid-theme-v1', '1');
+      return 'liquidLight';
+    }
+    return saved || 'liquidLight';
   });
   // 低特效模式（兼容低配/远程桌面/老 WebView2 环境）：关毛玻璃 + 关动画，根治"界面发灰卡住/弹窗打不开"
   const [lowFx, setLowFxState] = useState<boolean>(() => localStorage.getItem('app-lowfx') === '1');
+  const [backgroundImage, setBackgroundImageState] = useState<string>(() => localStorage.getItem('costhub_custom_background') || '');
 
   const theme = themes[currentTheme] || themes.red;
 
@@ -56,18 +65,19 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     root.style.setProperty('--font-serif', theme.typography.fontSerif);
     root.style.setProperty('--font-mono', theme.typography.fontMono);
 
-    // 应用body背景色（macOS主题用CSS渐变，其余用背景色）
-    if (currentTheme === 'macos') {
+    // 应用body背景色（玻璃主题通过 CSS 背景层承载壁纸）
+    if (currentTheme === 'macos' || currentTheme === 'liquidLight') {
       document.body.style.backgroundColor = 'transparent';
     } else {
       document.body.style.backgroundColor = theme.colors.canvas;
     }
+    root.style.setProperty('--costhub-bg-image', backgroundImage ? `url("${backgroundImage}")` : 'none');
     document.body.style.color = theme.colors.textPrimary;
     document.body.style.fontFamily = theme.typography.fontSans;
 
     // 保存到localStorage
     localStorage.setItem('app-theme', currentTheme);
-  }, [currentTheme, theme]);
+  }, [currentTheme, theme, backgroundImage]);
 
   const setTheme = (themeName: string) => {
     if (themes[themeName]) {
@@ -77,6 +87,16 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const setLowFx = (v: boolean) => {
     setLowFxState(v);
     localStorage.setItem('app-lowfx', v ? '1' : '0');
+  };
+  const setBackgroundImage = (dataUrl: string | null) => {
+    const next = dataUrl || '';
+    setBackgroundImageState(next);
+    try {
+      if (next) localStorage.setItem('costhub_custom_background', next);
+      else localStorage.removeItem('costhub_custom_background');
+    } catch {
+      // localStorage 额度不足时仍保留当前会话内的背景，不阻断其它设置
+    }
   };
 
   // Ant Design 主题配置（适配minimalist设计）
@@ -139,7 +159,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   };
 
   return (
-    <ThemeContext.Provider value={{ currentTheme, theme, setTheme, availableThemes: themes, lowFx, setLowFx }}>
+    <ThemeContext.Provider value={{ currentTheme, theme, setTheme, availableThemes: themes, lowFx, setLowFx, backgroundImage, setBackgroundImage }}>
       <ConfigProvider theme={antdThemeConfig}>
         {children}
       </ConfigProvider>
