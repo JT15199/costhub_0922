@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
 import { Table, Tag, Popconfirm } from 'antd';
-import { getProjects, getProjectBOMs, getTargets, getCompetitors, getCompetitorBOMs, getSellingPoints, getSellingPointMaps, getLatestTrendSnapshot, getSupplierPriceProfiles } from '../db';
+import { getProjects, getProjectBOMs, getTargets, getCompetitors, getCompetitorBOMs, getSellingPoints, getSellingPointMaps, getLatestTrendSnapshot, getSupplierPriceProfiles, getTenderOverview, getTenderMatrix } from '../db';
 import { computeSellingPointRows, computeModuleValueRows, type ModuleValueRow } from '../sellingPointAnalyzer';
 import { computeTargetStatuses } from '../targetInsight';
 import ModuleValueMatrix from './ModuleValueMatrix';
@@ -168,6 +168,26 @@ async function loadData(toolId: string, args: any): Promise<ViewData | null> {
         ],
         rows: rows.map((r: any) => { const st = statusOf(r); let specs: any[] = []; try { specs = JSON.parse(r.canonical_specs || '[]'); } catch { } return { ...r, specsText: specs.join(' / '), status: st }; }),
       } as ViewData;
+    }
+    if (toolId === 'query_tender_analysis') {
+      const projs = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
+      const p = projs.find((x: any) => x.code === args?.project_code);
+      if (!p) return null;
+      const [overview, matrix] = await Promise.all([getTenderOverview(p.id), getTenderMatrix(p.id)]);
+      if (!matrix.length) return null;
+      const suppliers = [...new Set(matrix.flatMap(row => Object.keys(row.offers)))];
+      const columns: any[] = [
+        { title: '器件', dataIndex: 'name', width: 160 },
+        ...suppliers.map(s => ({ title: s, dataIndex: 'supplier_' + s, align: 'right', render: (v: any) => v || '—' })),
+        { title: '可比最低', dataIndex: 'low', align: 'right' },
+        { title: '机会', dataIndex: 'opportunity', align: 'right', render: (v: number) => <b style={{ color: v > 0 ? '#C0392B' : '#5F5D54' }}>{v > 0 ? '¥' + v.toFixed(2) : '—'}</b> },
+      ];
+      const rows = matrix.slice().sort((a, b) => b.opportunity - a.opportunity).slice(0, 12).map(row => {
+        const item: any = { name: (row.moduleName ? row.moduleName + ' · ' : '') + row.materialName, low: row.comparableLow ? '¥' + row.comparableLow.lineTotal.toFixed(2) : '待确认', opportunity: row.opportunity };
+        suppliers.forEach(s => { const offer = row.offers[s]; item['supplier_' + s] = offer ? '¥' + offer.lineTotal.toFixed(2) + (offer.relationType === 'unmatched' ? ' · 待确认' : '') : ''; });
+        return item;
+      });
+      return { type: 'table', title: p.code + ' 招标比价 · ' + (overview.currentRound ? `第${overview.currentRound.roundNo}轮` : '当前') + ` · 可比覆盖 ${Math.round(overview.summary.comparableCoverage * 100)}% · 理论组合底价 ¥${overview.summary.theoreticalLow.toFixed(2)}`, columns, rows };
     }
     if (toolId === 'visualize_cost_analysis') {
       const codes = String(args?.project_codes || '').split(/[,，]/).map((x: string) => x.trim()).filter(Boolean).slice(0, 8);

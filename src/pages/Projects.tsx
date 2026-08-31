@@ -27,6 +27,7 @@ import { chartTooltip, chartAxisStyle, chartTextMuted, chartSplitLine, barGradie
 import { runAiIdentifyOnce, buildRuleGroups, moduleFingerprint, partKey, buildInsights } from '../autoCompare';
 import { getAdvisorInsights, updateAdvisorStatus } from '../db/advisor';
 import { getAuditFindings, markAuditRead, dismissAuditFinding } from '../auditStore';
+import TenderWorkspace from '../components/TenderWorkspace';
 
 export default function Projects() {
   const [projects, setProjects] = useState<any[]>([]);
@@ -1391,6 +1392,9 @@ export default function Projects() {
             </Col>
           </Row>
           <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
+            {
+              key: 'tender', label: <span><AimOutlined /> 招标工作台</span>, children: <TenderWorkspace projectId={selectedPid!} project={selectedProject} />,
+            },
             {
               key: 'bom', label: <span><InboxOutlined /> BOM清单 ({boms.length}件)</span>, children: (
                 <div style={{ position: 'relative', display: 'flex', gap: 12 }}>

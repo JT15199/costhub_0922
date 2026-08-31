@@ -328,3 +328,11 @@
 1. **构建由 AI 负责**：代码改动完成后 AI 执行 `npm run build` + `npm run tauri:build`（构建前确认 costhub.exe 未运行；build.bat 末尾有 pause 不适合脚本环境）；验证产物 exe 时间戳后向用户确认。
 2. **文档铁律**：改代码 → 更新本文件（如涉及新约束）→ 更新 `会话接续说明.md` → 任务才算完成。新开对话先读 会话接续说明.md + 本文件即可接续。
 3. **git**：推送 `git push costhub main`（origin 的 fork 拒绝属正常，忽略）。
+
+## 三·补25、招标工作台第一阶段（2026-08-31 用户：按既有策划继续实施）
+
+- **业务边界**：面向整机 ODM 招标的规格预估→摸底报价→比价→谈价→定点→复盘流程。理论组合底价是跨供应商可比最低价的谈判锚点，不是实际采购篮子；报价导入不覆盖现有项目 BOM、器件库或最终供应商选择。
+- **数据层**：新增 `project_spec_baselines`、`tender_rounds`、`supplier_quote_batches`、`supplier_quote_lines`、`quote_line_matches`、`project_process_events` 六表；报价原文、批次和匹配历史独立保留，文件哈希幂等，规格变化自动冻结版本。
+- **导入与页面**：`src/tenderImport.ts` 负责本地 xlsx/xls 表头探测、金额标准化、文件哈希和供应商名推断；`src/components/TenderWorkspace.tsx` 以新增页签接入项目详情，默认仍打开 BOM 页签，主流程为“导入→预览→确认”。
+- **AI**：新增 `query_tender_analysis` 只读工具与 `tender` Skill；模型只能读取当前轮次矩阵，必须区分可比/等价/参考/待确认，不能把待确认价格计入底价或擅自写回。
+- **安全与验收**：解析器无网络代码；工作台和 AI 工具不发送原始报价到云端。详细目录、接口、组件职责、验收标准和禁止事项见 `docs/招标工作台实施方案.md`。

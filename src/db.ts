@@ -18,3 +18,4 @@ export * from './db/memory';
 export * from './db/voice';
 export * from './db/selling';
 export * from './db/dataImport';
+export * from './db/tender';

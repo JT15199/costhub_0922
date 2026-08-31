@@ -16,7 +16,7 @@ import { loadSessions, newSession, loadMessages, saveMsg, type Session } from '.
 import { getDataReadiness } from '../dataReadiness';
 import ToolResultView from './ToolResultView';
 // 支持结果可视化的工具（分析结果直接看图，不依赖模型）
-const VISUAL_TOOLS = ['query_project_cost', 'query_project_bom', 'query_target_status', 'compare_subcategory_cost', 'query_project_module_value', 'query_competitor_bom', 'insight_material_trend', 'query_material_insight', 'query_supplier_profile', 'visualize_cost_analysis'];
+const VISUAL_TOOLS = ['query_project_cost', 'query_project_bom', 'query_target_status', 'compare_subcategory_cost', 'query_project_module_value', 'query_competitor_bom', 'insight_material_trend', 'query_material_insight', 'query_supplier_profile', 'query_tender_analysis', 'visualize_cost_analysis'];
 import { detectSkills } from '../aiSkills';
 import { buildDataMap } from '../dataMap';
 import { verifyConclusionNumbers } from '../verifyConclusion';

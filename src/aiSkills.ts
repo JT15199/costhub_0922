@@ -31,10 +31,18 @@ export const AI_SKILLS: AiSkill[] = [
     id: 'data-viz', name: '数据分析与图表', triggers: ['图表', '图标', '画图', '可视化', '柱状图', '饼图', '帕累托', '趋势图', '成本结构图'],
     guide: '先用本地查询工具取得真实数据，再调用 visualize_cost_analysis。图形选择：单项目构成→饼图；多项目同维度→分组柱状图；寻找成本大头→帕累托图。标题必须写清项目与口径，金额从工具结果读取，禁止模型手填或编造。',
   },
+  {
+    id: 'tender', name: '招标比价', triggers: ['招标', '摸底报价', '供应商报价', '多家报价', '比价', '议价清单', '理论组合底价'],
+    guide: '先用 query_tender_analysis 读取当前轮次的本地报价矩阵，再按名称+规格区分 exact（可比）、equivalent（等价待确认）、reference（仅参考）和 unmatched（待确认）。理论组合底价只是跨供应商最低可比价的谈判锚点，不是实际采购篮子；不得覆盖项目 BOM、不得把待确认/参考价计入。需要写入匹配关系或定标结论时先向用户展示证据并请求确认。',
+  },
 ];
 
 /** 按提问检测匹配的技能（命中任一触发词） */
 export function detectSkills(text: string): AiSkill[] {
   const t = text || '';
   return AI_SKILLS.filter(s => s.triggers.some(tr => new RegExp(tr, 'i').test(t)));
+}
+
+export function getTenderSkill(): AiSkill | undefined {
+  return AI_SKILLS.find(skill => skill.id === 'tender');
 }

@@ -1,9 +1,9 @@
-// 成本领域工具注册表（P1 Agent，2026-08-16）
+// 成本领域工具注册表（P1 Agent，2026-08-16；招标分析扩展 2026-08-31）
 // 设计：现有能力（查询/分析）包装成统一"工具"，本地模型编排调用序列（计划-执行-总结）
-// 安全：第一版只暴露只读查询 + 物料行情洞察（走现有 agentSearchLoop，外发=物料名/品类）；无任何写操作工具
+// 安全：分析工具只读；物料行情走现有受控网关，招标分析仅读本地聚合数据；无任何写操作工具
 // 审计：每次 Agent 任务由调用方 logLocalAICall(request_type=agent_plan/agent_answer) 留痕
 
-import { getProjects, getProjectBOMs, getParts, getWorkLogs, getSellingPoints, getSellingPointMaps } from './db';
+import { getProjects, getProjectBOMs, getParts, getWorkLogs, getSellingPoints, getSellingPointMaps, getTenderOverview, getTenderMatrix } from './db';
 import { getAllPartSuppliers, getSupplierPriceHistory } from './db/parts';
 import { getProjectCostSnapshots, getTargets } from './db/projects';
 import { getInsights } from './db/compare';
@@ -62,6 +62,7 @@ export const TOOL_ICONS: Record<string, React.ComponentType> = {
   ask_user: MessageOutlined,
   query_supplier_profile: ShopOutlined,
   canonicalize_project: AuditOutlined,
+  query_tender_analysis: BarChartOutlined,
 };
 export function toolIcon(id: string): React.ComponentType {
   return TOOL_ICONS[id] || FolderOutlined;
@@ -906,6 +907,24 @@ const tools: AiTool[] = [
       let msg = '项目 ' + a.project_code + ' 物料规范化完成：共 ' + st.total + ' 条，已规范 ' + st.done + ' 条（其中笼统保留 ' + st.kept + ' 条）、失败 ' + st.failed + ' 条。结果写入器件库标准名（原名/模块库不变）。';
       if (st.errors && st.errors.length) msg += '\n失败原因：' + st.errors.join('；') + '（可检查 Ollama 后重试，已规范的物料不会重复处理）。';
       return msg;
+    },
+  },
+  {
+    id: 'query_tender_analysis',
+    name: '分析招标报价矩阵',
+    desc: '读取指定项目本地招标工作台的当前轮次报价矩阵，返回供应商报价、可比最低、待确认数量和理论组合底价。名称+规格键一致才计入可比；参考价/待确认价不计入。仅查询，不改 BOM、不向外网发送数据。参数 project_code 必填。',
+    params: [{ key: 'project_code', type: 'string', required: true, desc: '项目代号，如 M270' }],
+    execute: async (a) => {
+      const project = (await getProjects('', '', '')).find((item: any) => !item.is_deleted && item.code === a.project_code);
+      if (!project) return '未找到项目代号：' + a.project_code;
+      const [overview, matrix] = await Promise.all([getTenderOverview(project.id), getTenderMatrix(project.id)]);
+      if (!matrix.length) return '项目 ' + a.project_code + ' 尚无招标报价批次，请先在项目详情→招标工作台导入供应商报价。';
+      const summary = overview.summary;
+      const lines = matrix.slice().sort((x, y) => y.opportunity - x.opportunity).slice(0, 80).map(row => {
+        const offers = Object.values(row.offers).map(offer => offer.supplierName + ' ' + fmtMoney(offer.lineTotal) + '[' + (offer.relationType || 'unmatched') + ']').join('；');
+        return '[' + (row.moduleName || '未归类') + '] ' + row.materialName + ' ' + (row.model || '') + '｜' + offers + '｜最低 ' + (row.comparableLow ? row.comparableLow.supplierName + ' ' + fmtMoney(row.comparableLow.lineTotal) : '待确认') + '｜机会 ' + fmtMoney(row.opportunity);
+      });
+      return '项目 ' + a.project_code + ' 招标分析（当前轮次）\n供应商 ' + summary.supplierCount + ' 家，明细 ' + summary.lineCount + ' 行，可比覆盖率 ' + Math.round(summary.comparableCoverage * 100) + '%，理论组合底价 ' + fmtMoney(summary.theoreticalLow) + '（谈判锚点，不是实际采购篮子），最佳整机报价 ' + (summary.bestFullQuote ? fmtMoney(summary.bestFullQuote) : '未填写') + '，可谈机会 ' + fmtMoney(summary.opportunity) + '\n' + lines.join('\n');
     },
   },
   {

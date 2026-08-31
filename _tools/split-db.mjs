@@ -20,6 +20,7 @@ const DOMAINS = {
   settings: ['getSetting','setSetting','loadContextEntries','saveContextEntry','deleteContextEntry','PRESET_PROVIDERS','ensurePresetProviders','getApiProviders','saveApiProvider','deleteApiProvider','setActiveProvider','updateProviderPriorities','getOutboundRequestLogs','clearOutboundRequestLogs','logOutboundRequest','getAllApiProviders','getApiProvidersByType','getActiveApiProviders','addApiProvider','updateApiProvider','toggleApiProviderActive','saveAIRequestLog','updateAIRequestLog','saveAIUsageLog','getTokenUsageStats','getAllAIRequestLogs','deleteAIRequestLog','clearAllAIRequestLogs','getModuleRules','saveModuleRule','deleteModuleRule','clearModuleRules'],
   worklog: ['getWorkLogs','getWorkLogsGroupedByProject','getWorkLog','saveWorkLog','toggleWorkLogDone','deleteWorkLog','getWorkLogCategories','getWorkSummaries','saveWorkSummary','deleteWorkSummary'],
   dashboard: ['getDashboardStats'],
+  tender: ['makeTenderCanonicalKey','recordTenderEvent','importTenderQuoteBatch','getTenderQuoteBatches','getTenderMatrix','updateTenderLineMatch','getTenderOverview'],
 };
 
 const nameToDomain = Object.create(null);
@@ -109,7 +110,7 @@ const agg = [
   '// 已按业务域拆分到 src/db/ 目录，本文件仅为聚合导出，页面 import 路径不变',
   '// 重新生成：node _tools/split-db.mjs <项目根>',
   "export * from './db/core';",
-  ...['auth','parts','suppliers','projects','competitors','compare','trend','settings','worklog','dashboard'].map(d => "export * from './db/" + d + "';"),
+  ...['auth','parts','suppliers','projects','competitors','compare','trend','settings','worklog','dashboard','tender'].map(d => "export * from './db/" + d + "';"),
 ];
 fs.writeFileSync(path.join(ROOT, 'src', 'db.ts'), agg.join('\n') + '\n');
 console.log('db.ts rewritten as aggregation');
