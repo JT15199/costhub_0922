@@ -3,7 +3,7 @@ import { EmojiIcon } from '../iconMap';
 import * as XLSX from 'xlsx';
 import {
   Button, Space, Alert, message, Spin, Descriptions, Modal, Tag, Empty, Select, Input, Tooltip,
-  Card, Row, Col, Switch, Tabs, Form, Popconfirm, Table, Checkbox, InputNumber, Radio, Slider,
+  Card, Row, Col, Switch, Tabs, Form, Popconfirm, Table, Checkbox, InputNumber, Radio, Slider, Upload,
 } from 'antd';
 import {
   ApiOutlined, CheckCircleOutlined, DeleteOutlined, EditOutlined,
@@ -1725,7 +1725,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
             选择本地图片作为玻璃界面的底层氛围。图片只保存在本机，不会上传或发送到网络。
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
           <div
             style={{
               width: 220, height: 92, borderRadius: 12, overflow: 'hidden',
@@ -1740,30 +1740,27 @@ export default function Settings({embedded }: { embedded?: boolean }) {
             </span>
           </div>
           <div>
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              id="background-upload"
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.currentTarget.value = '';
-                if (!file) return;
-                if (!file.type.startsWith('image/')) { message.error('请选择图片文件'); return; }
-                if (file.size > 2 * 1024 * 1024) { message.error('背景图片不能超过 2MB'); return; }
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                  const dataUrl = event.target?.result as string;
-                  setBackgroundImage(dataUrl);
-                  message.success('背景已更新');
-                };
-                reader.readAsDataURL(file);
-              }}
-            />
             <Space>
-              <Button icon={<PictureOutlined />} onClick={() => document.getElementById('background-upload')?.click()}>
-                更换背景图
-              </Button>
+              <Upload
+                accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  if (!file.type.startsWith('image/')) { message.error('请选择图片文件'); return Upload.LIST_IGNORE; }
+                  if (file.size > 2 * 1024 * 1024) { message.error('背景图片不能超过 2MB'); return Upload.LIST_IGNORE; }
+                  const reader = new FileReader();
+                  reader.onload = (event) => {
+                    const dataUrl = event.target?.result as string;
+                    if (!dataUrl) { message.error('图片读取失败，请重试'); return; }
+                    setBackgroundImage(dataUrl);
+                    message.success('背景已更新');
+                  };
+                  reader.onerror = () => message.error('图片读取失败，请重试');
+                  reader.readAsDataURL(file);
+                  return false;
+                }}
+              >
+                <Button icon={<PictureOutlined />}>更换背景图</Button>
+              </Upload>
               <Button disabled={!backgroundImage} onClick={() => { setBackgroundImage(null); message.success('已恢复默认背景'); }}>
                 恢复默认
               </Button>
