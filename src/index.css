@@ -192,6 +192,13 @@ body {
   transition: width 280ms cubic-bezier(0.32, 0.72, 0, 1), box-shadow 220ms ease, border-radius 220ms ease;
   will-change: width;
 }
+.local-ai-shell {
+  height: 100vh;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: width 280ms cubic-bezier(0.32, 0.72, 0, 1);
+  will-change: width;
+}
 
 /* ========== Main Content ========== */
 .main-content {
@@ -1397,6 +1404,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .sidebar,
   .local-ai-root,
+  .local-ai-shell,
   .sidebar-expanded-content,
   .sidebar-collapsed-content {
     transition: none !important;
@@ -1439,6 +1447,7 @@ body {
 }
 [data-lowfx="on"] .sidebar,
 [data-lowfx="on"] .local-ai-root,
+[data-lowfx="on"] .local-ai-shell,
 [data-lowfx="on"] .sidebar-expanded-content,
 [data-lowfx="on"] .sidebar-collapsed-content {
   transition: none !important;

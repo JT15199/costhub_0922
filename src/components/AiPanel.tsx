@@ -761,7 +761,10 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   // ===== 渲染：折叠态 =====
   if (collapsed) {
     return (
-      <div className="local-ai-root local-ai-collapsed" style={{ width: 42, height: '100vh', flexShrink: 0, background: 'var(--ai-panel-bg, #F4F3EE)', borderLeft: '1px solid var(--ai-panel-border, #E6E4DC)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0', overflow: 'hidden' }}>
+      <>
+      {searchModal}
+      <div className="local-ai-shell" style={{ width: 42 }}>
+      <div className="local-ai-root local-ai-collapsed" style={{ width: '100%', height: '100vh', flexShrink: 0, background: 'var(--ai-panel-bg, #F4F3EE)', borderLeft: '1px solid var(--ai-panel-border, #E6E4DC)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0', overflow: 'hidden' }}>
         <Tooltip title="展开 AI 协作窗">
           <Button type="text" aria-label="展开 AI 协作窗" icon={<LeftOutlined />} onClick={toggleCollapse} style={{ color: '#181713' }} />
         </Tooltip>
@@ -771,6 +774,8 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           <Button type="text" icon={<QuestionCircleOutlined />} style={{ color: '#9A978B' }} onClick={() => window.dispatchEvent(new Event('costhub-open-ai-guide'))} />
         </Tooltip>
       </div>
+      </div>
+      </>
     );
   }
 
@@ -779,7 +784,8 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     <>
     {searchModal}
 
-    <div className="local-ai-root local-ai-expanded" style={{ width, height: '100vh', flexShrink: 0, background: 'var(--ai-panel-bg, #F4F3EE)', borderLeft: '1px solid var(--ai-panel-border, #E6E4DC)', display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+    <div className="local-ai-shell" style={{ width }}>
+    <div className="local-ai-root local-ai-expanded" style={{ width: '100%', height: '100vh', flexShrink: 0, background: 'var(--ai-panel-bg, #F4F3EE)', borderLeft: '1px solid var(--ai-panel-border, #E6E4DC)', display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative', overflow: 'hidden' }}>
       {/* 拖拽调整宽度 */}
       <div
         onMouseDown={e => { e.preventDefault(); dragRef.current = { startX: e.clientX, startW: widthRef.current }; document.body.style.cursor = 'col-resize'; }}
@@ -993,6 +999,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           }}>让 AI 引导我 →</span>
         </div>
       </div>
+    </div>
     </div>
     </>
   );
