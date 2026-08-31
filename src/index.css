@@ -1831,6 +1831,9 @@ tr:hover .sp-row-ops { opacity: 1; }
   --glass-surface: rgba(255,255,255,var(--glass-opacity));
   --glass-hover-surface: rgba(255,255,255,var(--glass-hover-opacity));
   --glass-elevated: rgba(255,255,255,var(--glass-elevated-opacity));
+  --ai-panel-bg: rgba(255,255,255,var(--glass-opacity));
+  --ai-panel-border: rgba(255,255,255,0.84);
+  --ai-inner-surface: rgba(255,255,255,var(--glass-input-opacity));
 }
 
 [data-theme="liquidLight"] body {
