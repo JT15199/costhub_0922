@@ -761,7 +761,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   // ===== 渲染：折叠态 =====
   if (collapsed) {
     return (
-      <div style={{ width: 42, height: '100vh', flexShrink: 0, background: '#F4F3EE', borderLeft: '1px solid #E6E4DC', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0', overflow: 'hidden' }}>
+      <div className="local-ai-root" style={{ width: 42, height: '100vh', flexShrink: 0, background: '#F4F3EE', borderLeft: '1px solid #E6E4DC', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0', overflow: 'hidden' }}>
         <Tooltip title="展开 AI 协作窗">
           <Button type="text" icon={<LeftOutlined />} onClick={toggleCollapse} style={{ color: '#181713' }} />
         </Tooltip>
@@ -779,7 +779,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
     <>
     {searchModal}
 
-    <div style={{ width, height: '100vh', flexShrink: 0, background: '#F4F3EE', borderLeft: '1px solid #E6E4DC', display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+    <div className="local-ai-root" style={{ width, height: '100vh', flexShrink: 0, background: '#F4F3EE', borderLeft: '1px solid #E6E4DC', display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative', overflow: 'hidden' }}>
       {/* 拖拽调整宽度 */}
       <div
         onMouseDown={e => { e.preventDefault(); dragRef.current = { startX: e.clientX, startW: widthRef.current }; document.body.style.cursor = 'col-resize'; }}

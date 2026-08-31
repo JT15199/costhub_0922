@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ConfigProvider, theme as antdTheme } from 'antd';
 import { themes } from './themes';
 import type { Theme } from './themes';
+import { loadStoredBackground, saveStoredBackground } from './backgroundStore';
 
 interface ThemeContextType {
   currentTheme: string;
@@ -50,8 +51,21 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     const saved = Number(localStorage.getItem('costhub_glass_opacity'));
     return clampGlassOpacity(saved);
   });
+  const backgroundVersionRef = useRef(0);
 
   const theme = themes[currentTheme] || themes.red;
+
+  // IndexedDB 持久化是异步的：启动时先用旧版 localStorage 快速首屏，再用本地资源库补齐并迁移旧数据。
+  useEffect(() => {
+    const requestVersion = backgroundVersionRef.current;
+    let alive = true;
+    loadStoredBackground().then((value) => {
+      if (!alive || requestVersion !== backgroundVersionRef.current || !value) return;
+      setBackgroundImageState(value);
+      void saveStoredBackground(value);
+    }).catch(() => { /* 保持默认背景，不阻断应用启动 */ });
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     // 应用CSS变量到文档根元素
@@ -103,14 +117,11 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     localStorage.setItem('app-lowfx', v ? '1' : '0');
   };
   const setBackgroundImage = (dataUrl: string | null) => {
+    backgroundVersionRef.current += 1;
     const next = dataUrl || '';
     setBackgroundImageState(next);
-    try {
-      if (next) localStorage.setItem('costhub_custom_background', next);
-      else localStorage.removeItem('costhub_custom_background');
-    } catch {
-      // localStorage 额度不足时仍保留当前会话内的背景，不阻断其它设置
-    }
+    // 大图优先写入 IndexedDB，避免 Base64 图片触发 localStorage 配额；失败时内部自动回退。
+    void saveStoredBackground(next || null);
   };
   const setGlassOpacity = (value: number) => {
     const next = clampGlassOpacity(value);
