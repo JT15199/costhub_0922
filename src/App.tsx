@@ -91,6 +91,8 @@ export default function App() {
   // 侧边栏折叠（借鉴 DSH：收进去只显示常用 3 个功能）
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sidebar-collapsed') === '1');
   const toggleSidebar = () => { const v = !sidebarCollapsed; setSidebarCollapsed(v); localStorage.setItem('sidebar-collapsed', v ? '1' : '0'); };
+  // 驾驶舱直达项目的延迟转发：只允许转发一次，避免 App 自己再次接收后形成循环跳转。
+  const projectRouteTimerRef = useRef<number | null>(null);
   // 当前登录用户名（侧边栏底部显示）
   const [currentUser, setCurrentUser] = useState('');
 
@@ -314,6 +316,11 @@ export default function App() {
   }, []);
 
   const navigate = useCallback((key: string) => {
+    // 用户主动离开项目页时，取消尚未执行的直达项目转发，避免切页后又被旧事件拉回。
+    if (key !== 'projects' && projectRouteTimerRef.current !== null) {
+      window.clearTimeout(projectRouteTimerRef.current);
+      projectRouteTimerRef.current = null;
+    }
     // 保持目标页面挂载（页面切走不卸载，切回不重连）
     setMountedPages(prev => {
       const next = new Set(prev);
@@ -332,11 +339,24 @@ export default function App() {
   // 结果可视化跳转（2026-08-19）：costhub-open-project → 切项目页 + 延迟重发选中（Projects 懒加载需挂载后接收）
   useEffect(() => {
     const h = (e: Event) => {
-      const pid = (e as CustomEvent).detail?.pid;
-      if (pid) { navigate('projects'); setTimeout(() => window.dispatchEvent(new CustomEvent('costhub-open-project', { detail: { pid } })), 300); }
+      const detail = (e as CustomEvent).detail || {};
+      const pid = detail.pid;
+      if (!pid) return;
+      navigate('projects');
+      // 转发事件由 Projects 消费，但 App 不应再次安排下一次转发。
+      if (detail.__costhubForwarded) return;
+      if (projectRouteTimerRef.current !== null) window.clearTimeout(projectRouteTimerRef.current);
+      projectRouteTimerRef.current = window.setTimeout(() => {
+        projectRouteTimerRef.current = null;
+        window.dispatchEvent(new CustomEvent('costhub-open-project', { detail: { ...detail, __costhubForwarded: true } }));
+      }, 300);
     };
     window.addEventListener('costhub-open-project', h);
-    return () => window.removeEventListener('costhub-open-project', h);
+    return () => {
+      window.removeEventListener('costhub-open-project', h);
+      if (projectRouteTimerRef.current !== null) window.clearTimeout(projectRouteTimerRef.current);
+      projectRouteTimerRef.current = null;
+    };
   }, [navigate]);
 
   const openInsightsEntry = useCallback(() => {
