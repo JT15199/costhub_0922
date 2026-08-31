@@ -97,6 +97,38 @@ export interface TenderOverview {
   events: Array<{ id: number; eventType: string; summary: string; detail: string; actor: string; createdAt: string }>;
 }
 
+export interface NegotiationItemInput {
+  quoteLineId?: number;
+  moduleName?: string;
+  materialName: string;
+  specs?: string;
+  benchmarkSupplier?: string;
+  benchmarkPrice?: number;
+  targetSupplier?: string;
+  targetPrice?: number;
+  currentPrice?: number;
+  note?: string;
+}
+
+export interface NegotiationItem extends NegotiationItemInput {
+  id: number;
+  projectId: number;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenderDecisionInput {
+  selectedSupplier?: string;
+  finalQuote?: number;
+  status?: 'draft' | 'selected' | 'cancelled';
+  rationale?: string;
+  reviewSummary?: string;
+  decidedAt?: string;
+}
+
+export interface TenderDecision extends TenderDecisionInput { id: number; projectId: number; createdAt: string; updatedAt: string; }
+
 function text(value: unknown): string { return String(value ?? '').trim(); }
 function jsonObject(value: unknown, fallback: any = {}) {
   try { return JSON.parse(text(value) || JSON.stringify(fallback)); } catch { return fallback; }
@@ -282,4 +314,57 @@ export async function getTenderOverview(projectId: number): Promise<TenderOvervi
     batches, summary: { supplierCount: new Set(currentBatches.map(batch => batch.supplierName)).size, lineCount: offers.length, comparableCount, referenceCount, unmatchedCount, comparableCoverage: offers.length ? comparableCount / offers.length : 0, theoreticalLow, bestFullQuote, opportunity },
     events: events.map(row => ({ id: row.id, eventType: row.event_type, summary: row.summary, detail: row.detail, actor: row.actor, createdAt: row.created_at })),
   };
+}
+
+export async function saveNegotiationItems(projectId: number, items: NegotiationItemInput[]) {
+  const d = await getDb();
+  let saved = 0;
+  for (const item of items || []) {
+    if (!text(item.materialName)) continue;
+    const quoteLineId = numberValue(item.quoteLineId, 0) || null;
+    const existing = quoteLineId ? (await d.select<any[]>('SELECT id FROM negotiation_items WHERE project_id=? AND quote_line_id=? AND target_supplier=? LIMIT 1', [projectId, quoteLineId, text(item.targetSupplier)]))[0] : null;
+    const values = [projectId, quoteLineId, text(item.moduleName), text(item.materialName), text(item.specs), text(item.benchmarkSupplier), numberValue(item.benchmarkPrice), text(item.targetSupplier), numberValue(item.targetPrice), numberValue(item.currentPrice), text(item.note)];
+    if (existing) {
+      await d.execute('UPDATE negotiation_items SET module_name=?, material_name=?, specs=?, benchmark_supplier=?, benchmark_price=?, target_price=?, current_price=?, note=?, updated_at=datetime(\'now\',\'localtime\') WHERE id=?', [values[2], values[3], values[4], values[5], values[6], values[8], values[9], values[10], existing.id]);
+    } else {
+      await d.execute('INSERT INTO negotiation_items (project_id, quote_line_id, module_name, material_name, specs, benchmark_supplier, benchmark_price, target_supplier, target_price, current_price, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)', values);
+    }
+    saved += 1;
+  }
+  if (saved) await recordTenderEventWithDb(d, projectId, 'negotiation_items_created', `已沉淀${saved}条议价清单`, JSON.stringify({ saved }));
+  return saved;
+}
+
+export async function getNegotiationItems(projectId: number): Promise<NegotiationItem[]> {
+  const rows = await (await getDb()).select<any[]>('SELECT * FROM negotiation_items WHERE project_id=? ORDER BY CASE status WHEN \'draft\' THEN 0 WHEN \'sent\' THEN 1 WHEN \'agreed\' THEN 2 ELSE 3 END, id DESC', [projectId]);
+  return rows.map(row => ({ id: row.id, projectId: row.project_id, quoteLineId: row.quote_line_id || undefined, moduleName: row.module_name, materialName: row.material_name, specs: row.specs, benchmarkSupplier: row.benchmark_supplier, benchmarkPrice: numberValue(row.benchmark_price), targetSupplier: row.target_supplier, targetPrice: numberValue(row.target_price), currentPrice: numberValue(row.current_price), status: row.status, note: row.note, createdAt: row.created_at, updatedAt: row.updated_at }));
+}
+
+export async function updateNegotiationItemStatus(id: number, status: 'draft' | 'sent' | 'agreed' | 'closed', note = '') {
+  const d = await getDb();
+  const item = (await d.select<any[]>('SELECT project_id FROM negotiation_items WHERE id=?', [id]))[0];
+  if (!item) throw new Error('议价项不存在');
+  await d.execute('UPDATE negotiation_items SET status=?, note=CASE WHEN ?<>\'\' THEN ? ELSE note END, updated_at=datetime(\'now\',\'localtime\') WHERE id=?', [status, note, note, id]);
+  await recordTenderEventWithDb(d, item.project_id, 'negotiation_status_changed', `议价项状态更新为${status}`, JSON.stringify({ id, status }));
+}
+
+export async function getTenderDecision(projectId: number): Promise<TenderDecision | null> {
+  const row = (await (await getDb()).select<any[]>('SELECT * FROM tender_decisions WHERE project_id=? LIMIT 1', [projectId]))[0];
+  if (!row) return null;
+  return { id: row.id, projectId: row.project_id, selectedSupplier: row.selected_supplier, finalQuote: numberValue(row.final_quote), status: row.status, rationale: row.rationale, reviewSummary: row.review_summary, decidedAt: row.decided_at, createdAt: row.created_at, updatedAt: row.updated_at };
+}
+
+export async function saveTenderDecision(projectId: number, input: TenderDecisionInput) {
+  const d = await getDb();
+  const existing = (await d.select<any[]>('SELECT id FROM tender_decisions WHERE project_id=? LIMIT 1', [projectId]))[0];
+  const values = [text(input.selectedSupplier), numberValue(input.finalQuote), text(input.status) || 'draft', text(input.rationale), text(input.reviewSummary), text(input.decidedAt) || localNow()];
+  if (existing) {
+    await d.execute('UPDATE tender_decisions SET selected_supplier=?, final_quote=?, status=?, rationale=?, review_summary=?, decided_at=?, updated_at=datetime(\'now\',\'localtime\') WHERE id=?', [...values, existing.id]);
+  } else {
+    const result = await d.execute('INSERT INTO tender_decisions (project_id, selected_supplier, final_quote, status, rationale, review_summary, decided_at) VALUES (?,?,?,?,?,?,?)', [projectId, ...values]);
+    await recordTenderEventWithDb(d, projectId, 'tender_decision_saved', `已保存定点/复盘记录（${values[0] || '供应商待定'}）`, JSON.stringify({ decisionId: result.lastInsertId, status: values[2] }));
+    return result.lastInsertId as number;
+  }
+  await recordTenderEventWithDb(d, projectId, 'tender_decision_saved', `已更新定点/复盘记录（${values[0] || '供应商待定'}）`, JSON.stringify({ decisionId: existing.id, status: values[2] }));
+  return existing.id as number;
 }

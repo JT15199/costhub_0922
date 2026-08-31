@@ -20,7 +20,7 @@ const DOMAINS = {
   settings: ['getSetting','setSetting','loadContextEntries','saveContextEntry','deleteContextEntry','PRESET_PROVIDERS','ensurePresetProviders','getApiProviders','saveApiProvider','deleteApiProvider','setActiveProvider','updateProviderPriorities','getOutboundRequestLogs','clearOutboundRequestLogs','logOutboundRequest','getAllApiProviders','getApiProvidersByType','getActiveApiProviders','addApiProvider','updateApiProvider','toggleApiProviderActive','saveAIRequestLog','updateAIRequestLog','saveAIUsageLog','getTokenUsageStats','getAllAIRequestLogs','deleteAIRequestLog','clearAllAIRequestLogs','getModuleRules','saveModuleRule','deleteModuleRule','clearModuleRules'],
   worklog: ['getWorkLogs','getWorkLogsGroupedByProject','getWorkLog','saveWorkLog','toggleWorkLogDone','deleteWorkLog','getWorkLogCategories','getWorkSummaries','saveWorkSummary','deleteWorkSummary'],
   dashboard: ['getDashboardStats'],
-  tender: ['makeTenderCanonicalKey','recordTenderEvent','importTenderQuoteBatch','getTenderQuoteBatches','getTenderMatrix','updateTenderLineMatch','getTenderOverview'],
+  tender: ['makeTenderCanonicalKey','recordTenderEvent','importTenderQuoteBatch','getTenderQuoteBatches','getTenderMatrix','updateTenderLineMatch','getTenderOverview','saveNegotiationItems','getNegotiationItems','updateNegotiationItemStatus','getTenderDecision','saveTenderDecision'],
 };
 
 const nameToDomain = Object.create(null);

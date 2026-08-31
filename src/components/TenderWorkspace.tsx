@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Descriptions, Divider, Drawer, Empty, Input, Modal, Progress, Radio, Segmented, Select, Space, Spin, Statistic, Steps, Table, Tag, Timeline, Tooltip, Upload, message } from 'antd';
+import { Alert, Button, Card, Collapse, Descriptions, Divider, Drawer, Empty, Input, InputNumber, Modal, Progress, Radio, Segmented, Select, Space, Spin, Statistic, Steps, Table, Tag, Timeline, Tooltip, Upload, message } from 'antd';
 import { AimOutlined, CheckCircleOutlined, ClockCircleOutlined, DownloadOutlined, FileExcelOutlined, HistoryOutlined, InboxOutlined, ReloadOutlined, UploadOutlined, WarningOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
-import { getTenderMatrix, getTenderOverview, importTenderQuoteBatch, updateTenderLineMatch, type MatchRelation, type TenderMatrixRow, type TenderOffer, type TenderOverview } from '../db';
+import { getNegotiationItems, getTenderDecision, getTenderMatrix, getTenderOverview, importTenderQuoteBatch, saveNegotiationItems, saveTenderDecision, updateNegotiationItemStatus, updateTenderLineMatch, type MatchRelation, type NegotiationItem, type TenderDecision, type TenderMatrixRow, type TenderOffer, type TenderOverview } from '../db';
 import { parseTenderQuoteFile, type ParsedTenderQuote } from '../tenderImport';
 
 interface TenderWorkspaceProps { projectId: number; project?: any; }
@@ -27,12 +27,16 @@ export default function TenderWorkspace({ projectId, project }: TenderWorkspaceP
   const [selectedRow, setSelectedRow] = useState<TenderMatrixRow | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [matchSaving, setMatchSaving] = useState<number | null>(null);
+  const [negotiationItems, setNegotiationItems] = useState<NegotiationItem[]>([]);
+  const [decision, setDecision] = useState<TenderDecision | null>(null);
+  const [decisionDraft, setDecisionDraft] = useState({ selectedSupplier: '', finalQuote: 0, status: 'draft' as 'draft' | 'selected' | 'cancelled', rationale: '', reviewSummary: '' });
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextOverview, nextMatrix] = await Promise.all([getTenderOverview(projectId), getTenderMatrix(projectId)]);
-      setOverview(nextOverview); setMatrix(nextMatrix);
+      const [nextOverview, nextMatrix, nextItems, nextDecision] = await Promise.all([getTenderOverview(projectId), getTenderMatrix(projectId), getNegotiationItems(projectId), getTenderDecision(projectId)]);
+      setOverview(nextOverview); setMatrix(nextMatrix); setNegotiationItems(nextItems); setDecision(nextDecision);
+      if (nextDecision) setDecisionDraft({ selectedSupplier: nextDecision.selectedSupplier || '', finalQuote: nextDecision.finalQuote || 0, status: (nextDecision.status as any) || 'draft', rationale: nextDecision.rationale || '', reviewSummary: nextDecision.reviewSummary || '' });
     } catch (error: any) {
       message.error(`招标数据加载失败：${String(error?.message || error).slice(0, 120)}`);
     } finally { setLoading(false); }
@@ -78,11 +82,18 @@ export default function TenderWorkspace({ projectId, project }: TenderWorkspaceP
   const currentStageIndex = Math.max(0, STAGES.findIndex(item => item === overview?.currentRound?.stage));
   const summary = overview?.summary || { supplierCount: 0, lineCount: 0, comparableCount: 0, referenceCount: 0, unmatchedCount: 0, comparableCoverage: 0, theoreticalLow: 0, bestFullQuote: 0, opportunity: 0 };
 
-  const exportNegotiation = () => {
+  const exportNegotiation = async () => {
     const rows = matrix.filter(row => row.opportunity > 0).map(row => ({ 模块: row.moduleName, 器件名称: row.materialName, 型号: row.model, 规格: row.specs, 数量: row.quantity, 可比最低: row.comparableLow ? row.comparableLow.lineTotal : '', 最低供应商: row.comparableLow?.supplierName || '', 议价机会: row.opportunity, 说明: '理论组合底价，仅作谈判锚点' }));
     if (!rows.length) { message.info('当前没有已确认的可比价差'); return; }
+    const saved = await saveNegotiationItems(projectId, matrix.filter(row => row.opportunity > 0).map(row => ({ quoteLineId: row.comparableLow?.quoteLineId, moduleName: row.moduleName, materialName: row.materialName, specs: row.specs, benchmarkSupplier: row.comparableLow?.supplierName, benchmarkPrice: row.comparableLow?.lineTotal, note: '由当前轮次可比价差自动沉淀；理论组合底价仅作谈判锚点' })));
     const sheet = XLSX.utils.json_to_sheet(rows); const book = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(book, sheet, '议价清单'); XLSX.writeFile(book, `议价清单_${project?.code || projectId}.xlsx`); message.success(`已导出 ${rows.length} 条议价线索`);
+    if (saved) await load();
   };
+  const saveDecision = async () => {
+    if (!decisionDraft.selectedSupplier && decisionDraft.status === 'selected') { message.warning('定点状态需要选择供应商'); return; }
+    await saveTenderDecision(projectId, decisionDraft); message.success('定点/复盘记录已保存'); await load();
+  };
+  const changeNegotiationStatus = async (id: number, status: 'draft' | 'sent' | 'agreed' | 'closed') => { try { await updateNegotiationItemStatus(id, status); message.success('议价状态已更新'); await load(); } catch (error: any) { message.error(`状态更新失败：${String(error?.message || error).slice(0, 120)}`); } };
 
   const columns: any[] = [
     { title: '模块', dataIndex: 'moduleName', key: 'module', width: 110, fixed: 'left', render: (value: string) => <span style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>{value || '未归类'}</span> },
@@ -101,7 +112,7 @@ export default function TenderWorkspace({ projectId, project }: TenderWorkspaceP
           <Upload beforeUpload={handleFile} showUploadList={false} accept=".xlsx,.xls"><Button type="primary" icon={<UploadOutlined />}>导入报价</Button></Upload>
           <Button icon={<HistoryOutlined />} onClick={() => setFilter('all')}>查看比价</Button>
           <Button icon={<ClockCircleOutlined />} onClick={() => setHistoryOpen(true)}>历史批次</Button>
-          <Button icon={<DownloadOutlined />} onClick={exportNegotiation}>生成议价清单</Button>
+          <Button icon={<DownloadOutlined />} onClick={() => void exportNegotiation()}>生成议价清单</Button>
           <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>刷新</Button>
         </Space>
       </div>
@@ -124,6 +135,7 @@ export default function TenderWorkspace({ projectId, project }: TenderWorkspaceP
     </Card>
 
     {(overview?.batches?.length || overview?.events?.length) ? <Card size="small" title="过程留痕" extra={<span style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>报价原文不覆盖，历史批次按时间倒序</span>}><Descriptions size="small" column={{ xs: 1, sm: 2, md: 3 }} items={[{ key: 'round', label: '当前轮次', children: overview.currentRound ? `第${overview.currentRound.roundNo}轮 · ${overview.currentRound.name}` : '尚未开始' }, { key: 'batches', label: '报价批次', children: `${overview.batches.length} 份` }, { key: 'events', label: '过程事件', children: `${overview.events.length} 条` }]} /><Divider style={{ margin: '10px 0' }} /><Timeline items={overview.events.slice(0, 6).map(event => ({ color: event.eventType === 'quote_match_confirmed' ? 'green' : event.eventType === 'quote_imported' ? 'blue' : 'gray', children: <div><div style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>{event.summary}</div><div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{event.createdAt || '时间待补'}</div></div> }))} /></Card> : null}
+    {(negotiationItems.length || overview?.batches?.length) ? <Collapse items={[{ key: 'negotiation', label: `已沉淀议价清单（${negotiationItems.length}）`, children: negotiationItems.length ? <Table size="small" rowKey="id" pagination={{ pageSize: 8, showSizeChanger: false }} dataSource={negotiationItems} columns={[{ title: '器件', dataIndex: 'materialName', ellipsis: true }, { title: '最低供应商', dataIndex: 'benchmarkSupplier' }, { title: '基准价', dataIndex: 'benchmarkPrice', align: 'right', render: money }, { title: '目标供应商', dataIndex: 'targetSupplier', render: (v: string) => v || <span style={{ color: 'var(--color-text-tertiary)' }}>待指定</span> }, { title: '状态', dataIndex: 'status', render: (v: string, row: NegotiationItem) => <Select size="small" value={v} style={{ width: 92 }} options={[['draft', '草稿'], ['sent', '已发起'], ['agreed', '已达成'], ['closed', '已关闭']].map(([value, label]) => ({ value, label }))} onChange={next => void changeNegotiationStatus(row.id, next as any)} aria-label={`${row.materialName}议价状态`} /> }]} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="点击“生成议价清单”后，机会项会自动沉淀到这里" /> }, { key: 'decision', label: '定点与复盘（可选）', children: <div style={{ maxWidth: 760 }}><Alert type="info" showIcon message="这里记录最终业务判断，不会自动修改项目 BOM 或供应商主数据。" style={{ marginBottom: 12 }} /><div style={{ display: 'grid', gridTemplateColumns: '1fr 180px 180px', gap: 10 }}><div><div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 4 }}>定点供应商</div><Select allowClear value={decisionDraft.selectedSupplier || undefined} placeholder="暂不确定" options={suppliers.map(value => ({ value, label: value }))} onChange={value => setDecisionDraft(prev => ({ ...prev, selectedSupplier: value || '' }))} style={{ width: '100%' }} /></div><div><div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 4 }}>最终整机报价</div><InputNumber min={0} precision={2} value={decisionDraft.finalQuote || undefined} placeholder="未填写" onChange={value => setDecisionDraft(prev => ({ ...prev, finalQuote: Number(value || 0) }))} style={{ width: '100%' }} /></div><div><div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 4 }}>状态</div><Radio.Group size="small" value={decisionDraft.status} onChange={event => setDecisionDraft(prev => ({ ...prev, status: event.target.value }))} options={[{ label: '草稿', value: 'draft' }, { label: '已定点', value: 'selected' }, { label: '取消', value: 'cancelled' }]} /></div></div><Input.TextArea rows={2} value={decisionDraft.rationale} onChange={event => setDecisionDraft(prev => ({ ...prev, rationale: event.target.value }))} placeholder="定点依据：价格、规格响应、交期、质量、配合度……" style={{ marginTop: 10 }} /><Input.TextArea rows={3} value={decisionDraft.reviewSummary} onChange={event => setDecisionDraft(prev => ({ ...prev, reviewSummary: event.target.value }))} placeholder="复盘摘要：哪些动作有效、哪类器件可复用、下轮要提前准备什么……" style={{ marginTop: 8 }} /><Button type="primary" size="small" onClick={() => void saveDecision()} style={{ marginTop: 10 }}>保存定点/复盘</Button>{decision && <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginLeft: 10 }}>上次保存：{decision.updatedAt || decision.createdAt}</span>}</div> }]} /> : null}
 
     <Modal title="导入报价预览" open={!!preview} onCancel={() => !importing && setPreview(null)} onOk={() => void confirmImport()} okText="确认导入" confirmLoading={importing} width={820} destroyOnHidden>
       {preview && <div><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 12 }}><div><div style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>文件</div><div style={{ fontWeight: 600 }}>{preview.sourceFileName}</div></div><div><div style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>供应商</div><Input size="small" value={supplierName} onChange={event => setSupplierName(event.target.value)} placeholder="例如：A供应商" /></div><div><div style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>所属阶段</div><Radio.Group size="small" value={stage} onChange={event => setStage(event.target.value)} options={['摸底报价', '谈价', '定点'].map(value => ({ label: value, value }))} /></div></div><Alert type="info" showIcon message={`识别到 ${preview.lines.length} 行，合计 ${money(preview.totalAmount)}；表头第 ${preview.headerRow + 1} 行`} description={preview.warnings.length ? preview.warnings.join('；') : '将按人民币、未税、一口价保存；原始单元格会保留在批次中。'} style={{ marginBottom: 12 }} /><Table size="small" rowKey="source_row" dataSource={preview.lines.slice(0, 8)} pagination={false} columns={[{ title: '来源行', dataIndex: 'source_row', width: 65 }, { title: '模块', dataIndex: 'module_name' }, { title: '器件名称', dataIndex: 'raw_name' }, { title: '规格', dataIndex: 'raw_specs', ellipsis: true }, { title: '数量', dataIndex: 'quantity', width: 60 }, { title: '单价', dataIndex: 'unit_price', width: 90, render: money }, { title: '小计', dataIndex: 'line_total', width: 90, render: money }]} /></div>}
