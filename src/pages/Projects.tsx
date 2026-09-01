@@ -5,7 +5,7 @@ import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOut
 import * as XLSX from 'xlsx';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
-import { getProjects, saveProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, saveSkuDiff, deleteSku, deleteSkuDiff, getAllSkuDiffs, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead, markInsightUnread, appendHandledInsight, removeHandledInsight, deletePartAliasExact, cleanupInsightStatus, getProjectBOMCustomColumns, saveProjectBOMCustomColumn, deleteProjectBOMCustomColumn, updateBOMCustomData, getDataChangeHistory } from '../db';
+import { getProjects, saveProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getPriceHistory, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, saveSkuDiff, deleteSku, deleteSkuDiff, getAllSkuDiffs, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead, markInsightUnread, appendHandledInsight, removeHandledInsight, deletePartAliasExact, cleanupInsightStatus, getProjectBOMCustomColumns, saveProjectBOMCustomColumn, deleteProjectBOMCustomColumn, updateBOMCustomData, getDataChangeHistory } from '../db';
 import { TIERS, PROJECT_STATUSES, PROJECT_TYPES, SCREEN_SIZES, RESOLUTIONS, REFRESH_RATES, PANEL_TYPES, MAIN_CATEGORIES, SUB_CATEGORIES, MEASURE_STATUSES, getCategoryColor } from '../constants';
 import { getMainCategories, getSetting } from '../db';
 import { startOllamaStream, logLocalAICall } from '../ollama';
@@ -104,7 +104,7 @@ export default function Projects() {
   useEffect(() => { loadProjects(); }, [categoryFilter]);
   // AI 数据工程联动：切回页面自动刷新（BOM/报价/原声等写库后可见）
   useEffect(() => {
-    const h = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.page === 'projects') { loadProjects; } else if (d?.page) { setBomFullscreen(false); } };
+    const h = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.page === 'projects') { loadProjects(); } else if (d?.page) { setBomFullscreen(false); } };
     window.addEventListener('app-page-active', h);
     return () => window.removeEventListener('app-page-active', h);
   }, [loadProjects]);
@@ -1196,7 +1196,31 @@ export default function Projects() {
   const showBOMHistory = async (row: any) => {
     if (!row?.id) return;
     try {
-      setBomHistoryRows(await getDataChangeHistory('bom', row.id));
+      const [bomChanges, partChanges, legacyPrices] = await Promise.all([
+        getDataChangeHistory('bom', row.id),
+        row.part_id ? getDataChangeHistory('part', row.part_id) : Promise.resolve([]),
+        row.part_id ? getPriceHistory(row.part_id) : Promise.resolve([]),
+      ]);
+      // 项目 BOM 与器件库是同一颗器件的两个视角：BOM 记录优先，器件库记录补充，
+      // 同一时间/字段/原值/新值的双写只保留一条，避免用户看到重复历史。
+      const fieldMap: Record<string, string> = { name: 'part_name', model: 'part_model', cost: 'part_cost' };
+      const fieldLabelMap: Record<string, string> = { name: '器件名称', model: '型号', cost: '单价' };
+      const normalizedField = (item: any) => item.entity_type === 'part' ? (fieldMap[item.field_key] || item.field_key) : item.field_key;
+      const sameChange = (left: any, right: any) => normalizedField(left) === normalizedField(right)
+        && String(left.old_value ?? '') === String(right.old_value ?? '')
+        && String(left.new_value ?? '') === String(right.new_value ?? '')
+        && String(left.changed_at || '').slice(0, 19) === String(right.changed_at || '').slice(0, 19);
+      const merged: any[] = [...bomChanges];
+      for (const item of partChanges as any[]) {
+        if (merged.some(existing => sameChange(existing, item))) continue;
+        merged.push({ ...item, id: `part-${item.id}`, field_key: normalizedField(item), field_label: fieldLabelMap[item.field_key] || item.field_label });
+      }
+      for (const item of legacyPrices as any[]) {
+        const legacy = { ...item, entity_type: 'part', field_key: 'cost', field_label: '单价', old_value: item.old_cost, new_value: item.new_cost, changed_at: item.changed_at, source: '价格历史' };
+        if (merged.some(existing => sameChange(existing, legacy))) continue;
+        merged.push({ ...legacy, id: `price-${item.id}` });
+      }
+      setBomHistoryRows(merged.sort((a: any, b: any) => String(b.changed_at || '').localeCompare(String(a.changed_at || ''))));
       setBomHistoryTitle(`${row.part_name || 'BOM器件'} · ${row.part_model || '无型号'}`);
       setBomHistoryOpen(true);
     } catch (e: any) {
@@ -2947,7 +2971,7 @@ export default function Projects() {
               { title: '字段', dataIndex: 'field_label', width: 110 },
               { title: '原值', dataIndex: 'old_value', ellipsis: true },
               { title: '新值', dataIndex: 'new_value', ellipsis: true },
-              { title: '来源', dataIndex: 'source', width: 140, render: (v: string) => v === 'project_bom_inline' ? '项目 BOM 双击' : v === 'module_library_edit' ? '模块库编辑' : v || '手动' },
+              { title: '来源', dataIndex: 'source', width: 140, render: (v: string) => v === 'project_bom_inline' ? '项目 BOM 双击' : v === 'module_library_edit' ? '模块库编辑' : v === 'parts_inline' ? '器件库行内' : v === 'parts_form' ? '器件库表单' : v || '手动' },
             ]}
           />
         )}

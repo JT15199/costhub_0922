@@ -53,7 +53,7 @@ export default function PartsLibrary() {
   useEffect(() => { load(); }, [load]);
   // AI 数据工程联动：切回页面自动刷新（BOM/报价/原声等写库后可见）
   useEffect(() => {
-    const h = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.page === 'parts') { load; } };
+    const h = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.page === 'parts') { load(); } };
     window.addEventListener('app-page-active', h);
     return () => window.removeEventListener('app-page-active', h);
   }, [load]);
@@ -212,7 +212,14 @@ export default function PartsLibrary() {
   const showHistory = async (r: any) => {
     const [changes, legacyPrices] = await Promise.all([getDataChangeHistory('part', r.id), getPriceHistory(r.id)]);
     // 兼容改版前已经存在的成本历史，和字段级历史一起展示，避免历史记录断层。
-    const legacyRows = legacyPrices.map((item: any) => ({
+    // 新版成本变更仍会保留旧价格历史表用于统计，因此同一秒、同一旧值/新值的旧记录只展示一次。
+    const genericCostKeys = new Set(changes
+      .filter((item: any) => item.field_key === 'cost')
+      .map((item: any) => `${item.changed_at || ''}|${item.old_value}|${item.new_value}`));
+    const legacyRows = legacyPrices.filter((item: any) => {
+      const key = `${item.changed_at || ''}|${item.old_cost}|${item.new_cost}`;
+      return !genericCostKeys.has(key);
+    }).map((item: any) => ({
       id: `price-${item.id}`,
       changed_at: item.changed_at,
       field_label: '成本',

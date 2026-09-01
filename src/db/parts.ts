@@ -64,9 +64,11 @@ export async function savePart(data: any, autoSnapshot = true, syncReferences = 
       projects: data.projects || '',
       remark: data.remark || '',
     };
+    // 成本仍写入既有 part_price_history，供价格趋势/统计模块使用；
+    // 这里不再重复写入 data_change_history，避免一次成本编辑在历史弹窗中出现两条。
     const partFields: Array<[string, string]> = [
       ['main_category', '大类'], ['sub_category', '子类'], ['name', '名称'], ['model', '型号'],
-      ['cost', '成本'], ['specs', '规格参数'], ['projects', '使用项目'], ['remark', '备注'],
+      ['specs', '规格参数'], ['projects', '使用项目'], ['remark', '备注'],
     ];
     for (const [fieldKey, fieldLabel] of partFields) {
       await logDataChange({
