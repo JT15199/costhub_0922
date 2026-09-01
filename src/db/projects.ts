@@ -87,8 +87,12 @@ export async function copyProject(id: number, newCode: string, newName: string) 
   const boms = await d.select<any[]>('SELECT * FROM project_boms WHERE project_id = ? AND COALESCE(is_deleted, 0) = 0', [id]);
   for (const b of boms) {
     // 复制完整快照列（名称/型号/单价/分类/标记），保证复制项目与源项目显示一致
-    await d.execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, part_name, part_model, part_cost, main_category, sub_category, is_module_item, ref_project_id, is_reference, reference_remark) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [r.lastInsertId, b.part_id, b.module_name, b.quantity, b.remark || '', b.part_name || '', b.part_model || '', b.part_cost || 0, b.main_category || '', b.sub_category || '', b.is_module_item || 0, b.ref_project_id || 0, b.is_reference || 0, b.reference_remark || '']);
+    await d.execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, part_name, part_model, part_cost, main_category, sub_category, is_module_item, ref_project_id, is_reference, reference_remark, custom_data) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [r.lastInsertId, b.part_id, b.module_name, b.quantity, b.remark || '', b.part_name || '', b.part_model || '', b.part_cost || 0, b.main_category || '', b.sub_category || '', b.is_module_item || 0, b.ref_project_id || 0, b.is_reference || 0, b.reference_remark || '', b.custom_data || '{}']);
+  }
+  const customColumns = await d.select<any[]>('SELECT field_key, title, data_type, sort_order FROM project_bom_custom_columns WHERE project_id = ?', [id]);
+  for (const column of customColumns) {
+    await d.execute('INSERT INTO project_bom_custom_columns (project_id, field_key, title, data_type, sort_order) VALUES (?,?,?,?,?)', [r.lastInsertId, column.field_key, column.title, column.data_type, column.sort_order || 0]);
   }
   const mods = await d.select<any[]>('SELECT * FROM modules WHERE project_id = ?', [id]);
   for (const m of mods) {
@@ -103,7 +107,7 @@ export async function copyProject(id: number, newCode: string, newName: string) 
 
 // ==================== Project BOMs ====================
 export async function getProjectBOMs(projectId: number) {
-  return (await getDb()).select<any[]>(`SELECT pb.id, pb.project_id, pb.part_id, pb.module_name, pb.quantity, pb.remark, pb.ref_project_id, pb.cost, pb.is_reference, pb.reference_remark, pb.is_deleted, pb.is_module_item,
+  return (await getDb()).select<any[]>(`SELECT pb.id, pb.project_id, pb.part_id, pb.module_name, pb.quantity, pb.remark, pb.ref_project_id, pb.cost, pb.is_reference, pb.reference_remark, pb.is_deleted, pb.is_module_item, COALESCE(pb.custom_data, '{}') as custom_data,
     COALESCE(NULLIF(pb.part_name, ''), p.name) as part_name,
     COALESCE(NULLIF(pb.part_model, ''), p.model) as part_model,
     CASE WHEN pb.part_cost > 0 THEN pb.part_cost ELSE p.cost END as part_cost,
@@ -223,7 +227,7 @@ export async function deleteProjectCostSnapshot(snapshotId: number) {
 }
 
 
-export async function addBOMItem(projectId: number, partId: number, quantity = 1, moduleName = '', remark = '', refProjectId = 0, autoSnapshot = true, snapshot?: { name?: string; model?: string; cost?: number; mainCategory?: string; subCategory?: string }) {
+export async function addBOMItem(projectId: number, partId: number, quantity = 1, moduleName = '', remark = '', refProjectId = 0, autoSnapshot = true, snapshot?: { name?: string; model?: string; cost?: number; mainCategory?: string; subCategory?: string; customData?: Record<string, unknown> }) {
   const d = await getDb();
   // 固化快照列：BOM 行写入时记录器件名/型号/单价/分类，保证项目页与模块库读同一份数据
   // （parts 实时价可能被其他项目导入/供应商报价更新覆盖，若只 JOIN parts 会导致同一行两处显示不一致）
@@ -234,8 +238,8 @@ export async function addBOMItem(projectId: number, partId: number, quantity = 1
   } else {
     part = await d.select<any[]>('SELECT name, model, cost, main_category, sub_category FROM parts WHERE id = ?', [partId]).then(r => r[0]);
   }
-  await d.execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, ref_project_id, part_name, part_model, part_cost, main_category, sub_category, is_module_item) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-    [projectId, partId, moduleName, quantity, remark, refProjectId, part?.name || '', part?.model || '', part?.cost || 0, part?.main_category || '', part?.sub_category || '', 0]);
+  await d.execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, ref_project_id, part_name, part_model, part_cost, main_category, sub_category, is_module_item, custom_data) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    [projectId, partId, moduleName, quantity, remark, refProjectId, part?.name || '', part?.model || '', part?.cost || 0, part?.main_category || '', part?.sub_category || '', 0, JSON.stringify(snapshot?.customData || {})]);
   if (autoSnapshot) await recordProjectCostSnapshot(projectId, 'part_added', `新增器件到${moduleName || '未归类'}`);
 }
 
@@ -690,6 +694,32 @@ async function ensureTargetFeatureTable() {
     await (await getDb()).execute("CREATE TABLE IF NOT EXISTS project_target_features (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, domain TEXT DEFAULT '', feature_name TEXT DEFAULT '', is_new INTEGER DEFAULT 0, voice INTEGER DEFAULT 0, prev_cost REAL DEFAULT 0, target_cost REAL DEFAULT 0, sort_order INTEGER DEFAULT 0)");
     targetFeatureEnsured = true;
   } catch { }
+}
+
+export async function getProjectBOMCustomColumns(projectId: number) {
+  return (await getDb()).select<any[]>(
+    'SELECT id, project_id, field_key, title, data_type, sort_order FROM project_bom_custom_columns WHERE project_id = ? ORDER BY sort_order, id',
+    [projectId]
+  );
+}
+
+export async function saveProjectBOMCustomColumn(projectId: number, data: { title: string; fieldKey: string; dataType?: 'text' | 'number'; sortOrder?: number }) {
+  const title = String(data.title || '').trim().slice(0, 40);
+  const fieldKey = String(data.fieldKey || '').trim().replace(/[^a-zA-Z0-9_\-\u4e00-\u9fff]/g, '_').slice(0, 60);
+  if (!title || !fieldKey) throw new Error('自定义列名称不能为空');
+  const result = await (await getDb()).execute(
+    'INSERT INTO project_bom_custom_columns (project_id, field_key, title, data_type, sort_order) VALUES (?,?,?,?,?) ON CONFLICT(project_id, field_key) DO UPDATE SET title=excluded.title, data_type=excluded.data_type, sort_order=excluded.sort_order',
+    [projectId, fieldKey, title, data.dataType === 'number' ? 'number' : 'text', data.sortOrder || 0]
+  );
+  return result.lastInsertId;
+}
+
+export async function deleteProjectBOMCustomColumn(id: number) {
+  await (await getDb()).execute('DELETE FROM project_bom_custom_columns WHERE id = ?', [id]);
+}
+
+export async function updateBOMCustomData(id: number, customData: Record<string, unknown>) {
+  await (await getDb()).execute('UPDATE project_boms SET custom_data = ? WHERE id = ?', [JSON.stringify(customData || {}), id]);
 }
 export async function getTargetFeatures(projectId: number) {
   try { await ensureTargetFeatureTable(); return (await getDb()).select<any[]>('SELECT * FROM project_target_features WHERE project_id = ? ORDER BY sort_order, id', [projectId]); } catch { return []; }

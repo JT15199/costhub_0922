@@ -5,7 +5,7 @@ import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOut
 import * as XLSX from 'xlsx';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
-import { getProjects, saveProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, saveSkuDiff, deleteSku, deleteSkuDiff, getAllSkuDiffs, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead, markInsightUnread, appendHandledInsight, removeHandledInsight, deletePartAliasExact, cleanupInsightStatus } from '../db';
+import { getProjects, saveProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, saveSkuDiff, deleteSku, deleteSkuDiff, getAllSkuDiffs, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead, markInsightUnread, appendHandledInsight, removeHandledInsight, deletePartAliasExact, cleanupInsightStatus, getProjectBOMCustomColumns, saveProjectBOMCustomColumn, deleteProjectBOMCustomColumn, updateBOMCustomData } from '../db';
 import { TIERS, PROJECT_STATUSES, PROJECT_TYPES, SCREEN_SIZES, RESOLUTIONS, REFRESH_RATES, PANEL_TYPES, MAIN_CATEGORIES, SUB_CATEGORIES, MEASURE_STATUSES, getCategoryColor } from '../constants';
 import { getMainCategories, getSetting } from '../db';
 import { startOllamaStream, logLocalAICall } from '../ollama';
@@ -77,7 +77,11 @@ export default function Projects() {
   const [negotiationOpen, setNegotiationOpen] = useState(false);
   const [bomSearch, setBomSearch] = useState('');
   const [bomTableMode, setBomTableMode] = useState<'module' | 'flat'>('flat');
-  const [inlineBomCell, setInlineBomCell] = useState<{ id: number; field: 'part_cost' | 'quantity'; value: number } | null>(null);
+  const [inlineBomCell, setInlineBomCell] = useState<{ id: number; field: string; value: number | string } | null>(null);
+  const [bomCustomColumns, setBomCustomColumns] = useState<any[]>([]);
+  const [customColumnModal, setCustomColumnModal] = useState(false);
+  const [customColumnTitle, setCustomColumnTitle] = useState('');
+  const [customColumnType, setCustomColumnType] = useState<'text' | 'number'>('text');
 
   // ====== SKU 变体（基座项目 + 差异规则） ======
   const [skus, setSkus] = useState<any[]>([]);
@@ -131,6 +135,10 @@ export default function Projects() {
   }, []);
 
   const loadBOM = async (pid: number) => setBoms(await getProjectBOMs(pid));
+  const loadBOMCustomColumns = async (pid: number) => {
+    try { setBomCustomColumns(await getProjectBOMCustomColumns(pid)); } catch { setBomCustomColumns([]); }
+  };
+  useEffect(() => { if (selectedPid) loadBOMCustomColumns(selectedPid); else setBomCustomColumns([]); }, [selectedPid]);
   const loadReviews = async (pid: number) => setReviews(await getCostReviews(pid));
   const loadCostSnapshots = async (pid: number) => setCostSnapshots(await getProjectCostSnapshots(pid));
   const loadMeasures = async (pid: number) => setMeasures(await getMeasures(pid));
@@ -1193,8 +1201,20 @@ export default function Projects() {
     )},
   ];
 
-  const commitInlineBomCell = async (row: any, field: 'part_cost' | 'quantity', value: number | null) => {
-    if (!selectedPid || value == null || !Number.isFinite(Number(value))) { setInlineBomCell(null); return; }
+  const commitInlineBomCell = async (row: any, field: string, value: number | string | null) => {
+    if (!selectedPid || value == null || (!field.startsWith('custom:') && !Number.isFinite(Number(value)))) { setInlineBomCell(null); return; }
+    if (field.startsWith('custom:')) {
+      const fieldKey = field.slice('custom:'.length);
+      let customData: Record<string, unknown> = {};
+      try { customData = JSON.parse(row.custom_data || '{}'); } catch { customData = {}; }
+      const definition = bomCustomColumns.find((column: any) => column.field_key === fieldKey);
+      customData[fieldKey] = definition?.data_type === 'number' ? Number(value) : String(value);
+      setInlineBomCell(null);
+      await updateBOMCustomData(row.id, customData);
+      await recordProjectCostSnapshot(selectedPid, 'bom_custom_field_changed', `调整BOM自定义列：${definition?.title || fieldKey}`);
+      await Promise.all([loadBOM(selectedPid), loadCostSnapshots(selectedPid)]);
+      return;
+    }
     const nextCost = field === 'part_cost' ? Number(value) : Number(row.part_cost || 0);
     const nextQuantity = field === 'quantity' ? Number(value) : Number(row.quantity || 0);
     setInlineBomCell(null);
@@ -1206,10 +1226,10 @@ export default function Projects() {
     scheduleAutoCompare();
   };
 
-  const spreadsheetBomCols: any[] = [
-    { title: '#', key: 'row_no', width: 46, fixed: 'left' as const, align: 'center' as const, render: (_: any, __: any, index: number) => <span className="bom-row-number">{index + 1}</span> },
+  const spreadsheetBaseCols: any[] = [
+    { title: '#', key: 'row_no', width: 46, align: 'center' as const, render: (_: any, __: any, index: number) => <span className="bom-row-number">{index + 1}</span> },
     ...bomCols.map((column: any) => {
-      if (column.dataIndex !== 'part_cost' && column.dataIndex !== 'quantity') return column.dataIndex === 'module_name' ? { ...column, fixed: 'left' as const } : column;
+      if (column.dataIndex !== 'part_cost' && column.dataIndex !== 'quantity') return column;
       const field = column.dataIndex as 'part_cost' | 'quantity';
       return {
         ...column,
@@ -1235,6 +1255,35 @@ export default function Projects() {
       };
     }),
   ];
+  const spreadsheetCustomCols: any[] = bomCustomColumns.map((column: any) => {
+    const field = `custom:${column.field_key}`;
+    return {
+      title: column.title,
+      key: `custom_${column.id}`,
+      width: 150,
+      ellipsis: true,
+      onCell: (row: any) => ({
+        className: 'bom-editable-cell',
+        onDoubleClick: () => {
+          let data: Record<string, unknown> = {};
+          try { data = JSON.parse(row.custom_data || '{}'); } catch { data = {}; }
+          setInlineBomCell({ id: row.id, field, value: data[column.field_key] == null ? '' : String(data[column.field_key]) });
+        },
+      }),
+      render: (_value: unknown, row: any) => {
+        let data: Record<string, unknown> = {};
+        try { data = JSON.parse(row.custom_data || '{}'); } catch { data = {}; }
+        const current = data[column.field_key] == null ? '' : String(data[column.field_key]);
+        if (inlineBomCell?.id === row.id && inlineBomCell?.field === field) {
+          return column.data_type === 'number'
+            ? <InputNumber autoFocus size="small" controls={false} min={0} precision={4} value={Number(inlineBomCell?.value || 0)} onChange={next => setInlineBomCell(cell => cell ? { ...cell, value: Number(next || 0) } : cell)} onPressEnter={event => event.currentTarget.blur()} onBlur={() => commitInlineBomCell(row, field, inlineBomCell?.value ?? current)} />
+            : <Input autoFocus size="small" value={String(inlineBomCell?.value ?? '')} onChange={event => setInlineBomCell(cell => cell ? { ...cell, value: event.target.value } : cell)} onPressEnter={event => event.currentTarget.blur()} onBlur={() => commitInlineBomCell(row, field, inlineBomCell?.value ?? current)} />;
+        }
+        return current || <span className="bom-custom-empty">—</span>;
+      },
+    };
+  });
+  const spreadsheetBomCols: any[] = [...spreadsheetBaseCols.slice(0, -1), ...spreadsheetCustomCols, spreadsheetBaseCols[spreadsheetBaseCols.length - 1]];
 
   const negotiationRows = boms.map((row: any) => {
     const refs = modRefMap[row.module_name || '未归类']?.items || [];
@@ -1246,15 +1295,53 @@ export default function Projects() {
   const copySelectedBomRows = async () => {
     const rows = visibleBoms.filter((row: any) => bomSelKeys.includes(row.id));
     if (rows.length === 0) { message.info('请先选择要复制的行'); return; }
-    const header = ['模块', '大类', '子类', '名称', '型号', '单价', '数量', '小计', '备注'];
+    const header = ['模块', '大类', '子类', '名称', '型号', '单价', '数量', '小计', ...bomCustomColumns.map((column: any) => column.title), '备注'];
     const body = rows.map((row: any) => [
       row.module_name || '未归类', row.main_category || '', row.sub_category || '', row.part_name || '', row.part_model || '',
-      Number(row.part_cost || 0).toFixed(4), row.quantity ?? '', ((row.part_cost || 0) * (row.quantity || 0)).toFixed(4), row.remark || '',
+      Number(row.part_cost || 0).toFixed(4), row.quantity ?? '', ((row.part_cost || 0) * (row.quantity || 0)).toFixed(4),
+      ...bomCustomColumns.map((column: any) => { try { return JSON.parse(row.custom_data || '{}')[column.field_key] ?? ''; } catch { return ''; } }), row.remark || '',
     ]);
     try {
       await navigator.clipboard.writeText([header, ...body].map(line => line.join('\t')).join('\n'));
       message.success(`已复制 ${rows.length} 行，可直接粘贴到 Excel`);
     } catch { message.warning('当前环境不允许访问剪贴板，请使用导出 Excel'); }
+  };
+
+  const duplicateSelectedBomRows = async () => {
+    if (!selectedPid) return;
+    const rows = visibleBoms.filter((row: any) => bomSelKeys.includes(row.id) && row.part_id);
+    if (rows.length === 0) { message.info('请选择已有器件行（虚拟器件请用“添加器件”新增）'); return; }
+    for (const row of rows) {
+      await addBOMItem(selectedPid, row.part_id, row.quantity || 1, row.module_name || '', row.remark || '', 0, false, {
+        name: row.part_name, model: row.part_model, cost: row.part_cost, mainCategory: row.main_category, subCategory: row.sub_category,
+        customData: (() => { try { return JSON.parse(row.custom_data || '{}'); } catch { return {}; } })(),
+      });
+    }
+    await recordProjectCostSnapshot(selectedPid, 'parts_duplicated', `复制 ${rows.length} 行 BOM`);
+    setBomSelKeys([]);
+    await loadBOM(selectedPid);
+    await loadCostSnapshots(selectedPid);
+    message.success(`已复制 ${rows.length} 行`);
+  };
+
+  const createCustomBomColumn = async () => {
+    if (!selectedPid) return;
+    const title = customColumnTitle.trim();
+    if (!title) { message.warning('请输入列名称'); return; }
+    const baseKey = title.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_\u4e00-\u9fff-]/g, '_').slice(0, 40) || 'custom';
+    const fieldKey = `${baseKey}_${Date.now().toString(36)}`;
+    try {
+      await saveProjectBOMCustomColumn(selectedPid, { title, fieldKey, dataType: customColumnType, sortOrder: bomCustomColumns.length });
+      await loadBOMCustomColumns(selectedPid);
+      setCustomColumnTitle(''); setCustomColumnType('text'); setCustomColumnModal(false);
+      message.success(`已添加列「${title}」`);
+    } catch (e: any) { message.error(String(e?.message || e)); }
+  };
+
+  const removeCustomBomColumn = async (column: any) => {
+    await deleteProjectBOMCustomColumn(column.id);
+    await loadBOMCustomColumns(selectedPid!);
+    message.success(`已删除列「${column.title}」`);
   };
 
   return (
@@ -1326,11 +1413,12 @@ export default function Projects() {
                     <Space>
                       <Button type="primary" size="small" icon={<PlusOutlined />} onClick={async () => { setAllParts(await getParts('', '', '')); setBomEdit(null); setPreviewModItems([]); bomForm.resetFields(); bomForm.setFieldsValue({ _addMode: 'module', quantity: 1, _quantity: 1, _cost: 0 }); setBomModal(true); }}>添加器件</Button>
                       <Upload beforeUpload={handleImportFile} showUploadList={false} accept=".xlsx,.xls"><Button size="small" icon={<UploadOutlined />}>导入</Button></Upload>
-                      <Button size="small" icon={<DownloadOutlined />} onClick={() => { const data = boms.map(b => ({ 模块: b.module_name, 大类: b.main_category, 子类: b.sub_category, 器件名称: b.part_name, 型号: b.part_model, 单价: b.part_cost, 数量: b.quantity, 小计: (b.part_cost || 0) * b.quantity, 备注: b.remark })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'BOM'); XLSX.writeFile(wb, `BOM_${projects.find(p => p.id === selectedPid)?.code || 'export'}.xlsx`); message.success('已导出'); }}>导出</Button>
+                      <Button size="small" icon={<DownloadOutlined />} onClick={() => { const data = boms.map(b => ({ 模块: b.module_name, 大类: b.main_category, 子类: b.sub_category, 器件名称: b.part_name, 型号: b.part_model, 单价: b.part_cost, 数量: b.quantity, 小计: (b.part_cost || 0) * b.quantity, ...(() => { try { const d = JSON.parse(b.custom_data || '{}'); return Object.fromEntries(bomCustomColumns.map((column: any) => [column.title, d[column.field_key] ?? ''])); } catch { return {}; } })(), 备注: b.remark })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'BOM'); XLSX.writeFile(wb, `BOM_${projects.find(p => p.id === selectedPid)?.code || 'export'}.xlsx`); message.success('已导出'); }}>导出</Button>
                       <Input size="small" allowClear value={bomSearch} onChange={e => setBomSearch(e.target.value)} placeholder="搜索器件 / 型号 / 规格" style={{ width: 210 }} />
                       <Segmented size="small" value={bomTableMode} onChange={v => setBomTableMode(v as 'module' | 'flat')} options={[{ label: '模块分组', value: 'module' }, { label: '全量表格', value: 'flat' }]} />
                       <Button size="small" icon={<BulbOutlined />} onClick={() => setNegotiationOpen(true)}>议价机会</Button>
                       {bomTableMode === 'flat' && <Tooltip title="复制选中的 BOM 行为制表符文本，可直接粘贴到 Excel"><Button size="small" icon={<CopyOutlined />} onClick={copySelectedBomRows}>复制选中</Button></Tooltip>}
+                      {bomTableMode === 'flat' && <Button size="small" icon={<PlusOutlined />} onClick={() => setCustomColumnModal(true)}>添加列</Button>}
                     </Space>
                     {bomSelKeys.length > 0 && (
                       <Space>
@@ -1339,9 +1427,10 @@ export default function Projects() {
                         <Popconfirm title={`删除选中 ${bomSelKeys.length} 项？`} onConfirm={async () => { for (const id of bomSelKeys) await deleteBOMItem(Number(id), false); await recordProjectCostSnapshot(selectedPid!, 'parts_deleted', `批量删除 ${bomSelKeys.length} 个BOM项`); setBomSelKeys([]); loadBOM(selectedPid!); loadCostSnapshots(selectedPid!); scheduleAutoCompare(); message.success('已删除'); }}>
                           <Button size="small" danger icon={<DeleteOutlined />}>批量删除</Button>
                         </Popconfirm>
+                        {bomTableMode === 'flat' && <Button size="small" icon={<CopyOutlined />} onClick={duplicateSelectedBomRows}>复制行</Button>}
                       </Space>
                     )}
-                    <ColumnSettingsButton tableId={bomTableMode === 'flat' ? 'bom_flat_detail' : 'bom_module_detail'} columns={bomTableMode === 'flat' ? spreadsheetBomCols : bomCols} />
+                    <ColumnSettingsButton tableId={bomTableMode === 'flat' ? 'bom_spreadsheet_v2' : 'bom_module_detail'} columns={bomTableMode === 'flat' ? spreadsheetBomCols : bomCols} />
                     {/* 参照项目：所有项目都可选参照对比（在研测算/已完成复核），排除当前项目自身 */}
                     <Select
                       size="small"
@@ -1357,7 +1446,7 @@ export default function Projects() {
                   {bomTableMode === 'flat' ? (
                     <>
                       <DataTable
-                        tableId="bom_flat_detail"
+                        tableId="bom_spreadsheet_v2"
                         hideToolbar
                         dataSource={visibleBoms}
                         columns={spreadsheetBomCols}
@@ -2280,6 +2369,23 @@ export default function Projects() {
         </div>
         <Button type="primary" block onClick={() => { setNegotiationOpen(false); setActiveTab('tender'); }}>进入招标工作台查看报价证据</Button>
       </Drawer>
+
+      <Modal
+        title="管理 BOM 自定义列"
+        open={customColumnModal}
+        onOk={createCustomBomColumn}
+        onCancel={() => { setCustomColumnModal(false); setCustomColumnTitle(''); }}
+        okText="添加列"
+        cancelText="取消"
+        width={460}
+      >
+        <div className="bom-custom-column-form">
+          <div className="bom-custom-column-row"><label htmlFor="bom-custom-column-title">列名称</label><Input id="bom-custom-column-title" autoFocus value={customColumnTitle} onChange={event => setCustomColumnTitle(event.target.value)} placeholder="例如：A供应商报价、目标价、议价状态" maxLength={40} /></div>
+          <div className="bom-custom-column-row"><span>数据类型</span><Segmented value={customColumnType} onChange={value => setCustomColumnType(value as 'text' | 'number')} options={[{ label: '文字', value: 'text' }, { label: '数字', value: 'number' }]} /></div>
+          <div className="bom-custom-column-tip">自定义列会保存到当前项目的本地数据库；在全量表格中双击单元格即可填写，删除列不会删除 BOM 行。</div>
+          {bomCustomColumns.length > 0 && <div className="bom-custom-column-existing"><b>当前自定义列</b>{bomCustomColumns.map((column: any) => <div key={column.id}><span>{column.title}</span><small>{column.data_type === 'number' ? '数字' : '文字'}</small><Popconfirm title={`删除「${column.title}」？`} description="只删除列定义及显示，不会删除 BOM 行。" onConfirm={() => removeCustomBomColumn(column)}><Button type="link" danger size="small">删除</Button></Popconfirm></div>)}</div>}
+        </div>
+      </Modal>
 
       {/* Project edit modal */}
       <Modal title={editing?.id ? '编辑项目' : '新建项目'} open={modalOpen} onOk={handleSaveProject} onCancel={() => { setModalOpen(false); setEditing(null); }} width={640} destroyOnClose>
