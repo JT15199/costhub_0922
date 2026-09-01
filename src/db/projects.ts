@@ -1,7 +1,7 @@
 // 由 _tools/split-db.mjs 自动生成（db.ts 按域拆分）
 // 手工修改请改对应域文件；新增函数请更新 _tools/split-db.mjs 的 DOMAINS 映射
 
-import { getDb } from './core';
+import { getDb, logDataChange } from './core';
 import { savePart } from './parts';
 
 
@@ -260,7 +260,8 @@ export async function addVirtualBOMItem(projectId: number, data: { name: string;
 
 export async function updateBOMItem(id: number, quantity: number, moduleName: string, remark: string, autoSnapshot = true, extra?: { partName?: string; partModel?: string; cost?: number; mainCategory?: string; subCategory?: string }) {
   const d = await getDb();
-  const rows = await d.select<any[]>('SELECT project_id FROM project_boms WHERE id = ?', [id]);
+  const rows = await d.select<any[]>('SELECT * FROM project_boms WHERE id = ?', [id]);
+  const before = rows[0];
   // extra 传入时同步更新快照列（编辑 BOM 器件成本/名称时，快照优先显示会读到旧值）
   if (extra) {
     await d.execute('UPDATE project_boms SET quantity=?, module_name=?, remark=?, part_name=?, part_model=?, part_cost=?, main_category=?, sub_category=? WHERE id=?',
@@ -268,17 +269,45 @@ export async function updateBOMItem(id: number, quantity: number, moduleName: st
   } else {
     await d.execute('UPDATE project_boms SET quantity=?, module_name=?, remark=? WHERE id=?', [quantity, moduleName, remark, id]);
   }
+  const after = {
+    quantity,
+    module_name: moduleName,
+    remark,
+    part_name: extra?.partName ?? before?.part_name ?? '',
+    part_model: extra?.partModel ?? before?.part_model ?? '',
+    part_cost: extra?.cost ?? before?.part_cost ?? 0,
+    main_category: extra?.mainCategory ?? before?.main_category ?? '',
+    sub_category: extra?.subCategory ?? before?.sub_category ?? '',
+  };
+  const bomFields: Array<[string, string]> = [
+    ['module_name', '模块'], ['main_category', '大类'], ['sub_category', '子类'],
+    ['part_name', '器件名称'], ['part_model', '型号'], ['part_cost', '单价'],
+    ['quantity', '数量'], ['remark', '备注'],
+  ];
+  for (const [fieldKey, fieldLabel] of bomFields) {
+    await logDataChange({
+      entityType: 'bom', entityId: id, projectId: before?.project_id || 0, moduleName,
+      fieldKey, fieldLabel, oldValue: before?.[fieldKey], newValue: after[fieldKey as keyof typeof after], source: 'project_bom_inline',
+    });
+  }
+  // BOM 行绑定的真实器件也作为同一颗器件更新，器件库与其它模块引用随之同步。
+  if (before?.part_id && extra) {
+    const part = await d.select<any[]>('SELECT * FROM parts WHERE id = ?', [before.part_id]).then(r => r[0]);
+    if (part) {
+      await savePart({ ...part, name: after.part_name, model: after.part_model, cost: after.part_cost, main_category: after.main_category || part.main_category, sub_category: after.sub_category || part.sub_category }, false, true, 'project_bom_inline');
+    }
+  }
   // 反向同步 module_items：项目页改 BOM 数量/模块后，模块库显示同一份数据
   try {
     const bom = await d.select<any[]>('SELECT part_id, module_name, part_name, part_model, part_cost, main_category, sub_category FROM project_boms WHERE id = ?', [id]).then(r => r[0]);
-    if (rows[0]?.project_id && bom?.part_id) {
+    if (before?.project_id && bom?.part_id) {
       await d.execute(`UPDATE module_items SET quantity=?, part_name=?, part_model=?, cost=?, main_category=?, sub_category=?
         WHERE module_id IN (SELECT id FROM modules WHERE project_id=? AND name=?)
           AND part_id=?`,
-        [quantity, bom.part_name || '', bom.part_model || '', bom.part_cost || 0, bom.main_category || '', bom.sub_category || '', rows[0].project_id, bom.module_name, bom.part_id]);
+        [quantity, bom.part_name || '', bom.part_model || '', bom.part_cost || 0, bom.main_category || '', bom.sub_category || '', before.project_id, bom.module_name, bom.part_id]);
     }
   } catch (e) { console.warn('updateBOMItem 同步 module_items 失败:', e); }
-  if (autoSnapshot && rows[0]?.project_id) await recordProjectCostSnapshot(rows[0].project_id, 'part_changed', `调整BOM项：${moduleName || '未归类'}`);
+  if (autoSnapshot && before?.project_id) await recordProjectCostSnapshot(before.project_id, 'part_changed', `调整BOM项：${moduleName || '未归类'}`);
 }
 
 
@@ -531,9 +560,22 @@ export async function updateLibraryModuleItem(bomId: number, data: any) {
   if (!bom) return;
   await d.execute(`UPDATE project_boms SET part_name=?, part_model=?, part_cost=?, main_category=?, sub_category=?, quantity=?, remark=? WHERE id=?`,
     [data.part_name || '', data.part_model || '', data.cost ?? 0, data.main_category || '硬件类', data.sub_category || '', data.quantity ?? 1, data.remark || '', bomId]);
+  const next = {
+    part_name: data.part_name || '', part_model: data.part_model || '', part_cost: data.cost ?? 0,
+    main_category: data.main_category || '硬件类', sub_category: data.sub_category || '',
+    quantity: data.quantity ?? 1, remark: data.remark || '',
+  };
+  const fields: Array<[string, string]> = [
+    ['part_name', '器件名称'], ['part_model', '型号'], ['part_cost', '单价'],
+    ['main_category', '大类'], ['sub_category', '子类'], ['quantity', '数量'], ['remark', '备注'],
+  ];
+  for (const [fieldKey, fieldLabel] of fields) {
+    await logDataChange({ entityType: 'bom', entityId: bomId, projectId: bom.project_id || 0, moduleName: bom.module_name || '', fieldKey, fieldLabel, oldValue: bom[fieldKey], newValue: next[fieldKey as keyof typeof next], source: 'module_library_edit' });
+  }
   // 同步 parts 表（器件库也更新），保证器件库/项目页/模块库三处一致
   if (bom.part_id) {
-    await savePart({ id: bom.part_id, main_category: data.main_category || '硬件类', sub_category: data.sub_category || '', category: data.main_category || '硬件类', name: data.part_name, model: data.part_model || '', cost: data.cost ?? 0, specs: '', projects: '', remark: data.remark || '' }, false);
+    const part = await d.select<any[]>('SELECT * FROM parts WHERE id = ?', [bom.part_id]).then(r => r[0]);
+    if (part) await savePart({ ...part, main_category: next.main_category, sub_category: next.sub_category, category: next.main_category, name: next.part_name, model: next.part_model, cost: next.part_cost, remark: next.remark }, false, true, 'module_library_edit');
   }
   // 同步 module_items（兼容层）
   const mod = await d.select<any[]>('SELECT id FROM modules WHERE project_id = ? AND name = ?', [bom.project_id, bom.module_name]).then(r => r[0]);

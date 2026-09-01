@@ -142,6 +142,7 @@ async function ensureSchema(d: Database) {
   // ===== 核心表建表（取代 Rust migration 系统）=====
   // 全部用 ignoreSchemaError 包裹，已存在的表会静默跳过
   const coreCreate = [
+    `CREATE TABLE IF NOT EXISTS data_change_history (id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT NOT NULL, entity_id INTEGER NOT NULL, project_id INTEGER DEFAULT 0, module_name TEXT DEFAULT '', field_key TEXT NOT NULL, field_label TEXT DEFAULT '', old_value TEXT DEFAULT '', new_value TEXT DEFAULT '', source TEXT DEFAULT 'manual', changed_at TEXT DEFAULT (datetime('now','localtime')))` ,
     `CREATE TABLE IF NOT EXISTS parts (id INTEGER PRIMARY KEY AUTOINCREMENT, main_category TEXT DEFAULT '硬件类', sub_category TEXT DEFAULT '', category TEXT NOT NULL, name TEXT NOT NULL, model TEXT NOT NULL, cost REAL NOT NULL DEFAULT 0, specs TEXT DEFAULT '', projects TEXT DEFAULT '', remark TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now','localtime')), updated_at TEXT DEFAULT (datetime('now','localtime')))`,
     `CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, project_type TEXT DEFAULT '在研', tier TEXT DEFAULT '主流级', status TEXT DEFAULT '进行中', category TEXT DEFAULT '未分类', screen_size TEXT DEFAULT '', resolution TEXT DEFAULT '', refresh_rate TEXT DEFAULT '', panel_type TEXT DEFAULT '', specs TEXT DEFAULT '', platform_fee_rate REAL DEFAULT 0, profit_rate REAL DEFAULT 0, image TEXT DEFAULT '', sort_order INTEGER DEFAULT 0, is_deleted INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now','localtime')))`,
     `CREATE TABLE IF NOT EXISTS modules (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, name TEXT NOT NULL, module_category TEXT DEFAULT '未分类', description TEXT DEFAULT '', category TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now','localtime')))`,
@@ -598,6 +599,8 @@ async function ensureSchema(d: Database) {
     'CREATE INDEX IF NOT EXISTS idx_sku_diffs_sku ON sku_diffs(sku_id)',
     'CREATE INDEX IF NOT EXISTS idx_cost_change_log_type ON cost_change_log(change_type)',
     'CREATE INDEX IF NOT EXISTS idx_ai_request_logs_type ON ai_request_logs(request_type)',
+    'CREATE INDEX IF NOT EXISTS idx_data_change_history_entity ON data_change_history(entity_type, entity_id, changed_at DESC)',
+    'CREATE INDEX IF NOT EXISTS idx_data_change_history_project ON data_change_history(project_id, changed_at DESC)',
   ];
   for (const sql of indexSql) {
     await ignoreSchemaError(d.execute(sql));
@@ -605,6 +608,51 @@ async function ensureSchema(d: Database) {
 }
 
 
+
+export interface DataChangeHistoryInput {
+  entityType: string;
+  entityId: number;
+  projectId?: number;
+  moduleName?: string;
+  fieldKey: string;
+  fieldLabel?: string;
+  oldValue: unknown;
+  newValue: unknown;
+  source?: string;
+}
+
+/** 记录一条可读的字段级变更，供项目/BOM/器件的历史按钮查看。 */
+export async function logDataChange(input: DataChangeHistoryInput) {
+  const oldValue = input.oldValue == null ? '' : String(input.oldValue);
+  const newValue = input.newValue == null ? '' : String(input.newValue);
+  if (oldValue === newValue) return 0;
+  const d = await getDb();
+  const result = await d.execute(
+    `INSERT INTO data_change_history
+      (entity_type, entity_id, project_id, module_name, field_key, field_label, old_value, new_value, source)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    [input.entityType, input.entityId, input.projectId || 0, input.moduleName || '', input.fieldKey, input.fieldLabel || input.fieldKey, oldValue, newValue, input.source || 'manual']
+  );
+  return result.lastInsertId || 0;
+}
+
+export async function getDataChangeHistory(entityType: string, entityId: number, limit = 100) {
+  return (await getDb()).select<any[]>(
+    `SELECT * FROM data_change_history
+     WHERE entity_type = ? AND entity_id = ?
+     ORDER BY changed_at DESC, id DESC LIMIT ?`,
+    [entityType, entityId, limit]
+  );
+}
+
+export async function getProjectChangeHistory(projectId: number, limit = 200) {
+  return (await getDb()).select<any[]>(
+    `SELECT * FROM data_change_history
+     WHERE project_id = ?
+     ORDER BY changed_at DESC, id DESC LIMIT ?`,
+    [projectId, limit]
+  );
+}
 
 // 生成与 SQLite datetime('now','localtime') 一致的本地时间字符串（YYYY-MM-DD HH:MM:SS）
 function localNow(): string {

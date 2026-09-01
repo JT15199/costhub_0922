@@ -5,7 +5,7 @@ import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOut
 import * as XLSX from 'xlsx';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
-import { getProjects, saveProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, saveSkuDiff, deleteSku, deleteSkuDiff, getAllSkuDiffs, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead, markInsightUnread, appendHandledInsight, removeHandledInsight, deletePartAliasExact, cleanupInsightStatus, getProjectBOMCustomColumns, saveProjectBOMCustomColumn, deleteProjectBOMCustomColumn, updateBOMCustomData } from '../db';
+import { getProjects, saveProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, saveSkuDiff, deleteSku, deleteSkuDiff, getAllSkuDiffs, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead, markInsightUnread, appendHandledInsight, removeHandledInsight, deletePartAliasExact, cleanupInsightStatus, getProjectBOMCustomColumns, saveProjectBOMCustomColumn, deleteProjectBOMCustomColumn, updateBOMCustomData, getDataChangeHistory } from '../db';
 import { TIERS, PROJECT_STATUSES, PROJECT_TYPES, SCREEN_SIZES, RESOLUTIONS, REFRESH_RATES, PANEL_TYPES, MAIN_CATEGORIES, SUB_CATEGORIES, MEASURE_STATUSES, getCategoryColor } from '../constants';
 import { getMainCategories, getSetting } from '../db';
 import { startOllamaStream, logLocalAICall } from '../ollama';
@@ -84,6 +84,9 @@ export default function Projects() {
   const [customColumnType, setCustomColumnType] = useState<'text' | 'number'>('text');
   const [spreadsheetCell, setSpreadsheetCell] = useState<{ id: number; field: string } | null>(null);
   const [bomFullscreen, setBomFullscreen] = useState(false);
+  const [bomHistoryOpen, setBomHistoryOpen] = useState(false);
+  const [bomHistoryRows, setBomHistoryRows] = useState<any[]>([]);
+  const [bomHistoryTitle, setBomHistoryTitle] = useState('');
 
   // ====== SKU 变体（基座项目 + 差异规则） ======
   const [skus, setSkus] = useState<any[]>([]);
@@ -1190,6 +1193,17 @@ export default function Projects() {
     });
   }, [groupedBOMs, modCatMap, bomCatOrder]);
 
+  const showBOMHistory = async (row: any) => {
+    if (!row?.id) return;
+    try {
+      setBomHistoryRows(await getDataChangeHistory('bom', row.id));
+      setBomHistoryTitle(`${row.part_name || 'BOM器件'} · ${row.part_model || '无型号'}`);
+      setBomHistoryOpen(true);
+    } catch (e: any) {
+      message.error(`加载修改历史失败：${e?.message || '请重试'}`);
+    }
+  };
+
   const bomCols = [
     { title: '模块', dataIndex: 'module_name', width: 85, render: (v: string) => v ? <Tag>{v}</Tag> : <Tag color="#ddd">未归类</Tag> },
     { title: '大类', dataIndex: 'main_category', width: 70, render: (v: string) => <Tag color={getCategoryColor(v)}>{v}</Tag> },
@@ -1215,14 +1229,15 @@ export default function Projects() {
     } },
     { title: '操作', width: 120, render: (_: any, r: any) => (
       <Space size="small">
-        <Button type="link" size="small" onClick={() => { setBomEdit(r); bomForm.setFieldsValue({ ...r, _part_name: r.part_name, _part_model: r.part_model, _main_category: r.main_category, _sub_category: r.sub_category, _cost: r.part_cost }); setBomModal(true); }}>编辑</Button>
+        <Tooltip title="修改历史"><Button type="link" size="small" icon={<HistoryOutlined />} aria-label="查看修改历史" onClick={() => showBOMHistory(r)} /></Tooltip>
         <Popconfirm title="移除？" onConfirm={async () => { await deleteBOMItem(r.id); loadBOM(selectedPid!); loadCostSnapshots(selectedPid!); scheduleAutoCompare(); }}><Button type="link" size="small" danger>删除</Button></Popconfirm>
       </Space>
     )},
   ];
 
+  const bomInlineFields = ['module_name', 'main_category', 'sub_category', 'part_name', 'part_model', 'part_cost', 'quantity', 'remark'];
   const commitInlineBomCell = async (row: any, field: string, value: number | string | null) => {
-    if (!selectedPid || value == null || (!field.startsWith('custom:') && !Number.isFinite(Number(value)))) { setInlineBomCell(null); return; }
+    if (!selectedPid || value == null) { setInlineBomCell(null); return; }
     if (field.startsWith('custom:')) {
       const fieldKey = field.slice('custom:'.length);
       let customData: Record<string, unknown> = {};
@@ -1236,26 +1251,42 @@ export default function Projects() {
       await Promise.all([loadBOM(selectedPid), loadCostSnapshots(selectedPid)]);
       return;
     }
+    const numericField = field === 'part_cost' || field === 'quantity';
+    if (numericField && !Number.isFinite(Number(value))) { setInlineBomCell(null); return; }
     const nextCost = field === 'part_cost' ? Number(value) : Number(row.part_cost || 0);
     const nextQuantity = field === 'quantity' ? Number(value) : Number(row.quantity || 0);
+    const nextModule = field === 'module_name' ? String(value) : (row.module_name || '');
+    const nextRemark = field === 'remark' ? String(value) : (row.remark || '');
+    const nextName = field === 'part_name' ? String(value) : (row.part_name || '');
+    const nextModel = field === 'part_model' ? String(value) : (row.part_model || '');
+    const nextMainCategory = field === 'main_category' ? String(value) : (row.main_category || '');
+    const nextSubCategory = field === 'sub_category' ? String(value) : (row.sub_category || '');
+    if ((field === 'part_name' || field === 'part_model') && !String(value).trim()) { setInlineBomCell(null); message.warning(`${field === 'part_name' ? '器件名称' : '型号'}不能为空`); return; }
     setInlineBomCell(null);
-    await updateBOMItem(row.id, nextQuantity, row.module_name || '', row.remark || '', true, {
-      partName: row.part_name || '', partModel: row.part_model || '', cost: nextCost,
-      mainCategory: row.main_category || '', subCategory: row.sub_category || '',
-    });
-    await Promise.all([loadBOM(selectedPid), loadCostSnapshots(selectedPid)]);
-    scheduleAutoCompare();
+    try {
+      await updateBOMItem(row.id, nextQuantity, nextModule, nextRemark, true, {
+        partName: nextName, partModel: nextModel, cost: nextCost,
+        mainCategory: nextMainCategory, subCategory: nextSubCategory,
+      });
+      await Promise.all([loadBOM(selectedPid), loadCostSnapshots(selectedPid)]);
+      scheduleAutoCompare();
+      message.success('已自动保存');
+    } catch (e: any) {
+      message.error(`保存失败：${e?.message || '请重试'}`);
+      await loadBOM(selectedPid);
+    }
   };
 
-  const spreadsheetEditableFields = ['part_cost', 'quantity', ...bomCustomColumns.map((column: any) => `custom:${column.field_key}`)];
+  const spreadsheetEditableFields = [...bomInlineFields, ...bomCustomColumns.map((column: any) => `custom:${column.field_key}`)];
   const focusSpreadsheetCell = (row: any, field: string) => {
     setSpreadsheetCell({ id: row.id, field });
     window.setTimeout(() => document.querySelector<HTMLElement>(`[data-bom-cell="${row.id}:${CSS.escape(field)}"]`)?.focus(), 0);
   };
   const beginSpreadsheetEdit = (row: any, field: string) => {
     setSpreadsheetCell({ id: row.id, field });
-    if (field === 'part_cost' || field === 'quantity') {
+    if (bomInlineFields.includes(field)) {
       setInlineBomCell({ id: row.id, field, value: Number(row[field] || 0) });
+      if (field !== 'part_cost' && field !== 'quantity') setInlineBomCell({ id: row.id, field, value: String(row[field] || '') });
     } else if (field.startsWith('custom:')) {
       const key = field.slice('custom:'.length);
       let data: Record<string, unknown> = {};
@@ -1304,10 +1335,16 @@ export default function Projects() {
       let customData: Record<string, unknown> | null = null;
       try { customData = JSON.parse(target.custom_data || '{}'); } catch { customData = {}; }
       let changed = false;
-      let numericChanged = false;
+      let bomChanged = false;
       let customChanged = false;
       let nextCost = Number(target.part_cost || 0);
       let nextQuantity = Number(target.quantity || 0);
+      let nextModule = target.module_name || '';
+      let nextRemark = target.remark || '';
+      let nextName = target.part_name || '';
+      let nextModel = target.part_model || '';
+      let nextMainCategory = target.main_category || '';
+      let nextSubCategory = target.sub_category || '';
       for (let columnOffset = 0; columnOffset < lines[rowOffset].length; columnOffset++) {
         const targetField = fields[startField + columnOffset];
         if (!targetField) break;
@@ -1317,7 +1354,16 @@ export default function Projects() {
           if (!Number.isFinite(numeric)) continue;
           if (targetField === 'quantity') nextQuantity = numeric;
           else nextCost = numeric;
-          numericChanged = true;
+          bomChanged = true;
+          changed = true;
+        } else if (bomInlineFields.includes(targetField)) {
+          if (targetField === 'module_name') nextModule = text;
+          else if (targetField === 'remark') nextRemark = text;
+          else if (targetField === 'part_name') nextName = text;
+          else if (targetField === 'part_model') nextModel = text;
+          else if (targetField === 'main_category') nextMainCategory = text;
+          else if (targetField === 'sub_category') nextSubCategory = text;
+          bomChanged = true;
           changed = true;
         } else if (targetField.startsWith('custom:') && customData) {
           const key = targetField.slice('custom:'.length);
@@ -1331,9 +1377,9 @@ export default function Projects() {
           changed = true;
         }
       }
-      if (numericChanged) await updateBOMItem(target.id, nextQuantity, target.module_name || '', target.remark || '', false, {
-        partName: target.part_name || '', partModel: target.part_model || '', cost: nextCost,
-        mainCategory: target.main_category || '', subCategory: target.sub_category || '',
+      if (bomChanged) await updateBOMItem(target.id, nextQuantity, nextModule, nextRemark, false, {
+        partName: nextName, partModel: nextModel, cost: nextCost,
+        mainCategory: nextMainCategory, subCategory: nextSubCategory,
       });
       if (customData && customChanged) await updateBOMCustomData(target.id, customData);
       if (changed) touched++;
@@ -1360,33 +1406,38 @@ export default function Projects() {
     };
   };
 
+  // 模块分组和全量表格共用同一套行内编辑器：双击即可编辑，失焦自动写库。
+  const renderInlineBomEditor = (row: any, field: string, value: unknown, fallback?: React.ReactNode) => {
+    const editor = inlineBomCell;
+    if (!editor || editor.id !== row.id || editor.field !== field) return fallback ?? (value == null || value === '' ? <span className="bom-inline-empty">—</span> : String(value));
+    const numeric = field === 'part_cost' || field === 'quantity';
+    if (numeric) {
+      return <InputNumber autoFocus size="small" min={0} precision={field === 'part_cost' ? 4 : 6} controls={false} value={Number(editor.value || 0)}
+        onChange={next => setInlineBomCell(cell => cell ? { ...cell, value: Number(next ?? 0) } : cell)}
+        onPressEnter={event => event.currentTarget.blur()}
+        onKeyDown={event => { if (event.key === 'Escape') setInlineBomCell(null); }}
+        onBlur={() => commitInlineBomCell(row, field, editor.value)} />;
+    }
+    return <Input autoFocus size="small" value={String(editor.value ?? '')}
+      onChange={event => setInlineBomCell(cell => cell ? { ...cell, value: event.target.value } : cell)}
+      onPressEnter={event => event.currentTarget.blur()}
+      onKeyDown={event => { if (event.key === 'Escape') setInlineBomCell(null); }}
+      onBlur={() => commitInlineBomCell(row, field, editor.value)} />;
+  };
+  const editableBomCols: any[] = bomCols.map((column: any) => {
+    const field = String(column.dataIndex || '');
+    if (!bomInlineFields.includes(field)) return column;
+    const originalRender = column.render;
+    return {
+      ...column,
+      onCell: (row: any) => getSpreadsheetCellProps(row, field, true),
+      render: (value: unknown, row: any, index: number) => renderInlineBomEditor(row, field, value, originalRender ? originalRender(value, row, index) : undefined),
+    };
+  });
+
   const spreadsheetBaseCols: any[] = [
     { title: '#', key: 'row_no', width: 46, align: 'center' as const, render: (_: any, __: any, index: number) => <span className="bom-row-number">{index + 1}</span> },
-    ...bomCols.map((column: any) => {
-      if (column.dataIndex !== 'part_cost' && column.dataIndex !== 'quantity') {
-        return column.dataIndex ? { ...column, onCell: (row: any) => getSpreadsheetCellProps(row, String(column.dataIndex)) } : column;
-      }
-      const field = column.dataIndex as 'part_cost' | 'quantity';
-      return {
-        ...column,
-        onCell: (row: any) => getSpreadsheetCellProps(row, field, true),
-        render: (value: number, row: any) => inlineBomCell?.id === row.id && inlineBomCell?.field === field
-          ? <InputNumber
-              autoFocus
-              size="small"
-              min={0}
-              precision={field === 'part_cost' ? 4 : 6}
-              controls={false}
-              value={inlineBomCell?.value ?? Number(value || 0)}
-              onChange={next => setInlineBomCell(current => current ? { ...current, value: Number(next || 0) } : current)}
-              onPressEnter={event => event.currentTarget.blur()}
-              onBlur={() => commitInlineBomCell(row, field, inlineBomCell?.value ?? Number(value || 0))}
-            />
-          : field === 'part_cost'
-            ? Number(value || 0).toFixed(4)
-            : (value != null ? (Number.isInteger(value) ? value : Number(value).toFixed(6).replace(/0+$/, '').replace(/\.$/, '')) : '-'),
-      };
-    }),
+    ...editableBomCols,
   ];
   const spreadsheetCustomCols: any[] = bomCustomColumns.map((column: any) => {
     const field = `custom:${column.field_key}`;
@@ -1546,7 +1597,7 @@ export default function Projects() {
                       <Upload beforeUpload={handleImportFile} showUploadList={false} accept=".xlsx,.xls"><Button size="small" icon={<UploadOutlined />}>导入</Button></Upload>
                       <Button size="small" icon={<DownloadOutlined />} onClick={() => { const data = boms.map(b => ({ 模块: b.module_name, 大类: b.main_category, 子类: b.sub_category, 器件名称: b.part_name, 型号: b.part_model, 单价: b.part_cost, 数量: b.quantity, 小计: (b.part_cost || 0) * b.quantity, ...(() => { try { const d = JSON.parse(b.custom_data || '{}'); return Object.fromEntries(bomCustomColumns.map((column: any) => [column.title, d[column.field_key] ?? ''])); } catch { return {}; } })(), 备注: b.remark })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'BOM'); XLSX.writeFile(wb, `BOM_${projects.find(p => p.id === selectedPid)?.code || 'export'}.xlsx`); message.success('已导出'); }}>导出</Button>
                       <Input size="small" allowClear value={bomSearch} onChange={e => setBomSearch(e.target.value)} placeholder="搜索器件 / 型号 / 规格" style={{ width: 210 }} />
-                      <Segmented size="small" value={bomTableMode} onChange={v => setBomTableMode(v as 'module' | 'flat')} options={[{ label: '模块分组', value: 'module' }, { label: '全量表格', value: 'flat' }]} />
+                      <Segmented size="small" value={bomTableMode} onChange={v => { const mode = v as 'module' | 'flat'; setBomTableMode(mode); if (mode !== 'flat') setBomFullscreen(false); }} options={[{ label: '模块分组', value: 'module' }, { label: '全量表格', value: 'flat' }]} />
                       {bomTableMode === 'flat' && <Tooltip title={bomFullscreen ? '退出 BOM 全屏（Esc）' : '将 BOM 表格铺满窗口（Esc 退出）'}><Button size="small" icon={bomFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} onClick={() => setBomFullscreen(value => !value)}>{bomFullscreen ? '退出全屏' : '全屏'}</Button></Tooltip>}
                       <Button size="small" icon={<BulbOutlined />} onClick={() => setNegotiationOpen(true)}>议价机会</Button>
                       {bomTableMode === 'flat' && <Tooltip title="复制选中的 BOM 行为制表符文本，可直接粘贴到 Excel"><Button size="small" icon={<CopyOutlined />} onClick={copySelectedBomRows}>复制选中</Button></Tooltip>}
@@ -1613,7 +1664,7 @@ export default function Projects() {
                     const refProject = ref?.pid ? projects.find((p: any) => p.id === ref.pid) : null;
                     const refDelta = modTotal - refTotal;
                     const extCols = hasRef ? [
-                      ...bomCols.slice(0, -1),
+                      ...editableBomCols.slice(0, -1),
                       { title: '参考单价', width: 85, align: 'right' as const, render: (_: any, r: any) => {
                         const rref = findRef(r);
                         return rref ? <span style={{ color: '#2563EB', fontSize: 12, fontFamily: 'monospace' }}>¥{Number(rref.part_cost).toFixed(4)}</span> : <span style={{ color: '#DDD', fontSize: 12 }}>—</span>;
@@ -1630,8 +1681,8 @@ export default function Projects() {
                         const diff = ((rref.part_cost || 0) * rref.quantity) - ((r.part_cost || 0) * r.quantity);
                         return <span style={{ color: diff > 0 ? '#EF4444' : diff < 0 ? '#10B981' : '#666', fontWeight: 600, fontSize: 12 }}>{diff >= 0 ? '+' : ''}¥{diff.toFixed(4)}</span>;
                       }},
-                      bomCols[bomCols.length - 1],
-                    ] : bomCols;
+                      editableBomCols[editableBomCols.length - 1],
+                    ] : editableBomCols;
                     return (
                       <div key={modName} id={`module-${modName}`} className="bom-module-card" style={{ scrollMarginTop: 80 }}>
                         <div className="bom-module-header">
@@ -2873,6 +2924,33 @@ export default function Projects() {
             }}
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={`修改历史 - ${bomHistoryTitle}`}
+        open={bomHistoryOpen}
+        onCancel={() => setBomHistoryOpen(false)}
+        footer={null}
+        width={760}
+      >
+        {bomHistoryRows.length === 0 ? (
+          <div className="history-empty-state">暂无字段级修改记录</div>
+        ) : (
+          <DataTable
+            tableId="project_bom_change_history"
+            dataSource={bomHistoryRows}
+            rowKey="id"
+            size="small"
+            pagination={false}
+            columns={[
+              { title: '时间', dataIndex: 'changed_at', width: 150 },
+              { title: '字段', dataIndex: 'field_label', width: 110 },
+              { title: '原值', dataIndex: 'old_value', ellipsis: true },
+              { title: '新值', dataIndex: 'new_value', ellipsis: true },
+              { title: '来源', dataIndex: 'source', width: 140, render: (v: string) => v === 'project_bom_inline' ? '项目 BOM 双击' : v === 'module_library_edit' ? '模块库编辑' : v || '手动' },
+            ]}
+          />
+        )}
       </Modal>
 
       {/* Copy/Review/Measure modals - same */}

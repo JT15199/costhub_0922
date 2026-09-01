@@ -2,9 +2,9 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { EmojiIcon } from '../iconMap';
 import { Button, Input, Select, Space, Modal, Form, InputNumber, Tag, message, Popconfirm, Tooltip, Upload, Row, Col } from 'antd';
 import type { TableRowSelection } from 'antd/es/table/interface';
-import { PlusOutlined, EditOutlined, DeleteOutlined, DownloadOutlined, UploadOutlined, HistoryOutlined, SearchOutlined, ShopOutlined, ToolOutlined, CheckOutlined, UndoOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, DownloadOutlined, UploadOutlined, HistoryOutlined, SearchOutlined, ShopOutlined, ToolOutlined, CheckOutlined, UndoOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
-import { getParts, savePart, deletePart, getCategories, getPriceHistory, getMainCategories, getPartSuppliers, addPartSupplier, updatePartSupplier, deletePartSupplier, getSupplierPriceHistory, getPartCostChangeLogs } from '../db';
+import { getParts, savePart, deletePart, getCategories, getPriceHistory, getMainCategories, getPartSuppliers, addPartSupplier, updatePartSupplier, deletePartSupplier, getSupplierPriceHistory, getPartCostChangeLogs, getDataChangeHistory } from '../db';
 import { summarizeSupplierTrend, supplierTrendTag } from '../supplierTrend';
 import { MAIN_CATEGORIES, SUB_CATEGORIES, getCategoryColor } from '../constants';
 import DataTable from '../components/DataTable';
@@ -22,6 +22,7 @@ export default function PartsLibrary() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyData, setHistoryData] = useState<any[]>([]);
   const [historyName, setHistoryName] = useState('');
+  const [inlinePartCell, setInlinePartCell] = useState<{ id: number; field: string; value: string | number } | null>(null);
   const [mainCats, setMainCats] = useState(MAIN_CATEGORIES);
   const [form] = Form.useForm();
 
@@ -202,13 +203,27 @@ export default function PartsLibrary() {
 
   const handleSave = async () => {
     const v = await form.validateFields();
-    await savePart({ ...editing, ...v, main_category: v.main_category || '硬件类', sub_category: v.sub_category || '' });
+    await savePart({ ...editing, ...v, main_category: v.main_category || '硬件类', sub_category: v.sub_category || '' }, true, true, 'parts_form');
     setModalOpen(false); setEditing(null); form.resetFields(); load(); message.success('已保存');
   };
   const handleDelete = async (id: number) => { await deletePart(id); load(); message.success('已删除'); };
   const batchDelete = async () => { for (const id of selKeys) await deletePart(Number(id)); message.success(`已删除 ${selKeys.length} 条`); setSelKeys([]); load(); };
   const rowSel: TableRowSelection<any> = { selectedRowKeys: selKeys, onChange: setSelKeys };
-  const showHistory = async (r: any) => { setHistoryData(await getPriceHistory(r.id)); setHistoryName(`${r.name} [${r.model}]`); setHistoryOpen(true); };
+  const showHistory = async (r: any) => {
+    const [changes, legacyPrices] = await Promise.all([getDataChangeHistory('part', r.id), getPriceHistory(r.id)]);
+    // 兼容改版前已经存在的成本历史，和字段级历史一起展示，避免历史记录断层。
+    const legacyRows = legacyPrices.map((item: any) => ({
+      id: `price-${item.id}`,
+      changed_at: item.changed_at,
+      field_label: '成本',
+      old_value: item.old_cost,
+      new_value: item.new_cost,
+      source: '价格历史',
+    }));
+    setHistoryData([...changes, ...legacyRows].sort((a: any, b: any) => String(b.changed_at || '').localeCompare(String(a.changed_at || ''))));
+    setHistoryName(`${r.name} [${r.model}]`);
+    setHistoryOpen(true);
+  };
 
   const openEdit = (record?: any) => {
     setEditing(record || null);
@@ -338,13 +353,64 @@ export default function PartsLibrary() {
     } catch { }
   };
 
+  const beginPartInlineEdit = (row: any, field: string) => {
+    setInlinePartCell({ id: row.id, field, value: field === 'cost' ? Number(row.cost || 0) : String(row[field] || '') });
+  };
+  const commitPartInlineCell = async (row: any, field: string, value: string | number) => {
+    setInlinePartCell(null);
+    const nextValue = field === 'cost' ? Number(value) : String(value ?? '').trim();
+    if (field === 'name' || field === 'model') {
+      if (!nextValue) { message.warning(`${field === 'name' ? '名称' : '型号'}不能为空`); return; }
+    }
+    if (field === 'cost' && !Number.isFinite(Number(nextValue))) { message.warning('成本必须是数字'); return; }
+    try {
+      await savePart({
+        ...row,
+        [field]: nextValue,
+        category: field === 'main_category' ? nextValue : (row.category || row.main_category || '硬件类'),
+      }, true, true, 'parts_inline');
+      await load();
+      message.success('已自动保存');
+    } catch (e: any) {
+      message.error(`保存失败：${e?.message || '请重试'}`);
+      await load();
+    }
+  };
+  const partCellProps = (row: any, field: string) => ({
+    className: `parts-inline-cell${inlinePartCell?.id === row.id && inlinePartCell?.field === field ? ' is-editing' : ''}`,
+    tabIndex: 0,
+    onDoubleClick: () => beginPartInlineEdit(row, field),
+    onKeyDown: (event: React.KeyboardEvent) => {
+      if ((event.key === 'Enter' || event.key === 'F2') && event.target === event.currentTarget) {
+        event.preventDefault(); beginPartInlineEdit(row, field);
+      }
+    },
+  });
+  const renderPartInline = (row: any, field: string, value: unknown, fallback?: React.ReactNode) => {
+    const editor = inlinePartCell;
+    if (!editor || editor.id !== row.id || editor.field !== field) return fallback ?? (value == null || value === '' ? <span className="parts-inline-empty">—</span> : String(value));
+    if (field === 'cost') {
+      return <InputNumber autoFocus size="small" min={0} precision={4} controls={false} value={Number(editor.value || 0)}
+        onChange={v => setInlinePartCell(cell => cell ? { ...cell, value: Number(v ?? 0) } : cell)}
+        onPressEnter={e => e.currentTarget.blur()}
+        onKeyDown={e => { if (e.key === 'Escape') setInlinePartCell(null); }}
+        onBlur={() => commitPartInlineCell(row, field, editor.value)} />;
+    }
+    return <Input autoFocus size="small" value={String(editor.value ?? '')}
+      onChange={e => setInlinePartCell(cell => cell ? { ...cell, value: e.target.value } : cell)}
+      onPressEnter={e => e.currentTarget.blur()}
+      onKeyDown={e => { if (e.key === 'Escape') setInlinePartCell(null); }}
+      onBlur={() => commitPartInlineCell(row, field, editor.value)} />;
+  };
+
   const cols = [
     { title: 'ID', dataIndex: 'id', width: 50 },
-    { title: '大类', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={getCategoryColor(v)}>{v}</Tag> },
-    { title: '子类', dataIndex: 'sub_category', width: 100 },
-    { title: '名称', dataIndex: 'name', width: 200, ellipsis: true },
-    { title: '型号', dataIndex: 'model', width: 150, ellipsis: true },
-    { title: '成本(¥)', dataIndex: 'cost', width: 100, align: 'right' as const, render: (v: number) => <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>{v?.toFixed(2)}</span> },
+    { title: '大类', dataIndex: 'main_category', width: 100, onCell: (r: any) => partCellProps(r, 'main_category'), render: (v: string, r: any) => renderPartInline(r, 'main_category', v, <Tag color={getCategoryColor(v)}>{v}</Tag>) },
+    { title: '子类', dataIndex: 'sub_category', width: 110, onCell: (r: any) => partCellProps(r, 'sub_category'), render: (v: string, r: any) => renderPartInline(r, 'sub_category', v) },
+    { title: '名称', dataIndex: 'name', width: 200, ellipsis: true, onCell: (r: any) => partCellProps(r, 'name'), render: (v: string, r: any) => renderPartInline(r, 'name', v) },
+    { title: '型号', dataIndex: 'model', width: 160, ellipsis: true, onCell: (r: any) => partCellProps(r, 'model'), render: (v: string, r: any) => renderPartInline(r, 'model', v) },
+    { title: '成本(¥)', dataIndex: 'cost', width: 110, align: 'right' as const, onCell: (r: any) => partCellProps(r, 'cost'), render: (v: number, r: any) => renderPartInline(r, 'cost', v, <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>{Number(v || 0).toFixed(4)}</span>) },
+    { title: '规格', dataIndex: 'specs', width: 220, ellipsis: true, onCell: (r: any) => partCellProps(r, 'specs'), render: (v: string, r: any) => renderPartInline(r, 'specs', v) },
     { title: '规范化', width: 200, render: (_: any, r: any) => {
       const cn = r.canonical_name || '';
       if (!cn) return <Tag style={{ margin: 0 }}>未规范</Tag>;
@@ -359,12 +425,12 @@ export default function PartsLibrary() {
         </Tooltip>
       );
     } },
-    { title: '项目', dataIndex: 'projects', width: 100, ellipsis: true },
-    { title: '操作', width: 230, render: (_: any, r: any) => (
+    { title: '项目', dataIndex: 'projects', width: 140, ellipsis: true, onCell: (r: any) => partCellProps(r, 'projects'), render: (v: string, r: any) => renderPartInline(r, 'projects', v) },
+    { title: '备注', dataIndex: 'remark', width: 160, ellipsis: true, onCell: (r: any) => partCellProps(r, 'remark'), render: (v: string, r: any) => renderPartInline(r, 'remark', v) },
+    { title: '操作', width: 180, render: (_: any, r: any) => (
       <Space size="small">
-        <Tooltip title="编辑"><Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} /></Tooltip>
         <Tooltip title="供应商"><Button type="link" size="small" icon={<ShopOutlined />} onClick={() => openSupplierModal(r)} /></Tooltip>
-        <Tooltip title="价格历史"><Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => showHistory(r)} /></Tooltip>
+        <Tooltip title="修改历史"><Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => showHistory(r)} /></Tooltip>
         {r.canonical_name ? (
           <Popconfirm title="还原规范化？" description="清空该器件规范结果（原名不受影响），之后可重新规范" onConfirm={() => handleResetCanonical(r)}>
             <Tooltip title="还原规范化"><Button type="link" size="small" icon={<UndoOutlined />} /></Tooltip>
@@ -402,7 +468,8 @@ export default function PartsLibrary() {
         <div style={{ marginBottom: 8 }}>{selKeys.length > 0 && (
           <Popconfirm title={`批量删除 ${selKeys.length} 条？`} onConfirm={batchDelete}><Button size="small" danger icon={<DeleteOutlined />}>删除选中 ({selKeys.length})</Button></Popconfirm>
         )}</div>
-        <DataTable tableId="parts_lib" dataSource={filteredParts} columns={cols} rowKey="id" size="middle" loading={loading} rowSelection={rowSel} pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `共 ${t} 条` }} scroll={{ x: 900 }} />
+        <div className="parts-inline-hint">双击单元格或按 Enter / F2 编辑，离开单元格自动保存；修改历史可查看字段级变更。</div>
+        <DataTable tableId="parts_lib" dataSource={filteredParts} columns={cols} rowKey="id" size="middle" loading={loading} rowSelection={rowSel} pagination={{ pageSize: 20, showSizeChanger: true, showTotal: t => `共 ${t} 条` }} scroll={{ x: 1380 }} />
       </div>
 
       <Modal title={editing?.id ? '编辑器件' : '新增器件'} open={modalOpen} onOk={handleSave} onCancel={() => { setModalOpen(false); setEditing(null); form.resetFields(); }} width={560} destroyOnClose>
@@ -432,9 +499,9 @@ export default function PartsLibrary() {
         </Form>
       </Modal>
 
-      <Modal title={`价格历史 - ${historyName}`} open={historyOpen} onCancel={() => setHistoryOpen(false)} footer={null} width={600}>
+      <Modal title={`修改历史 - ${historyName}`} open={historyOpen} onCancel={() => setHistoryOpen(false)} footer={null} width={760}>
         <DataTable tableId="parts_price_hist" dataSource={historyData} rowKey="id" size="small" pagination={false}
-          columns={[{ title: '旧价', dataIndex: 'old_cost', render: (v: number) => v?.toFixed(2) }, { title: '新价', dataIndex: 'new_cost', render: (v: number) => v?.toFixed(2) }, { title: '变动', key: 'd', render: (_: any, r: any) => <span style={{ color: r.new_cost > r.old_cost ? '#EF4444' : '#10B981' }}>{(r.new_cost - r.old_cost).toFixed(2)}</span> }, { title: '时间', dataIndex: 'changed_at' }]} />
+          columns={[{ title: '时间', dataIndex: 'changed_at', width: 150 }, { title: '字段', dataIndex: 'field_label', width: 110 }, { title: '原值', dataIndex: 'old_value', ellipsis: true }, { title: '新值', dataIndex: 'new_value', ellipsis: true }, { title: '来源', dataIndex: 'source', width: 130, render: (v: string) => v === 'parts_inline' ? '器件库行内' : v === 'project_bom_inline' ? '项目 BOM' : v === 'module_library_edit' ? '模块库' : v === 'parts_form' ? '器件表单' : v || '手动' }]} />
       </Modal>
 
       <Modal

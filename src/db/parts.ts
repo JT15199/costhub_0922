@@ -1,7 +1,7 @@
 // 由 _tools/split-db.mjs 自动生成（db.ts 按域拆分）
 // 手工修改请改对应域文件；新增函数请更新 _tools/split-db.mjs 的 DOMAINS 映射
 
-import { getDb } from './core';
+import { getDb, logDataChange } from './core';
 import { recordProjectCostSnapshot } from './projects';
 
 
@@ -40,10 +40,10 @@ export async function getPartsSpecsMap(partIds: number[]): Promise<Record<number
 }
 
 
-export async function savePart(data: any, autoSnapshot = true) {
+export async function savePart(data: any, autoSnapshot = true, syncReferences = false, source = 'manual') {
   const d = await getDb();
   if (data.id) {
-    const old = await d.select<{ cost: number }[]>('SELECT cost FROM parts WHERE id = ?', [data.id]);
+    const old = await d.select<any[]>('SELECT * FROM parts WHERE id = ?', [data.id]);
     if (old[0] && Math.abs(old[0].cost - (data.cost || 0)) > 0.0001) {
       await d.execute('INSERT INTO part_price_history (part_id, old_cost, new_cost) VALUES (?, ?, ?)', [data.id, old[0].cost, data.cost || 0]);
     }
@@ -52,6 +52,37 @@ export async function savePart(data: any, autoSnapshot = true) {
       : [];
     await d.execute(`UPDATE parts SET main_category=?, sub_category=?, category=?, name=?, model=?, cost=?, specs=?, projects=?, remark=?, updated_at=datetime('now','localtime') WHERE id=?`,
       [data.main_category || '硬件类', data.sub_category || '', data.category || '', data.name, data.model, data.cost || 0, data.specs || '', data.projects || '', data.remark || '', data.id]);
+    const oldPart = old[0];
+    const nextPart = {
+      main_category: data.main_category || '硬件类',
+      sub_category: data.sub_category || '',
+      category: data.category || '',
+      name: data.name || '',
+      model: data.model || '',
+      cost: data.cost || 0,
+      specs: data.specs || '',
+      projects: data.projects || '',
+      remark: data.remark || '',
+    };
+    const partFields: Array<[string, string]> = [
+      ['main_category', '大类'], ['sub_category', '子类'], ['name', '名称'], ['model', '型号'],
+      ['cost', '成本'], ['specs', '规格参数'], ['projects', '使用项目'], ['remark', '备注'],
+    ];
+    for (const [fieldKey, fieldLabel] of partFields) {
+      await logDataChange({
+        entityType: 'part', entityId: data.id, fieldKey, fieldLabel,
+        oldValue: oldPart?.[fieldKey], newValue: nextPart[fieldKey as keyof typeof nextPart], source,
+      });
+    }
+    // 需要跨页面保持一致时（项目 BOM 双击编辑/器件库行内编辑），同步所有引用的快照。
+    // 默认关闭，避免历史报价导入流程意外改写既有项目快照。
+    if (syncReferences) {
+      await d.execute(`UPDATE project_boms SET part_name=?, part_model=?, part_cost=?, main_category=?, sub_category=?
+        WHERE part_id=? AND COALESCE(is_deleted,0)=0`,
+        [nextPart.name, nextPart.model, nextPart.cost, nextPart.main_category, nextPart.sub_category, data.id]);
+      await d.execute(`UPDATE module_items SET part_name=?, part_model=?, cost=?, main_category=?, sub_category=? WHERE part_id=?`,
+        [nextPart.name, nextPart.model, nextPart.cost, nextPart.main_category, nextPart.sub_category, data.id]);
+    }
     if (autoSnapshot && affectedProjects.length > 0) {
       for (const p of affectedProjects) {
         await recordProjectCostSnapshot(p.project_id, 'part_price_changed', `器件「${data.name || ''}」价格/信息变更`);
