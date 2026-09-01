@@ -82,6 +82,7 @@ export default function Projects() {
   const [customColumnModal, setCustomColumnModal] = useState(false);
   const [customColumnTitle, setCustomColumnTitle] = useState('');
   const [customColumnType, setCustomColumnType] = useState<'text' | 'number'>('text');
+  const [spreadsheetCell, setSpreadsheetCell] = useState<{ id: number; field: string } | null>(null);
 
   // ====== SKU 变体（基座项目 + 差异规则） ======
   const [skus, setSkus] = useState<any[]>([]);
@@ -1208,6 +1209,7 @@ export default function Projects() {
       let customData: Record<string, unknown> = {};
       try { customData = JSON.parse(row.custom_data || '{}'); } catch { customData = {}; }
       const definition = bomCustomColumns.find((column: any) => column.field_key === fieldKey);
+      if (definition?.data_type === 'number' && !Number.isFinite(Number(value))) { setInlineBomCell(null); return; }
       customData[fieldKey] = definition?.data_type === 'number' ? Number(value) : String(value);
       setInlineBomCell(null);
       await updateBOMCustomData(row.id, customData);
@@ -1226,17 +1228,129 @@ export default function Projects() {
     scheduleAutoCompare();
   };
 
+  const spreadsheetEditableFields = ['part_cost', 'quantity', ...bomCustomColumns.map((column: any) => `custom:${column.field_key}`)];
+  const focusSpreadsheetCell = (row: any, field: string) => {
+    setSpreadsheetCell({ id: row.id, field });
+    window.setTimeout(() => document.querySelector<HTMLElement>(`[data-bom-cell="${row.id}:${CSS.escape(field)}"]`)?.focus(), 0);
+  };
+  const beginSpreadsheetEdit = (row: any, field: string) => {
+    setSpreadsheetCell({ id: row.id, field });
+    if (field === 'part_cost' || field === 'quantity') {
+      setInlineBomCell({ id: row.id, field, value: Number(row[field] || 0) });
+    } else if (field.startsWith('custom:')) {
+      const key = field.slice('custom:'.length);
+      let data: Record<string, unknown> = {};
+      try { data = JSON.parse(row.custom_data || '{}'); } catch { data = {}; }
+      setInlineBomCell({ id: row.id, field, value: data[key] == null ? '' : String(data[key]) });
+    }
+  };
+  const moveSpreadsheetCell = (row: any, field: string, direction: -1 | 0 | 1, rowDirection = 0) => {
+    const fields = spreadsheetEditableFields;
+    const currentField = fields.indexOf(field);
+    if (currentField < 0 && rowDirection === 0) return;
+    const currentRow = visibleBoms.findIndex((item: any) => item.id === row.id);
+    let nextRowIndex = currentRow + rowDirection;
+    let nextFieldIndex = currentField < 0 ? 0 : currentField;
+    if (rowDirection === 0) {
+      nextFieldIndex += direction;
+      if (nextFieldIndex >= fields.length) { nextRowIndex += 1; nextFieldIndex = 0; }
+      if (nextFieldIndex < 0) { nextRowIndex -= 1; nextFieldIndex = fields.length - 1; }
+    }
+    nextRowIndex = Math.max(0, Math.min(visibleBoms.length - 1, nextRowIndex));
+    nextFieldIndex = Math.max(0, Math.min(fields.length - 1, nextFieldIndex));
+    const nextRow = visibleBoms[nextRowIndex];
+    const nextField = fields[nextFieldIndex];
+    if (nextRow && nextField) focusSpreadsheetCell(nextRow, nextField);
+  };
+  const handleSpreadsheetCellKeyDown = (event: React.KeyboardEvent, row: any, field: string) => {
+    if ((event.key === 'Enter' || event.key === 'F2') && event.target === event.currentTarget) { event.preventDefault(); beginSpreadsheetEdit(row, field); return; }
+    if (event.key === 'ArrowUp') { event.preventDefault(); moveSpreadsheetCell(row, field, 0, -1); return; }
+    if (event.key === 'ArrowDown') { event.preventDefault(); moveSpreadsheetCell(row, field, 0, 1); return; }
+    if (event.key === 'Tab') { event.preventDefault(); moveSpreadsheetCell(row, field, event.shiftKey ? -1 : 1); }
+  };
+  const handleSpreadsheetPaste = async (event: React.ClipboardEvent, row: any, field: string) => {
+    const raw = event.clipboardData.getData('text/plain');
+    if (!raw || (!raw.includes('\t') && !raw.includes('\n'))) return;
+    event.preventDefault();
+    if (!selectedPid) return;
+    const fields = spreadsheetEditableFields;
+    const startField = fields.indexOf(field);
+    if (startField < 0) return;
+    const rowStart = visibleBoms.findIndex((item: any) => item.id === row.id);
+    const lines = raw.replace(/\r/g, '').split('\n').filter((line: string) => line.length > 0).map((line: string) => line.split('\t'));
+    let touched = 0;
+    for (let rowOffset = 0; rowOffset < lines.length; rowOffset++) {
+      const target = visibleBoms[rowStart + rowOffset];
+      if (!target) break;
+      let customData: Record<string, unknown> | null = null;
+      try { customData = JSON.parse(target.custom_data || '{}'); } catch { customData = {}; }
+      let changed = false;
+      let numericChanged = false;
+      let customChanged = false;
+      let nextCost = Number(target.part_cost || 0);
+      let nextQuantity = Number(target.quantity || 0);
+      for (let columnOffset = 0; columnOffset < lines[rowOffset].length; columnOffset++) {
+        const targetField = fields[startField + columnOffset];
+        if (!targetField) break;
+        const text = lines[rowOffset][columnOffset].trim();
+        if (targetField === 'part_cost' || targetField === 'quantity') {
+          const numeric = Number(text.replace(/,/g, ''));
+          if (!Number.isFinite(numeric)) continue;
+          if (targetField === 'quantity') nextQuantity = numeric;
+          else nextCost = numeric;
+          numericChanged = true;
+          changed = true;
+        } else if (targetField.startsWith('custom:') && customData) {
+          const key = targetField.slice('custom:'.length);
+          const definition = bomCustomColumns.find((column: any) => column.field_key === key);
+          if (definition?.data_type === 'number') {
+            const numeric = Number(text.replace(/,/g, ''));
+            if (!Number.isFinite(numeric)) continue;
+            customData[key] = numeric;
+          } else customData[key] = text;
+          customChanged = true;
+          changed = true;
+        }
+      }
+      if (numericChanged) await updateBOMItem(target.id, nextQuantity, target.module_name || '', target.remark || '', false, {
+        partName: target.part_name || '', partModel: target.part_model || '', cost: nextCost,
+        mainCategory: target.main_category || '', subCategory: target.sub_category || '',
+      });
+      if (customData && customChanged) await updateBOMCustomData(target.id, customData);
+      if (changed) touched++;
+    }
+    if (touched > 0) {
+      await recordProjectCostSnapshot(selectedPid, 'bom_paste', `从剪贴板粘贴 ${touched} 行 BOM`);
+      await Promise.all([loadBOM(selectedPid), loadCostSnapshots(selectedPid)]);
+      message.success(`已粘贴 ${touched} 行`);
+    }
+  };
+
+  const getSpreadsheetCellProps = (row: any, field: string, editable = false) => {
+    const active = spreadsheetCell?.id === row.id && spreadsheetCell?.field === field;
+    return {
+      className: `bom-grid-cell${editable ? ' bom-editable-cell' : ''}${active ? ' bom-cell-active' : ''}`,
+      tabIndex: editable ? 0 : -1,
+      'data-bom-cell': `${row.id}:${field}`,
+      onClick: () => setSpreadsheetCell({ id: row.id, field }),
+      ...(editable ? {
+        onDoubleClick: () => beginSpreadsheetEdit(row, field),
+        onKeyDown: (event: React.KeyboardEvent) => handleSpreadsheetCellKeyDown(event, row, field),
+        onPaste: (event: React.ClipboardEvent) => handleSpreadsheetPaste(event, row, field),
+      } : {}),
+    };
+  };
+
   const spreadsheetBaseCols: any[] = [
     { title: '#', key: 'row_no', width: 46, align: 'center' as const, render: (_: any, __: any, index: number) => <span className="bom-row-number">{index + 1}</span> },
     ...bomCols.map((column: any) => {
-      if (column.dataIndex !== 'part_cost' && column.dataIndex !== 'quantity') return column;
+      if (column.dataIndex !== 'part_cost' && column.dataIndex !== 'quantity') {
+        return column.dataIndex ? { ...column, onCell: (row: any) => getSpreadsheetCellProps(row, String(column.dataIndex)) } : column;
+      }
       const field = column.dataIndex as 'part_cost' | 'quantity';
       return {
         ...column,
-        onCell: (row: any) => ({
-          className: 'bom-editable-cell',
-          onDoubleClick: () => setInlineBomCell({ id: row.id, field, value: Number(row[field] || 0) }),
-        }),
+        onCell: (row: any) => getSpreadsheetCellProps(row, field, true),
         render: (value: number, row: any) => inlineBomCell?.id === row.id && inlineBomCell?.field === field
           ? <InputNumber
               autoFocus
@@ -1262,14 +1376,7 @@ export default function Projects() {
       key: `custom_${column.id}`,
       width: 150,
       ellipsis: true,
-      onCell: (row: any) => ({
-        className: 'bom-editable-cell',
-        onDoubleClick: () => {
-          let data: Record<string, unknown> = {};
-          try { data = JSON.parse(row.custom_data || '{}'); } catch { data = {}; }
-          setInlineBomCell({ id: row.id, field, value: data[column.field_key] == null ? '' : String(data[column.field_key]) });
-        },
-      }),
+      onCell: (row: any) => getSpreadsheetCellProps(row, field, true),
       render: (_value: unknown, row: any) => {
         let data: Record<string, unknown> = {};
         try { data = JSON.parse(row.custom_data || '{}'); } catch { data = {}; }
@@ -1284,6 +1391,8 @@ export default function Projects() {
     };
   });
   const spreadsheetBomCols: any[] = [...spreadsheetBaseCols.slice(0, -1), ...spreadsheetCustomCols, spreadsheetBaseCols[spreadsheetBaseCols.length - 1]];
+  // 领域列是全量表格的核心上下文，不能被旧版列设置隐藏，否则表头会出现“模块/子类”错位感。
+  const spreadsheetLockedColumns = ['main_category'];
 
   const negotiationRows = boms.map((row: any) => {
     const refs = modRefMap[row.module_name || '未归类']?.items || [];
@@ -1430,7 +1539,7 @@ export default function Projects() {
                         {bomTableMode === 'flat' && <Button size="small" icon={<CopyOutlined />} onClick={duplicateSelectedBomRows}>复制行</Button>}
                       </Space>
                     )}
-                    <ColumnSettingsButton tableId={bomTableMode === 'flat' ? 'bom_spreadsheet_v2' : 'bom_module_detail'} columns={bomTableMode === 'flat' ? spreadsheetBomCols : bomCols} />
+                    <ColumnSettingsButton tableId={bomTableMode === 'flat' ? 'bom_spreadsheet_v2' : 'bom_module_detail'} columns={bomTableMode === 'flat' ? spreadsheetBomCols : bomCols} lockKeys={bomTableMode === 'flat' ? spreadsheetLockedColumns : undefined} />
                     {/* 参照项目：所有项目都可选参照对比（在研测算/已完成复核），排除当前项目自身 */}
                     <Select
                       size="small"
@@ -1442,7 +1551,7 @@ export default function Projects() {
                       options={projects.filter((p: any) => p.id !== selectedPid).map((p: any) => ({ label: `[${p.code}] ${p.name}${p.project_type === '已完成' ? ' ✓' : ''}`, value: p.id }))}
                       />
                   </div>
-                  {bomTableMode === 'flat' && <div className="bom-spreadsheet-hint">连续表格模式 · 双击“单价”或“数量”直接编辑，Enter 保存 · 可横向滚动查看完整字段</div>}
+                  {bomTableMode === 'flat' && <div className="bom-spreadsheet-hint">连续表格模式 · 双击或 Enter/F2 编辑 · Tab/方向键移动 · 可从 Excel 粘贴多行 · 横向滚动查看完整字段</div>}
                   {bomTableMode === 'flat' ? (
                     <>
                       <DataTable
@@ -1450,13 +1559,14 @@ export default function Projects() {
                         hideToolbar
                         dataSource={visibleBoms}
                         columns={spreadsheetBomCols}
+                        lockKeys={spreadsheetLockedColumns}
                         rowKey="id"
                         size="small"
                         pagination={false}
                         scroll={{ x: 1240, y: 560 }}
-                        rowSelection={{ selectedRowKeys: bomSelKeys, onChange: keys => setBomSelKeys(keys) }}
+                        rowSelection={{ fixed: false, selectedRowKeys: bomSelKeys, onChange: keys => setBomSelKeys(keys) }}
                       />
-                      <div className="bom-spreadsheet-statusbar"><span>显示 {visibleBoms.length} / {boms.length} 行</span><span>当前合计 <b>¥{visibleBoms.reduce((sum: number, row: any) => sum + (row.part_cost || 0) * (row.quantity || 0), 0).toFixed(4)}</b></span><span>已选 {bomSelKeys.filter(id => visibleBoms.some((row: any) => row.id === id)).length} 行</span><span className="bom-spreadsheet-status-note">双击单价/数量编辑 · 列宽可拖动调整</span></div>
+                      <div className="bom-spreadsheet-statusbar"><span>显示 {visibleBoms.length} / {boms.length} 行</span><span>当前合计 <b>¥{visibleBoms.reduce((sum: number, row: any) => sum + (row.part_cost || 0) * (row.quantity || 0), 0).toFixed(4)}</b></span><span>已选 {bomSelKeys.filter(id => visibleBoms.some((row: any) => row.id === id)).length} 行</span><span className="bom-spreadsheet-status-note">双击或 Enter/F2 编辑 · Tab/方向键移动 · 可粘贴 Excel 数据</span></div>
                     </>
                   ) : sortedModNames.map((modName: string) => {
                     const items = groupedBOMs[modName];
