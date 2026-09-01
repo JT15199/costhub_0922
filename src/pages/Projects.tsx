@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { EmojiIcon } from '../iconMap';
-import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Segmented, Tag, message, notification, Popconfirm, Tabs, Row, Col, Tooltip, Card, Statistic, Upload, Alert, DatePicker, Checkbox, AutoComplete, Radio, Badge, Drawer } from 'antd';
+import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Segmented, Tag, message, notification, Popconfirm, Tabs, Row, Col, Tooltip, Card, Statistic, Upload, Alert, DatePicker, Checkbox, AutoComplete, Radio, Badge, Drawer, Dropdown } from 'antd';
 import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined, InboxOutlined, DollarOutlined, TagOutlined, LineChartOutlined, BarChartOutlined, ToolOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, AimOutlined, BuildOutlined, HistoryOutlined, EyeOutlined, CheckOutlined, CloseOutlined, RobotOutlined, BulbOutlined, MinusCircleOutlined, FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import ReactECharts from 'echarts-for-react/esm/core';
@@ -841,15 +841,18 @@ export default function Projects() {
     setRefProjPid(null); setRefProjBoms([]); setModRefMap({});
   };
   const loadTargets = async (pid: number) => setTargets(await getTargets(pid));
+  // 模块级参照保留为高级入口：默认跟随顶部全局参照，也可对单个模块指定其他项目。
   const loadModRef = async (modName: string, pid: number) => {
-    if (!pid) { setModRefMap(prev => { const n = { ...prev }; delete n[modName]; return n; }); return; }
+    if (!pid) {
+      setModRefMap(prev => { const next = { ...prev }; delete next[modName]; return next; });
+      if (selectedPid) await updateBOMRefProject(modName, selectedPid, 0);
+      return;
+    }
     const refBoms = await getProjectBOMs(pid);
     const modItems = refBoms.filter((b: any) => b.module_name === modName);
     setModRefMap(prev => ({ ...prev, [modName]: { pid, items: modItems } }));
-    // Update all items in this module to reference this project
-    if (selectedPid) await updateBOMRefProject(modName, selectedPid!, pid);
+    if (selectedPid) await updateBOMRefProject(modName, selectedPid, pid);
   };
-
   // 参照项目：整个项目作为参照，自动按模块名关联各模块的参考
   const loadRefProj = async (pid: number | null) => {
     setRefProjPid(pid);
@@ -1409,6 +1412,9 @@ export default function Projects() {
   const spreadsheetBomCols: any[] = [...spreadsheetBaseCols.slice(0, -1), ...spreadsheetCustomCols, spreadsheetBaseCols[spreadsheetBaseCols.length - 1]];
   // 领域列是全量表格的核心上下文，不能被旧版列设置隐藏，否则表头会出现“模块/子类”错位感。
   const spreadsheetLockedColumns = ['main_category'];
+  const selectedReferenceProject = refProjPid ? projects.find((p: any) => p.id === refProjPid) : null;
+  const referenceBomTotal = refProjBoms.reduce((sum: number, row: any) => sum + (row.part_cost || 0) * (row.quantity || 0), 0);
+  const referenceDelta = bomTotal - referenceBomTotal;
 
   const negotiationRows = boms.map((row: any) => {
     const refs = modRefMap[row.module_name || '未归类']?.items || [];
@@ -1557,16 +1563,21 @@ export default function Projects() {
                       </Space>
                     )}
                     <ColumnSettingsButton tableId={bomTableMode === 'flat' ? 'bom_spreadsheet_v2' : 'bom_module_detail'} columns={bomTableMode === 'flat' ? spreadsheetBomCols : bomCols} lockKeys={bomTableMode === 'flat' ? spreadsheetLockedColumns : undefined} />
-                    {/* 参照项目：所有项目都可选参照对比（在研测算/已完成复核），排除当前项目自身 */}
-                    <Select
-                      size="small"
-                      allowClear
-                      placeholder="参照项目"
-                      style={{ width: 170 }}
-                      value={refProjPid || undefined}
-                      onChange={v => loadRefProj(v || null)}
-                      options={projects.filter((p: any) => p.id !== selectedPid).map((p: any) => ({ label: `[${p.code}] ${p.name}${p.project_type === '已完成' ? ' ✓' : ''}`, value: p.id }))}
+                    {/* 参照项目：全局选择一次，模块卡内展示当前/参照/差异，避免每个模块重复放下拉框 */}
+                    <div className={`bom-reference-picker ${refProjPid ? 'has-reference' : ''}`}>
+                      <span className="bom-reference-picker-label">参照项目</span>
+                      <Select
+                        size="small"
+                        allowClear
+                        aria-label="选择参照项目"
+                        placeholder="选择项目进行对比"
+                        style={{ width: 190 }}
+                        value={refProjPid || undefined}
+                        onChange={v => loadRefProj(v || null)}
+                        options={projects.filter((p: any) => p.id !== selectedPid).map((p: any) => ({ label: `[${p.code}] ${p.name}${p.project_type === '已完成' ? ' · 已完成' : ''}`, value: p.id }))}
                       />
+                      {selectedReferenceProject && <div className="bom-reference-overview"><span>{selectedReferenceProject.code || selectedReferenceProject.name}</span><b>¥{referenceBomTotal.toFixed(2)}</b><em className={referenceDelta > 0 ? 'is-over' : referenceDelta < 0 ? 'is-under' : ''}>{referenceDelta > 0 ? '+' : ''}¥{referenceDelta.toFixed(2)}</em></div>}
+                    </div>
                   </div>
                   {bomTableMode === 'flat' && <div className="bom-spreadsheet-hint">连续表格模式 · 双击或 Enter/F2 编辑 · Tab/方向键移动 · 可从 Excel 粘贴多行 · 横向滚动查看完整字段</div>}
                   {bomTableMode === 'flat' ? (
@@ -1599,6 +1610,8 @@ export default function Projects() {
                       (rb.module_name || '未归类') === (r.module_name || '未归类')
                       && rb.part_name === r.part_name
                       && (rb.part_model || '') === (r.part_model || ''));
+                    const refProject = ref?.pid ? projects.find((p: any) => p.id === ref.pid) : null;
+                    const refDelta = modTotal - refTotal;
                     const extCols = hasRef ? [
                       ...bomCols.slice(0, -1),
                       { title: '参考单价', width: 85, align: 'right' as const, render: (_: any, r: any) => {
@@ -1620,15 +1633,19 @@ export default function Projects() {
                       bomCols[bomCols.length - 1],
                     ] : bomCols;
                     return (
-                      <div key={modName} id={`module-${modName}`} style={{ marginBottom: 12, border: '1px solid #E8ECF1', borderRadius: 8, overflow: 'hidden', scrollMarginTop: 80 }}>
-                        <div style={{ background: '#F8FAFC', padding: '8px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #E8ECF1' }}>
-                          <Space>
-                            <b style={{ fontSize: 13 }}>{modName}</b>
-                            <Tag>{items.length} 件</Tag>
-                            <Tag color="red">¥{modTotal.toFixed(4)}</Tag>
-                            {hasRef && <Tag color="blue">参考: ¥{refTotal.toFixed(4)}</Tag>}
-                            {hasRef && <Tag color={modTotal > refTotal ? 'red' : 'green'}>{modTotal > refTotal ? '+' : ''}¥{(modTotal - refTotal).toFixed(4)}</Tag>}
-                          </Space>
+                      <div key={modName} id={`module-${modName}`} className="bom-module-card" style={{ scrollMarginTop: 80 }}>
+                        <div className="bom-module-header">
+                          <div className="bom-module-heading">
+                            <div className="bom-module-name"><b>{modName}</b><span>{items.length} 件</span></div>
+                            <div className="bom-module-metrics">
+                              <span><small>当前小计</small><strong>¥{modTotal.toFixed(4)}</strong></span>
+                              {hasRef ? <>
+                                <i />
+                                <span><small>参照小计 · {refProject?.code || '参照项目'}</small><strong className="is-reference">¥{refTotal.toFixed(4)}</strong></span>
+                                <span className={`bom-module-delta ${refDelta > 0 ? 'is-over' : 'is-under'}`}><small>{refDelta > 0 ? '高于参照' : refDelta < 0 ? '低于参照' : '与参照一致'}</small><strong>{refDelta > 0 ? '+' : ''}¥{refDelta.toFixed(4)}</strong></span>
+                              </> : refProjPid ? <span className="bom-module-no-reference"><small>{projects.find((p: any) => p.id === refProjPid)?.code || '参照项目'}</small><strong>暂无此模块</strong></span> : null}
+                            </div>
+                          </div>
                           <Space size={4}>
                             {/* 跨项目报价比对（AI 疑似同物料识别 + 人工确认沉淀） */}
                             <Tooltip title="跨项目对比该模块报价（AI 识别疑似同物料，需配置本地模型）">
@@ -1642,19 +1659,37 @@ export default function Projects() {
                                 <Button size="small" icon={<CopyOutlined />} onClick={() => importRefModule(modName)}>导入参考</Button>
                               </Tooltip>
                             )}
-                            <Select size="small" allowClear style={{ width: 200 }} placeholder="选项目参考此模块"
-                              value={ref?.pid || undefined}
-                              onChange={v => loadModRef(modName, v || 0)}
-                              options={projects.filter((p: any) => p.id !== selectedPid).map((p: any) => ({ label: `[${p.code}] ${p.name}${p.project_type === '已完成' ? ' ✓' : ''}`, value: p.id }))} />
+                            <Dropdown
+                              trigger={['click']}
+                              menu={{
+                                items: [
+                                  { key: 'global', label: refProjPid ? `跟随全局参照${selectedReferenceProject?.code ? ` · ${selectedReferenceProject.code}` : ''}` : '跟随全局参照（未选择）', disabled: !refProjPid },
+                                  { key: 'clear', label: '清除本模块参照' },
+                                  { type: 'divider' as const },
+                                  ...projects.filter((p: any) => p.id !== selectedPid).map((p: any) => ({ key: `project:${p.id}`, label: `指定：${p.code || p.name}` })),
+                                ],
+                                onClick: ({ key }: { key: string }) => {
+                                  if (key === 'global') loadModRef(modName, refProjPid || 0);
+                                  else if (key === 'clear') loadModRef(modName, 0);
+                                  else if (key.startsWith('project:')) loadModRef(modName, Number(key.slice('project:'.length)));
+                                },
+                              }}
+                            >
+                              <Button size="small" aria-label={`设置${modName}的参照项目`}>参照设置</Button>
+                            </Dropdown>
                           </Space>
                         </div>
                         <DataTable tableId="bom_module_detail" hideToolbar dataSource={items} columns={extCols} rowKey="id" size="small" pagination={false} scroll={{ x: 1100 }}
                           rowSelection={{ selectedRowKeys: bomSelKeys.filter(k => items.some(i => i.id === k)), onChange: (keys) => { const others = bomSelKeys.filter(k => !items.some(i => i.id === k)); setBomSelKeys([...others, ...keys]); } }}
                           summary={() => (
                             <Table.Summary.Row>
-                              <Table.Summary.Cell index={0} colSpan={5}><b style={{ fontSize: 12 }}>{modName} 合计</b></Table.Summary.Cell>
-                              <Table.Summary.Cell index={5} align="right"><b style={{ color: '#CF0A2C', fontSize: 13 }}>¥{modTotal.toFixed(4)}</b></Table.Summary.Cell>
-                              {hasRef && <Table.Summary.Cell index={6} colSpan={3} align="right"><span style={{ color: '#64748B', fontSize: 12.5 }}>参考: ¥{refTotal.toFixed(4)} | 差异: {modTotal > refTotal ? '+' : ''}¥{(modTotal - refTotal).toFixed(4)}</span></Table.Summary.Cell>}
+                              <Table.Summary.Cell index={0} colSpan={extCols.length + 1}>
+                                <div className="bom-module-summary">
+                                  <b>{modName} 合计</b>
+                                  <span>当前 <strong>¥{modTotal.toFixed(4)}</strong></span>
+                                  {hasRef && <><span>参照 <strong className="is-reference">¥{refTotal.toFixed(4)}</strong></span><span className={refDelta > 0 ? 'is-over' : 'is-under'}>差异 <strong>{refDelta > 0 ? '+' : ''}¥{refDelta.toFixed(4)}</strong></span></>}
+                                </div>
+                              </Table.Summary.Cell>
                             </Table.Summary.Row>
                           )} />
                       </div>
