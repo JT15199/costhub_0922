@@ -2796,6 +2796,32 @@ tr:hover .sp-row-ops { opacity: 1; }
 .bom-custom-column-existing > div { display:flex; align-items:center; gap:8px; min-height:28px; padding:3px 6px; border-radius:7px; background:rgba(247,250,253,.72); }
 .bom-custom-column-existing > div span { flex:1; color:#243e5a; }
 .bom-custom-column-existing > div small { color:#8ba0b3; }
+
+/* BOM 沉浸式查看：只保留当前项目的全量表格，侧栏/AI 窗平滑收拢，Esc 或按钮退出。 */
+body.bom-fullscreen-mode .sidebar,
+body.bom-fullscreen-mode .local-ai-shell { width:0 !important; min-width:0 !important; opacity:0; pointer-events:none; border-width:0; }
+body.bom-fullscreen-mode .main-content { width:100%; padding:14px !important; transition:padding 240ms cubic-bezier(.22,1,.36,1); }
+body.bom-fullscreen-mode .projects-page-title,
+body.bom-fullscreen-mode .project-sticky-header,
+body.bom-fullscreen-mode .project-summary-strip,
+body.bom-fullscreen-mode .module-target-section,
+body.bom-fullscreen-mode .project-legacy-summary { display:none !important; }
+body.bom-fullscreen-mode .projects-detail-card { height:calc(100vh - 28px) !important; padding:10px !important; border-radius:18px !important; }
+body.bom-fullscreen-mode .project-detail-scroll { overflow:hidden; padding-right:0; }
+body.bom-fullscreen-mode .projects-detail-card .ant-tabs-nav { display:none !important; }
+body.bom-fullscreen-mode .projects-detail-card .ant-tabs-content,
+body.bom-fullscreen-mode .projects-detail-card .ant-tabs-content-holder,
+body.bom-fullscreen-mode .projects-detail-card .ant-tabs-tabpane,
+body.bom-fullscreen-mode .bom-tab-layout,
+body.bom-fullscreen-mode .bom-workspace-main { height:100%; min-height:0; }
+body.bom-fullscreen-mode .bom-workspace-main { display:flex; flex-direction:column; }
+body.bom-fullscreen-mode .bom-command-bar { flex:0 0 auto; }
+body.bom-fullscreen-mode .bom-workspace-main .ant-table-wrapper { flex:1 1 auto; min-height:0; }
+body.bom-fullscreen-mode .bom-spreadsheet-hint { flex:0 0 auto; }
+body.bom-fullscreen-mode .bom-spreadsheet-statusbar { flex:0 0 auto; }
+@media (prefers-reduced-motion: reduce) {
+  body.bom-fullscreen-mode .main-content { transition:none; }
+}
 .negotiation-drawer .ant-drawer-content { background:rgba(241,248,253,.96); backdrop-filter:blur(22px) saturate(125%); }
 .negotiation-drawer .ant-drawer-header { border-bottom-color:rgba(124,161,193,.18); }
 .negotiation-panel { width:292px; flex:0 0 292px; max-height:calc(100vh - 390px); min-height:260px; overflow:auto; padding:10px; border:1px solid rgba(255,255,255,.82); border-radius:15px; background:rgba(241,248,253,.68); box-shadow:0 8px 24px rgba(77,123,160,.08); transition:width 220ms cubic-bezier(.22,1,.36,1), flex-basis 220ms cubic-bezier(.22,1,.36,1), padding 180ms ease; }

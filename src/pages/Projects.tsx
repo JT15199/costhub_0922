@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { EmojiIcon } from '../iconMap';
 import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Segmented, Tag, message, notification, Popconfirm, Tabs, Row, Col, Tooltip, Card, Statistic, Upload, Alert, DatePicker, Checkbox, AutoComplete, Radio, Badge, Drawer } from 'antd';
-import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined, InboxOutlined, DollarOutlined, TagOutlined, LineChartOutlined, BarChartOutlined, ToolOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, AimOutlined, BuildOutlined, HistoryOutlined, EyeOutlined, CheckOutlined, CloseOutlined, RobotOutlined, BulbOutlined, MinusCircleOutlined } from '@ant-design/icons';
+import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined, InboxOutlined, DollarOutlined, TagOutlined, LineChartOutlined, BarChartOutlined, ToolOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, AimOutlined, BuildOutlined, HistoryOutlined, EyeOutlined, CheckOutlined, CloseOutlined, RobotOutlined, BulbOutlined, MinusCircleOutlined, FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
@@ -83,6 +83,7 @@ export default function Projects() {
   const [customColumnTitle, setCustomColumnTitle] = useState('');
   const [customColumnType, setCustomColumnType] = useState<'text' | 'number'>('text');
   const [spreadsheetCell, setSpreadsheetCell] = useState<{ id: number; field: string } | null>(null);
+  const [bomFullscreen, setBomFullscreen] = useState(false);
 
   // ====== SKU 变体（基座项目 + 差异规则） ======
   const [skus, setSkus] = useState<any[]>([]);
@@ -100,10 +101,25 @@ export default function Projects() {
   useEffect(() => { loadProjects(); }, [categoryFilter]);
   // AI 数据工程联动：切回页面自动刷新（BOM/报价/原声等写库后可见）
   useEffect(() => {
-    const h = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.page === 'projects') { loadProjects; } };
+    const h = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.page === 'projects') { loadProjects; } else if (d?.page) { setBomFullscreen(false); } };
     window.addEventListener('app-page-active', h);
     return () => window.removeEventListener('app-page-active', h);
   }, [loadProjects]);
+  useEffect(() => {
+    if (!bomFullscreen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) setBomFullscreen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [bomFullscreen]);
+  useEffect(() => {
+    if (!selectedPid || activeTab !== 'bom') setBomFullscreen(false);
+  }, [selectedPid, activeTab]);
+  useEffect(() => {
+    document.body.classList.toggle('bom-fullscreen-mode', bomFullscreen && !!selectedPid && activeTab === 'bom');
+    return () => document.body.classList.remove('bom-fullscreen-mode');
+  }, [bomFullscreen, selectedPid, activeTab]);
   // ====== 项目状态点（目标超支/报价情报/成本异动 → 列表圆点，点击选中项目） ======
   const [projectStatuses, setProjectStatuses] = useState<Record<number, any>>({});
   useEffect(() => {
@@ -1525,6 +1541,7 @@ export default function Projects() {
                       <Button size="small" icon={<DownloadOutlined />} onClick={() => { const data = boms.map(b => ({ 模块: b.module_name, 大类: b.main_category, 子类: b.sub_category, 器件名称: b.part_name, 型号: b.part_model, 单价: b.part_cost, 数量: b.quantity, 小计: (b.part_cost || 0) * b.quantity, ...(() => { try { const d = JSON.parse(b.custom_data || '{}'); return Object.fromEntries(bomCustomColumns.map((column: any) => [column.title, d[column.field_key] ?? ''])); } catch { return {}; } })(), 备注: b.remark })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'BOM'); XLSX.writeFile(wb, `BOM_${projects.find(p => p.id === selectedPid)?.code || 'export'}.xlsx`); message.success('已导出'); }}>导出</Button>
                       <Input size="small" allowClear value={bomSearch} onChange={e => setBomSearch(e.target.value)} placeholder="搜索器件 / 型号 / 规格" style={{ width: 210 }} />
                       <Segmented size="small" value={bomTableMode} onChange={v => setBomTableMode(v as 'module' | 'flat')} options={[{ label: '模块分组', value: 'module' }, { label: '全量表格', value: 'flat' }]} />
+                      {bomTableMode === 'flat' && <Tooltip title={bomFullscreen ? '退出 BOM 全屏（Esc）' : '将 BOM 表格铺满窗口（Esc 退出）'}><Button size="small" icon={bomFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} onClick={() => setBomFullscreen(value => !value)}>{bomFullscreen ? '退出全屏' : '全屏'}</Button></Tooltip>}
                       <Button size="small" icon={<BulbOutlined />} onClick={() => setNegotiationOpen(true)}>议价机会</Button>
                       {bomTableMode === 'flat' && <Tooltip title="复制选中的 BOM 行为制表符文本，可直接粘贴到 Excel"><Button size="small" icon={<CopyOutlined />} onClick={copySelectedBomRows}>复制选中</Button></Tooltip>}
                       {bomTableMode === 'flat' && <Button size="small" icon={<PlusOutlined />} onClick={() => setCustomColumnModal(true)}>添加列</Button>}
@@ -1563,7 +1580,7 @@ export default function Projects() {
                         rowKey="id"
                         size="small"
                         pagination={false}
-                        scroll={{ x: 1240, y: 560 }}
+                        scroll={{ x: 1240, y: bomFullscreen ? 'calc(100vh - 160px)' : 560 }}
                         rowSelection={{ fixed: false, selectedRowKeys: bomSelKeys, onChange: keys => setBomSelKeys(keys) }}
                       />
                       <div className="bom-spreadsheet-statusbar"><span>显示 {visibleBoms.length} / {boms.length} 行</span><span>当前合计 <b>¥{visibleBoms.reduce((sum: number, row: any) => sum + (row.part_cost || 0) * (row.quantity || 0), 0).toFixed(4)}</b></span><span>已选 {bomSelKeys.filter(id => visibleBoms.some((row: any) => row.id === id)).length} 行</span><span className="bom-spreadsheet-status-note">双击或 Enter/F2 编辑 · Tab/方向键移动 · 可粘贴 Excel 数据</span></div>
