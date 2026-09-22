@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "checkedAt": "2026-09-21T03:17:14.933Z",
+  "directory": "C:\\Users\\96529\\AppData\\Local\\Temp\\CostHub-first-run-4YEnzb\\中文 # 空格",
+  "exeSha256": "0193705b927c58ab234e367f23033c9fca2569bc87339da38f6dc4ab07ada19b",
+  "checks": [
+    "EXE only in empty Unicode/space/# directory",
+    "real SQLite file auto-created",
+    "admin and SHA-256(666666) initialized",
+    "real login succeeds",
+    "restart and login succeeds"
+  ]
+}

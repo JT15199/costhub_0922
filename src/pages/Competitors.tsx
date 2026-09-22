@@ -6,6 +6,8 @@ import * as XLSX from 'xlsx';
 import { getCompetitors, saveCompetitor, deleteCompetitor, getCompetitorBOMs, addCompetitorBOMItem, updateCompetitorBOMItem, deleteCompetitorBOMItem, getCompetitorParts, saveCompetitorPart, deleteCompetitorPart, getProjects, getModules, getModuleItems, getMainCategories } from '../db';
 import { TIERS, MAIN_CATEGORIES, SUB_CATEGORIES, getCategoryColor } from '../constants';
 import DataTable from '../components/DataTable';
+import { downloadCompetitorBomTemplate } from '../excelTemplates';
+import { bomExtendedCostStrict, sumBomCostStrict } from '../ai/contracts';
 
 export default function Competitors() {
   const [comps, setComps] = useState<any[]>([]);
@@ -101,7 +103,8 @@ export default function Competitors() {
     message.success(`导入 ${imported} 件`); setFrameworkOpen(false); loadBOM(selectedCid!);
   };
 
-  const bomTotal = boms.reduce((s, b) => s + (b.estimated_cost || 0) * b.quantity, 0);
+  const bomCostState = sumBomCostStrict(boms.map(b => ({ ...b, part_cost: b.estimated_cost, price_state: b.price_state, quantity_state: b.quantity_state })));
+  const bomTotal = bomCostState.missing.length ? null : bomCostState.total;
   const groupedBOMs: Record<string, any[]> = {};
   boms.forEach(b => { const m = b.module_name || '未归类'; if (!groupedBOMs[m]) groupedBOMs[m] = []; groupedBOMs[m].push(b); });
   const moduleNames = Object.keys(groupedBOMs);
@@ -155,7 +158,7 @@ export default function Competitors() {
 
       {selectedCid && (
         <div className="content-card" style={{ marginTop: 16 }}>
-          <div style={{ marginBottom: 12, fontWeight: 600 }}>竞品BOM总计: <span style={{ color: '#CF0A2C', fontSize: 16 }}>¥{bomTotal.toFixed(2)}</span> / {boms.length} 件</div>
+          <div style={{ marginBottom: 12, fontWeight: 600 }}>竞品BOM总计: <span style={{ color: '#CF0A2C', fontSize: 16 }}>{bomTotal == null ? '待补证据' : `¥${bomTotal.toFixed(2)}`}</span> / {boms.length} 件 {bomCostState.missing.length > 0 && <Tag color="orange">{bomCostState.missing.length} 行未确认</Tag>}</div>
           <Tabs items={[{
             key: 'bom', label: <span><InboxOutlined /> 竞品BOM ({boms.length})</span>, children: (
               <div>
@@ -164,18 +167,19 @@ export default function Competitors() {
                   <Button size="small" icon={<FileTextOutlined />} onClick={openFramework} style={{ borderColor: '#CF0A2C', color: '#CF0A2C' }}>从框架导入</Button>
                   <Upload beforeUpload={file => { const r = new FileReader(); r.onload = e => { const wb = XLSX.read(e.target?.result, { type: 'binary' }); const data = XLSX.utils.sheet_to_json<any>(wb.Sheets[wb.SheetNames[0]]); (async () => { let n = 0; for (const d of data) { const name = d['器件名称'] || d['名称'] || d['name'] || d['part_name']; if (!name) continue; await addCompetitorBOMItem(selectedCid!, String(name).trim(), String(d['型号'] || d['model'] || d['part_model'] || '').trim(), parseFloat(d['单价'] || d['cost'] || d['estimated_cost'] || '0') || 0, parseInt(d['数量'] || d['quantity'] || '1') || 1, String(d['模块'] || d['module_name'] || '').trim(), String(d['我方名称'] || d['our_part_name'] || '').trim(), String(d['我方型号'] || d['our_part_model'] || '').trim(), parseFloat(d['我方成本'] || d['our_cost'] || '0') || 0, parseInt(d['我方数量'] || d['our_quantity'] || '0') || 0); n++; } message.success(`导入 ${n} 条`); loadBOM(selectedCid!); })(); }; r.readAsBinaryString(file); return false; }} showUploadList={false} accept=".xlsx,.xls">
                     <Button size="small" icon={<UploadOutlined />}>导入</Button>
-                  </Upload>
-                  <Button size="small" icon={<DownloadOutlined />} onClick={() => { const data = boms.map(b => ({ 模块: b.module_name, 器件名称: b.part_name, 型号: b.part_model, 我方名称: b.our_part_name, 我方型号: b.our_part_model, 我方成本: b.our_cost, 我方数量: b.our_quantity, 竞品数量: b.quantity, 竞品单价: b.estimated_cost, 竞品小计: (b.estimated_cost || 0) * b.quantity })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '竞品BOM'); XLSX.writeFile(wb, '竞品BOM_export.xlsx'); message.success('已导出'); }}>导出</Button>
+                  </Upload><Button size="small" icon={<DownloadOutlined />} onClick={downloadCompetitorBomTemplate}>模板</Button>
+                  <Button size="small" icon={<DownloadOutlined />} onClick={() => { const data = boms.map(b => ({ 模块: b.module_name, 器件名称: b.part_name, 型号: b.part_model, 我方名称: b.our_part_name, 我方型号: b.our_part_model, 我方成本: b.our_cost, 我方数量: b.our_quantity, 竞品数量: b.quantity, 竞品单价: b.price_state === 'confirmed' ? b.estimated_cost : '待补证据', 竞品小计: bomExtendedCostStrict({ ...b, part_cost: b.estimated_cost }) ?? '待补证据' })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, '竞品BOM'); XLSX.writeFile(wb, '竞品BOM_export.xlsx'); message.success('已导出'); }}>导出</Button>
                   {bomSel.length > 0 && <Popconfirm title={`批量删除 ${bomSel.length} 项？`} onConfirm={batchDeleteBOM}><Button size="small" danger icon={<DeleteOutlined />}>删除选中 ({bomSel.length})</Button></Popconfirm>}
                 </Space>
 
                 {moduleNames.map(modName => {
                   const items = groupedBOMs[modName];
-                  const modTotal = items.reduce((s: number, b: any) => s + b.estimated_cost * b.quantity, 0);
+                  const modState = sumBomCostStrict(items.map((b: any) => ({ ...b, part_cost: b.estimated_cost })));
+                  const modTotal = modState.missing.length ? null : modState.total;
                   return (
                     <div key={modName} style={{ marginBottom: 14, border: '1px solid #E8ECF1', borderRadius: 10, overflow: 'hidden' }}>
                       <div style={{ background: '#F8FAFC', padding: '8px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #E8ECF1' }}>
-                        <Space><b style={{ fontSize: 13 }}>{modName}</b><Tag>{items.length} 件</Tag><Tag color="red">¥{modTotal.toFixed(2)}</Tag></Space>
+                        <Space><b style={{ fontSize: 13 }}>{modName}</b><Tag>{items.length} 件</Tag><Tag color="red">{modTotal == null ? '待补证据' : `¥${modTotal.toFixed(2)}`}</Tag></Space>
                       </div>
                       <div style={{ padding: 6 }}>
                         <div style={{ display: 'grid', gridTemplateColumns: '30px 120px 50px 60px 1fr 60px 70px 70px', gap: 4, padding: '4px 6px', fontWeight: 600, fontSize: 10, color: '#999', borderBottom: '1px solid #F0F0F0' }}>
@@ -215,7 +219,7 @@ export default function Competitors() {
                               {isEditing ? (
                                 <InputNumber size="small" value={ed.cost} min={0} precision={4} onChange={v => updateEdit(item.id, 'cost', v || 0)} style={{ width: '100%' }} prefix="¥" />
                               ) : (
-                                <div style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: '#CF0A2C', fontSize: 10 }}>¥{Number(item.estimated_cost).toFixed(2)}</div>
+                                <div style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: '#CF0A2C', fontSize: 10 }}>{item.price_state === 'confirmed' ? `¥${Number(item.estimated_cost).toFixed(2)}` : '待补证据'}</div>
                               )}
                               <div style={{ textAlign: 'center' }}>
                                 {isEditing ? (

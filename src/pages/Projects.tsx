@@ -1,11 +1,13 @@
+import { SupplierNameInput } from '../components/SupplierResourcePool';
+import { consumeInsightTab } from '../insightNavigation';
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { EmojiIcon } from '../iconMap';
-import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Segmented, Tag, message, notification, Popconfirm, Tabs, Row, Col, Tooltip, Card, Statistic, Upload, Alert, DatePicker, Checkbox, AutoComplete, Radio, Badge, Drawer, Dropdown } from 'antd';
+import { Table, Button, Input, Select, Space, Modal, Form, InputNumber, Segmented, Tag, message, notification, Popconfirm, Tabs, Row, Col, Tooltip, Card, Statistic, Upload, Alert, DatePicker, Checkbox, AutoComplete, Radio, Badge, Drawer, Dropdown, Empty } from 'antd';
 import { PlusOutlined, PlusCircleOutlined, EditOutlined, DeleteOutlined, CopyOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined, InboxOutlined, DollarOutlined, TagOutlined, LineChartOutlined, BarChartOutlined, ToolOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, AimOutlined, BuildOutlined, HistoryOutlined, EyeOutlined, CheckOutlined, CloseOutlined, RobotOutlined, BulbOutlined, MinusCircleOutlined, FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
-import { getProjects, saveProject, copyProject, getProjectBOMs, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getPriceHistory, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, saveModuleItem, getTargets, saveTarget, deleteTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, saveSkuDiff, deleteSku, deleteSkuDiff, getAllSkuDiffs, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead, markInsightUnread, appendHandledInsight, removeHandledInsight, deletePartAliasExact, cleanupInsightStatus, getProjectBOMCustomColumns, saveProjectBOMCustomColumn, deleteProjectBOMCustomColumn, updateBOMCustomData, getDataChangeHistory } from '../db';
+import { getProjects, saveProject, copyProject, setProjectReference, getProjectBOMs, getDeletedBOMItems, restoreBOMItem, addBOMItem, updateBOMItem, deleteBOMItem, getParts, getPriceHistory, getCostReviews, saveCostReview, deleteCostReview, getMeasures, saveMeasure, deleteMeasure, savePart, getModules, getModuleItems, saveModule, getTargets, saveTarget, updateBOMRefProject, getProjectCostSnapshots, recordProjectCostSnapshot, deleteProjectCostSnapshot, getSnapshotBOMDetail, getProjectSuppliers, saveProjectSupplier, deleteProjectSupplier, getProjectSupplierPriceHistory, saveProjectSupplierPriceHistory, getSkus, saveSku, saveSkuDiff, deleteSku, deleteSkuDiff, getAllSkuDiffs, getPartAliases, savePartAlias, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getInsights, markInsightRead, markInsightUnread, appendHandledInsight, removeHandledInsight, deletePartAliasExact, cleanupInsightStatus, getProjectBOMCustomColumns, saveProjectBOMCustomColumn, deleteProjectBOMCustomColumn, updateBOMCustomData, getDataChangeHistory, saveNegotiationItems } from '../db';
 import { TIERS, PROJECT_STATUSES, PROJECT_TYPES, SCREEN_SIZES, RESOLUTIONS, REFRESH_RATES, PANEL_TYPES, MAIN_CATEGORIES, SUB_CATEGORIES, MEASURE_STATUSES, getCategoryColor } from '../constants';
 import { getMainCategories, getSetting } from '../db';
 import { startOllamaStream, logLocalAICall } from '../ollama';
@@ -13,21 +15,38 @@ import { calcSkuCost as calcSkuCostFn, buildSkuBom as buildSkuBomFn } from '../s
 import { computeProjectHealth, type HealthIssue } from '../projectHealth';
 import { computeProjectStatuses } from '../projectStatus';
 
-/** 往 parts.projects 追加项目代号（去重，避免重复拼接） */
-function appendProjectCode(existing: string | undefined, code: string): string {
-  if (!code) return existing || '';
-  const arr = (existing || '').split(',').map(x => x.trim()).filter(Boolean);
-  if (!arr.includes(code)) arr.push(code);
-  return arr.join(',');
-}
-
 import DataTable, { ColumnSettingsButton } from '../components/DataTable';
-import TargetAllocationPanel from '../components/TargetAllocationPanel';
-import { chartTooltip, chartAxisStyle, chartTextMuted, chartSplitLine, barGradient } from '../chartTheme';
-import { runAiIdentifyOnce, buildRuleGroups, moduleFingerprint, partKey, buildInsights } from '../autoCompare';
+import { chartTooltip, chartAxisStyle, chartTextMuted, barGradient } from '../chartTheme';
+import { runAiIdentifyOnce, buildRuleGroups, moduleFingerprint, partKey, buildInsights, filterStoredInsightGroups } from '../autoCompare';
 import { getAdvisorInsights, updateAdvisorStatus } from '../db/advisor';
+import { getRecommendations, recordRecommendationOutcome } from '../db/ai';
+import type { AiRecommendation } from '../ai/contracts';
+import { bomExtendedCostStrict, bomPriceState, bomQuantityState, sumBomCostStrict } from '../ai/contracts';
 import { getAuditFindings, markAuditRead, dismissAuditFinding } from '../auditStore';
 import TenderWorkspace from '../components/TenderWorkspace';
+import RecommendationCard from '../components/ai/RecommendationCard';
+import CostPlanningWorkspace from '../components/CostPlanningWorkspace';
+import CostPackageButton from '../components/CostPackageButton';
+import ProjectOverviewPanel from '../components/ProjectOverviewPanel';
+import { downloadProjectBomTemplate, downloadSkuDiffTemplate } from '../excelTemplates';
+
+type ProjectWorkspace = 'overview' | 'planning' | 'quote' | 'bom' | 'measures';
+
+const PROJECT_WORKSPACE_VIEWS: Record<ProjectWorkspace, { key: string; label: string }[]> = {
+  overview: [{ key: 'overview', label: '项目总览' }, { key: 'cost-history', label: '成本历史' }, { key: 'reviews', label: '阶段评审' }],
+  planning: [{ key: 'analysis', label: '报价审核' }],
+  quote: [{ key: 'tender', label: '招标工作台' }, { key: 'odm', label: '供应商定点' }],
+  bom: [{ key: 'bom', label: 'BOM清单' }, { key: 'sku', label: 'SKU变体' }],
+  measures: [{ key: 'measures', label: '降本措施' }],
+};
+
+const PROJECT_WORKSPACE_LABELS: Record<ProjectWorkspace, string> = {
+  overview: '总览', planning: '报价审核', quote: '报价与定点', bom: 'BOM版本', measures: '措施与复盘',
+};
+
+const PROJECT_WORKSPACE_BY_VIEW = Object.fromEntries(
+  Object.entries(PROJECT_WORKSPACE_VIEWS).flatMap(([workspace, views]) => views.map(view => [view.key, workspace])),
+) as Record<string, ProjectWorkspace>;
 
 export default function Projects() {
   const [projects, setProjects] = useState<any[]>([]);
@@ -72,6 +91,15 @@ export default function Projects() {
   const [modList, setModList] = useState<any[]>([]);
   const [previewModItems, setPreviewModItems] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState('bom');
+  const [workspace, setWorkspace] = useState<ProjectWorkspace>('bom');
+  const selectProjectTab = (tab: string) => {
+    setActiveTab(tab);
+    setWorkspace(PROJECT_WORKSPACE_BY_VIEW[tab] || 'bom');
+  };
+  const selectProjectWorkspace = (next: ProjectWorkspace) => {
+    setWorkspace(next);
+    selectProjectTab(PROJECT_WORKSPACE_VIEWS[next][0].key);
+  };
   // 方案三：领域目标钻取；项目列表由 App 原有左侧栏承载，不再占用页面宽度。
   const [domainFocus, setDomainFocus] = useState<string | null>(null);
   const [negotiationOpen, setNegotiationOpen] = useState(false);
@@ -87,6 +115,8 @@ export default function Projects() {
   const [bomHistoryOpen, setBomHistoryOpen] = useState(false);
   const [bomHistoryRows, setBomHistoryRows] = useState<any[]>([]);
   const [bomHistoryTitle, setBomHistoryTitle] = useState('');
+  const [recycleOpen, setRecycleOpen] = useState(false);
+  const [deletedBoms, setDeletedBoms] = useState<any[]>([]);
 
   // ====== SKU 变体（基座项目 + 差异规则） ======
   const [skus, setSkus] = useState<any[]>([]);
@@ -155,6 +185,11 @@ export default function Projects() {
   }, []);
 
   const loadBOM = async (pid: number) => setBoms(await getProjectBOMs(pid));
+  const openRecycle = async () => {
+    if (!selectedPid) return;
+    setDeletedBoms(await getDeletedBOMItems(selectedPid));
+    setRecycleOpen(true);
+  };
   const loadBOMCustomColumns = async (pid: number) => {
     try { setBomCustomColumns(await getProjectBOMCustomColumns(pid)); } catch { setBomCustomColumns([]); }
   };
@@ -351,9 +386,11 @@ export default function Projects() {
   };
   // ====== 报价情报（后台识别由 App 级驱动：空闲/导入/改价自动扫描，发现问题在此提醒） ======
   const [insightModal, setInsightModal] = useState(false);
+  const insightOpenGeneration = useRef(0);
   // AI 情报中心（2026-08-17 用户要求统一）：报价差异 / 自主建议 / 巡检发现 三个 tab
   const [aiTab, setAiTab] = useState<'diff' | 'advice' | 'audit'>('diff');
   const [adviceList, setAdviceList] = useState<any[]>([]);
+  const [recommendationList, setRecommendationList] = useState<AiRecommendation[]>([]);
   const [adviceShowDone, setAdviceShowDone] = useState(false);
   const [auditList, setAuditList] = useState<any[]>([]);
   const [insights, setInsights] = useState<any[]>([]);
@@ -366,36 +403,111 @@ export default function Projects() {
   const loadInsights = async () => {
     try { await cleanupInsightStatus(); } catch { /* 清理失败不影响加载 */ } // 历史脏数据：已核对/已处理完的模块不再停在待处理
     const list = await getInsights();
-    setInsights(list);
-    setUnreadMods(new Set(list.filter(i => i.status === 'unread').map(i => i.module_name)));
+    // 兼容旧库/手工导入的异常 JSON：情报正文必须是数组，否则渲染阶段的 map 会直接中断项目页。
+    const normalized = await Promise.all(list.map(async (item: any) => {
+      let data: any[] = [];
+      try { const parsed = JSON.parse(item.insight_json || '[]'); data = Array.isArray(parsed) ? parsed : []; } catch { }
+      try {
+        const filtered = filterStoredInsightGroups(data, await getPartAliases(item.module_name));
+        const insightJson = JSON.stringify(filtered);
+        if (insightJson !== item.insight_json || (filtered.length === 0 && item.status === 'unread')) {
+          await upsertInsight(item.category, item.module_name, insightJson);
+        }
+        return { ...item, insight_json: insightJson, status: filtered.length === 0 ? 'read' : item.status };
+      } catch { return { ...item, insight_json: JSON.stringify(data) }; }
+    }));
+    setInsights(normalized);
+    setUnreadMods(new Set(normalized.filter(i => i.status === 'unread').map(i => i.module_name)));
     setRowExcluded(new Set()); // 每次重载清空乐观排除标记（库中数据已是最新）
   };
   // 变更后触发全局识别（App 监听 costhub-compare-request 立即执行；空闲时也会自动扫描）
   const scheduleAutoCompare = () => window.dispatchEvent(new CustomEvent('costhub-compare-request'));
+  const loadRecommendations = async () => {
+    try { setRecommendationList(await getRecommendations()); } catch { setRecommendationList([]); }
+  };
+  const refreshAiCenter = async () => {
+    return Promise.all([
+      (async () => { try { const rows = await getAdvisorInsights(); setAdviceList(rows); return rows; } catch { setAdviceList([]); return []; } })(),
+      loadRecommendations(),
+      (async () => { try { const rows = await getAuditFindings(); setAuditList(rows); return rows; } catch { setAuditList([]); return []; } })(),
+    ]);
+  };
+  const recommendationEvidenceProject = (recommendation: AiRecommendation) => recommendation.evidence.find(item => item.deepLink?.page === 'projects')?.deepLink?.params.projectId;
+  const openRecommendation = (recommendation: AiRecommendation) => {
+    const pid = recommendationEvidenceProject(recommendation);
+    if (pid) window.dispatchEvent(new CustomEvent('costhub-open-project', { detail: { pid } }));
+    else if (recommendation.action.type === 'todo' || recommendation.action.type === 'draft') {
+      try { localStorage.setItem('costhub-ai-prompt-pending', JSON.stringify({ prompt: recommendation.conclusion })); } catch { }
+      window.dispatchEvent(new Event('costhub-open-ai-prompt'));
+    }
+  };
+  const recommendationTodo = (recommendation: AiRecommendation) => {
+    try { localStorage.setItem('costhub-ai-prompt-pending', JSON.stringify({ prompt: `请把这条建议转成待办：${recommendation.title}。${recommendation.conclusion}` })); } catch { }
+    window.dispatchEvent(new Event('costhub-open-ai-prompt'));
+  };
+  const convertAdvisorToMeasure = async (advisor: any) => {
+    const projectId = advisor.ref_type === 'project' ? Number(advisor.ref_id) : Number(selectedPid || 0);
+    if (!projectId) { message.warning('该建议暂时没有可关联的项目'); return; }
+    try {
+      await saveMeasure({ project_id: projectId, main_category: '自主巡检', measure: advisor.title, status: '待执行', remark: advisor.detail || '由自主巡检转入，待补充责任人与截止时间' });
+      await updateAdvisorStatus(advisor.id, 'done');
+      await refreshAiCenter();
+      if (projectId === selectedPid) await loadMeasures(projectId);
+      message.success('已转为降本措施并标记建议为已处理');
+    } catch (error: any) { message.error(`转措施失败：${String(error?.message || error).slice(0, 120)}`); }
+  };
+  const convertAdvisorToNegotiation = async (advisor: any) => {
+    if (!selectedPid) { message.warning('请先选择项目，再把物料建议转为谈价项'); return; }
+    const rows = advisor.ref_type === 'part' ? boms.filter(row => Number(row.part_id) === Number(advisor.ref_id)) : [];
+    if (!rows.length) { message.warning('当前项目 BOM 中没有找到该物料，暂不生成谈价项'); return; }
+    try {
+      await saveNegotiationItems(selectedPid, rows.map(row => ({ moduleName: row.module_name, materialName: row.part_name, specs: row.part_specs, currentPrice: Number(row.part_cost || 0), note: `自主巡检：${advisor.detail || advisor.title}` })));
+      await updateAdvisorStatus(advisor.id, 'done');
+      await refreshAiCenter();
+      selectProjectTab('tender');
+      message.success(`已将 ${rows.length} 行物料转入谈价清单`);
+    } catch (error: any) { message.error(`转谈价项失败：${String(error?.message || error).slice(0, 120)}`); }
+  };
+  const recommendationFeedback = async (recommendation: AiRecommendation, input: Omit<Parameters<typeof recordRecommendationOutcome>[0], 'recommendationId'>) => {
+    if (!recommendation.id) return;
+    try { await recordRecommendationOutcome({ recommendationId: recommendation.id, ...input }); await loadRecommendations(); message.success('已记录'); }
+    catch (e: any) { message.error('记录失败：' + String(e?.message || e)); }
+  };
   useEffect(() => {
     loadInsights();
-    // 侧边栏「报价情报」入口：App 先写待处理标志再切页（组件未挂载时 costhub-open-insights 事件会丢失）→ 挂载后消费标志打开弹窗
-    if (localStorage.getItem('costhub-open-insights-pending')) {
-      localStorage.removeItem('costhub-open-insights-pending');
-      loadInsights();
+    const onOpen = (event?: Event) => {
+      const generation = ++insightOpenGeneration.current;
+      const requested = consumeInsightTab(event);
+      setAiTab(requested === 'auto' ? 'diff' : requested);
       setInsightModal(true);
-    }
-    scheduleAutoCompare(); // 打开项目页立即触发一次（App 空闲监听会继续兜底）
-    const onDone = () => loadInsights(); // 识别完成刷新情报红点
-    window.addEventListener('costhub-compare-done', onDone);
-    // 侧边栏「报价情报」入口点击 → 打开弹窗（同时加载自主建议/巡检，2026-08-17 AI 情报中心）
-    const loadAiCenter = async () => {
-      try { setAdviceList(await getAdvisorInsights()); } catch { setAdviceList([]); }
-      try { setAuditList(await getAuditFindings()); } catch { setAuditList([]); }
+      loadInsights();
+      void refreshAiCenter().then(([advice, , audit]) => {
+        if (generation === insightOpenGeneration.current && requested === 'auto') setAiTab(audit.some((x: any) => x.status === 'unread') ? 'audit' : advice.some((x: any) => x.status === 'open') ? 'advice' : 'diff');
+      });
     };
-    const onOpen = () => { loadInsights(); loadAiCenter(); setInsightModal(true); };
+    if (localStorage.getItem('costhub-open-insights-pending')) onOpen();
+    scheduleAutoCompare();
+    const onDone = () => loadInsights();
+    window.addEventListener('costhub-compare-done', onDone);
     window.addEventListener('costhub-open-insights', onOpen);
     // 仪表盘驾驶舱「直达」→ 自动选中项目（costhub-open-project，detail: { pid }）
     const onOpenProject = (e: Event) => {
-      const pid = (e as CustomEvent).detail?.pid;
-      if (pid) { selectProject(pid); setSelectedPid(pid); }
+      const detail = (e as CustomEvent).detail || {};
+      const pid = detail.pid;
+      if (pid) {
+        try { sessionStorage.removeItem('costhub-open-project-pending'); } catch { }
+        selectProject(pid); setSelectedPid(pid); if (detail.tab) selectProjectTab(String(detail.tab));
+      }
     };
     window.addEventListener('costhub-open-project', onOpenProject);
+    try {
+      const pending = sessionStorage.getItem('costhub-open-project-pending');
+      if (pending) {
+        sessionStorage.removeItem('costhub-open-project-pending');
+        const detail = JSON.parse(pending);
+        if (detail?.pid) onOpenProject(new CustomEvent('costhub-open-project', { detail }));
+      }
+    } catch { }
     return () => {
       window.removeEventListener('costhub-compare-done', onDone);
       window.removeEventListener('costhub-open-insights', onOpen);
@@ -514,7 +626,8 @@ export default function Projects() {
     setRowExcluded(prev => new Set(prev).add(key)); // ① 立即行级反馈
     try {
       await savePartAlias({ module_name: ins.module_name, alias_name: '#ROWDIFF#' + partKey(r), alias_model: '', canonical_name: '', canonical_model: '', source: 'marked_different' });
-      await rebuildModuleInsight(ins); // 后台照常重建（下次识别/重开不再建议该行）
+      const allDone = await rebuildModuleInsight(ins); // 后台照常重建（下次识别/重开不再建议该行）
+      if (allDone) await markInsightRead(ins.category, ins.module_name);
       const handledIdx = await appendHandledInsight(ins.category, ins.module_name, {
         name: r.name, type: 'row', action: 'row_different', rows: [r], diff: 0,
         handled_at: new Date().toLocaleString('zh-CN', { hour12: false }),
@@ -838,10 +951,12 @@ export default function Projects() {
   };
 
   const selectProject = (pid: number) => {
-    setSelectedPid(pid); setDomainFocus(null); setActiveTab('bom');
+    setSelectedPid(pid); setDomainFocus(null); selectProjectTab('bom');
     loadBOM(pid); loadReviews(pid); loadCostSnapshots(pid); loadMeasures(pid); loadTargets(pid); loadProjectSuppliers(pid); loadSkus(pid);
     // 切换项目时自动退出参照对比模式（要对比再重新选择参照项目）
-    setRefProjPid(null); setRefProjBoms([]); setModRefMap({});
+    const referenceId = Number(projects.find((project: any) => project.id === pid)?.reference_project_id || 0);
+    setRefProjPid(referenceId || null); setModRefMap({});
+    if (referenceId) getProjectBOMs(referenceId).then(setRefProjBoms).catch(() => setRefProjBoms([])); else setRefProjBoms([]);
   };
   const loadTargets = async (pid: number) => setTargets(await getTargets(pid));
   // 模块级参照保留为高级入口：默认跟随顶部全局参照，也可对单个模块指定其他项目。
@@ -862,8 +977,10 @@ export default function Projects() {
     if (!pid) {
       setRefProjBoms([]);
       setModRefMap({});
+      if (selectedPid) await setProjectReference(selectedPid, 0);
       return;
     }
+    if (selectedPid) await setProjectReference(selectedPid, pid);
     const refBoms = await getProjectBOMs(pid);
     setRefProjBoms(refBoms);
     // 按模块名自动关联参考（每个模块匹配参照项目同名模块）
@@ -1042,21 +1159,18 @@ export default function Projects() {
       for (const row of importData) {
         if (row.module_name && row.module_category) categoryByModuleName[row.module_name] = row.module_category;
       }
-    const modIdMap: Record<string, number> = {};
     for (const mn of modNames) {
       const exists = existingMods.find((m: any) => m.name === mn);
       const moduleCategory = categoryByModuleName[mn] || exists?.module_category || '未分类';
       if (exists) {
-        modIdMap[mn] = exists.id;
         if ((exists.module_category || '未分类') !== moduleCategory) {
           await saveModule({ ...exists, module_category: moduleCategory });
         }
         continue;
       }
-      const mid = await saveModule({ project_id: targetPid!, name: mn, module_category: moduleCategory, description: `从BOM导入自动创建` });
-      modIdMap[mn] = mid;
+      await saveModule({ project_id: targetPid!, name: mn, module_category: moduleCategory, description: `从BOM导入自动创建` });
     }
-    // For each row: save to parts library, then add to BOM with module_name
+    // For each row: match/create the identity, then write the supplier quote as a BOM snapshot.
     const targetProjCode = projects.find(p => p.id === targetPid)?.code || '';
     // 器件匹配缓存：同名同型号只查一次库（行数多时避免 N 次串行查询卡住）
     const partCache = new Map<string, any>();
@@ -1080,17 +1194,14 @@ export default function Projects() {
       let partId: number;
       if (match) {
         partId = match.id!;
-        if (Math.abs(match.cost - row.cost) > 0.0001) {
-          await savePart({ ...match, cost: row.cost, main_category: row.main_category, sub_category: row.sub_category, projects: appendProjectCode(match.projects, targetProjCode) }, false);
-        }
+        // 供应商报价属于项目 BOM 行事实；导入不能用新报价覆盖器件主档最近参考价。
       } else {
         partId = await savePart({ main_category: row.main_category, sub_category: row.sub_category, category: row.main_category, name: row.name, model: row.model, cost: row.cost, specs: '', projects: targetProjCode, remark: row.remark }, false);
       }
-      await addBOMItem(targetPid!, partId, row.quantity, row.module_name, row.remark, 0, false);
-      // Also add to module_items
-      if (row.module_name && row.module_name !== '未归类' && modIdMap[row.module_name]) {
-        await saveModuleItem({ module_id: modIdMap[row.module_name], part_id: partId, part_name: row.name, part_model: row.model, main_category: row.main_category, sub_category: row.sub_category, cost: row.cost, quantity: row.quantity, remark: row.remark });
-      }
+      await addBOMItem(targetPid!, partId, row.quantity, row.module_name, row.remark, 0, false, {
+        name: row.name, model: row.model, cost: row.cost,
+        mainCategory: row.main_category, subCategory: row.sub_category,
+      });
     }
     await recordProjectCostSnapshot(targetPid!, 'bom_import', `BOM批量导入 ${total} 条`);
     await loadCostSnapshots(targetPid!);
@@ -1105,9 +1216,13 @@ export default function Projects() {
     }
   };
 
-  const bomTotal = boms.reduce((s, b) => s + (b.part_cost || 0) * b.quantity, 0);
+  const bomCostState = sumBomCostStrict(boms);
+  const bomComplete = bomCostState.missing.length === 0;
+  const bomTotal = bomCostState.total;
   const selectedProject = projects.find(p => p.id === selectedPid);
-  const wholeMachineCost = bomTotal * (1 + (((selectedProject?.platform_fee_rate || 0) + (selectedProject?.profit_rate || 0)) / 100));
+  const wholeMachineCost = bomComplete ? bomTotal * (1 + ((selectedProject?.platform_fee_rate || 0) / 100)) : 0;
+  const bomTotalLabel = bomComplete ? `¥${bomTotal.toFixed(2)}` : '待补证据';
+  const wholeMachineCostLabel = bomComplete ? `¥${wholeMachineCost.toFixed(2)}` : '待补证据';
 
   // ====== AI 体检（规则驱动：BOM 完整性/目标/快照/同品类价差） ======
   const [healthIssues, setHealthIssues] = useState<HealthIssue[]>([]);
@@ -1145,7 +1260,7 @@ export default function Projects() {
   const moduleSummary: Record<string, number> = {};
   const domainSummary: Record<string, number> = {};
   const groupedBOMs: Record<string, any[]> = {};
-  boms.forEach(b => {
+  boms.filter(b => bomPriceState(b) === 'confirmed' && bomQuantityState(b) === 'confirmed').forEach(b => {
     const module = b.module_name || '未归类';
     const domain = b.main_category || '其他';
     moduleSummary[module] = (moduleSummary[module] || 0) + (b.part_cost || 0) * b.quantity;
@@ -1232,14 +1347,16 @@ export default function Projects() {
     { title: '模块', dataIndex: 'module_name', width: 85, render: (v: string) => v ? <Tag>{v}</Tag> : <Tag color="#ddd">未归类</Tag> },
     { title: '大类', dataIndex: 'main_category', width: 70, render: (v: string) => <Tag color={getCategoryColor(v)}>{v}</Tag> },
     { title: '子类', dataIndex: 'sub_category', width: 80 },
+    { title: '成本层', dataIndex: 'cost_layer', width: 90, render: (v: string) => <Tag color={v === 'packaging' ? 'gold' : v === 'odm_processing' ? 'purple' : 'blue'}>{v === 'packaging' ? '包装' : v === 'odm_processing' ? 'ODM加工' : '物料'}</Tag> },
     { title: '名称', dataIndex: 'part_name', width: 180, ellipsis: true, render: (v: string, r: any) => r.is_module_item ? <span><Tag color="orange" style={{ marginRight: 4, fontSize: 10 }}>虚</Tag>{v}</span> : v },
     { title: '型号', dataIndex: 'part_model', width: 150, ellipsis: true },
-    { title: '单价', dataIndex: 'part_cost', width: 85, align: 'right' as const, render: (v: number) => v?.toFixed(4) },
+    { title: '单价', dataIndex: 'part_cost', width: 85, align: 'right' as const, render: (v: number, r: any) => bomPriceState(r) === 'unknown' ? <Tag color="orange">待补证据</Tag> : bomPriceState(r) === 'invalid' ? <Tag color="red">数据错误</Tag> : Number(v).toFixed(4) },
     { title: '数量', dataIndex: 'quantity', width: 60, align: 'center' as const, render: (v: number) => v != null ? (Number.isInteger(v) ? v : v.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')) : '-' },
-    { title: '小计', key: 'sub', width: 90, align: 'right' as const, render: (_: any, r: any) => <b>{((r.part_cost || 0) * r.quantity).toFixed(4)}</b> },
+    { title: '小计', key: 'sub', width: 90, align: 'right' as const, render: (_: any, r: any) => bomPriceState(r) === 'confirmed' && bomQuantityState(r) === 'confirmed' ? <b>{(Number(r.part_cost) * Number(r.quantity)).toFixed(4)}</b> : <Tag color="orange">待补证据</Tag> },
     // 占整机 %：降本地图（迷你条 + 热力色 + 排序）——大头一眼可见
     { title: '占整机 %', key: 'pct', width: 96, align: 'right' as const, sorter: (a: any, b: any) => ((a.part_cost || 0) * a.quantity) - ((b.part_cost || 0) * b.quantity), render: (_: any, r: any) => {
-      const sub = (r.part_cost || 0) * (r.quantity || 1);
+      if (bomPriceState(r) !== 'confirmed' || bomQuantityState(r) !== 'confirmed') return <Tag color="orange">—</Tag>;
+      const sub = Number(r.part_cost) * Number(r.quantity);
       const pct = bomTotal > 0 ? (sub / bomTotal) * 100 : 0;
       const color = pct >= 10 ? '#FF9500' : pct >= 5 ? '#FFD60A' : '#34C759';
       return (
@@ -1259,7 +1376,7 @@ export default function Projects() {
     )},
   ];
 
-  const bomInlineFields = ['module_name', 'main_category', 'sub_category', 'part_name', 'part_model', 'part_cost', 'quantity', 'remark'];
+  const bomInlineFields = ['module_name', 'main_category', 'sub_category', 'cost_layer', 'part_name', 'part_model', 'part_cost', 'quantity', 'remark'];
   const commitInlineBomCell = async (row: any, field: string, value: number | string | null) => {
     if (!selectedPid || value == null) { setInlineBomCell(null); return; }
     if (field.startsWith('custom:')) {
@@ -1285,12 +1402,14 @@ export default function Projects() {
     const nextModel = field === 'part_model' ? String(value) : (row.part_model || '');
     const nextMainCategory = field === 'main_category' ? String(value) : (row.main_category || '');
     const nextSubCategory = field === 'sub_category' ? String(value) : (row.sub_category || '');
+    const nextCostLayer = field === 'cost_layer' ? String(value) : (row.cost_layer || 'material');
+    if (field === 'cost_layer' && !['material', 'packaging', 'odm_processing'].includes(nextCostLayer)) { setInlineBomCell(null); message.warning('成本层只能选择物料、包装或 ODM 加工'); return; }
     if ((field === 'part_name' || field === 'part_model') && !String(value).trim()) { setInlineBomCell(null); message.warning(`${field === 'part_name' ? '器件名称' : '型号'}不能为空`); return; }
     setInlineBomCell(null);
     try {
       await updateBOMItem(row.id, nextQuantity, nextModule, nextRemark, true, {
         partName: nextName, partModel: nextModel, cost: nextCost,
-        mainCategory: nextMainCategory, subCategory: nextSubCategory,
+        mainCategory: nextMainCategory, subCategory: nextSubCategory, costLayer: nextCostLayer,
       });
       await Promise.all([loadBOM(selectedPid), loadCostSnapshots(selectedPid)]);
       scheduleAutoCompare();
@@ -1369,6 +1488,7 @@ export default function Projects() {
       let nextModel = target.part_model || '';
       let nextMainCategory = target.main_category || '';
       let nextSubCategory = target.sub_category || '';
+      let nextCostLayer = target.cost_layer || 'material';
       for (let columnOffset = 0; columnOffset < lines[rowOffset].length; columnOffset++) {
         const targetField = fields[startField + columnOffset];
         if (!targetField) break;
@@ -1387,6 +1507,7 @@ export default function Projects() {
           else if (targetField === 'part_model') nextModel = text;
           else if (targetField === 'main_category') nextMainCategory = text;
           else if (targetField === 'sub_category') nextSubCategory = text;
+          else if (targetField === 'cost_layer') { if (!['material', 'packaging', 'odm_processing'].includes(text)) continue; nextCostLayer = text; }
           bomChanged = true;
           changed = true;
         } else if (targetField.startsWith('custom:') && customData) {
@@ -1403,7 +1524,7 @@ export default function Projects() {
       }
       if (bomChanged) await updateBOMItem(target.id, nextQuantity, nextModule, nextRemark, false, {
         partName: nextName, partModel: nextModel, cost: nextCost,
-        mainCategory: nextMainCategory, subCategory: nextSubCategory,
+        mainCategory: nextMainCategory, subCategory: nextSubCategory, costLayer: nextCostLayer,
       });
       if (customData && customChanged) await updateBOMCustomData(target.id, customData);
       if (changed) touched++;
@@ -1434,6 +1555,9 @@ export default function Projects() {
   const renderInlineBomEditor = (row: any, field: string, value: unknown, fallback?: React.ReactNode) => {
     const editor = inlineBomCell;
     if (!editor || editor.id !== row.id || editor.field !== field) return fallback ?? (value == null || value === '' ? <span className="bom-inline-empty">—</span> : String(value));
+    if (field === 'cost_layer') {
+      return <Select autoFocus size="small" value={String(editor.value || 'material')} options={[['material', '物料'], ['packaging', '包装'], ['odm_processing', 'ODM加工']].map(([optionValue, label]) => ({ value: optionValue, label }))} onChange={next => commitInlineBomCell(row, field, next)} onBlur={() => setInlineBomCell(null)} style={{ width: '100%' }} />;
+    }
     const numeric = field === 'part_cost' || field === 'quantity';
     if (numeric) {
       return <InputNumber autoFocus size="small" min={0} precision={field === 'part_cost' ? 4 : 6} controls={false} value={Number(editor.value || 0)}
@@ -1488,8 +1612,11 @@ export default function Projects() {
   // 领域列是全量表格的核心上下文，不能被旧版列设置隐藏，否则表头会出现“模块/子类”错位感。
   const spreadsheetLockedColumns = ['main_category'];
   const selectedReferenceProject = refProjPid ? projects.find((p: any) => p.id === refProjPid) : null;
-  const referenceBomTotal = refProjBoms.reduce((sum: number, row: any) => sum + (row.part_cost || 0) * (row.quantity || 0), 0);
-  const referenceDelta = bomTotal - referenceBomTotal;
+  const referenceCostState = sumBomCostStrict(refProjBoms);
+  const referenceBomTotal = referenceCostState.total;
+  const referenceDelta = bomComplete && referenceCostState.missing.length === 0 ? bomTotal - referenceBomTotal : null;
+  const selectedBomCost = sumBomCostStrict(boms.filter(row => bomSelKeys.includes(row.id)));
+  const visibleBomCost = sumBomCostStrict(visibleBoms);
 
   const negotiationRows = boms.map((row: any) => {
     const refs = modRefMap[row.module_name || '未归类']?.items || [];
@@ -1561,10 +1688,11 @@ export default function Projects() {
         <div className="content-card projects-detail-card">
           <div className="project-detail-scroll">
           <div className="project-sticky-header">
-            <div className="project-detail-title"><span className="eyebrow">当前项目</span><h1>{selectedProject?.code} {selectedProject?.name}</h1><span className="project-detail-spec">{selectedProject?.category || '显示器'} · {selectedProject?.screen_size || '—'} · {selectedProject?.resolution || '—'} · {selectedProject?.refresh_rate || '—'}</span></div>
-            <div className="project-detail-actions"><Button size="small" icon={<UploadOutlined />} onClick={() => setActiveTab('tender')}>导入报价</Button><Button size="small" onClick={() => { setEditing(selectedProject); form.setFieldsValue(selectedProject); setModalOpen(true); }}>编辑项目</Button><Button type="primary" size="small" icon={<PlusOutlined />} onClick={async () => { setAllParts(await getParts('', '', '')); setBomEdit(null); bomForm.resetFields(); bomForm.setFieldsValue({ _addMode: 'module', quantity: 1, _quantity: 1, _cost: 0 }); setBomModal(true); }}>新增器件</Button></div>
+            <div className="project-detail-title"><span className="eyebrow">当前项目</span><h1>{selectedProject?.code} {selectedProject?.name}</h1><span className="project-detail-spec">{[selectedProject?.category || '显示器', ...((selectedProject?.category || '显示器') === '显示器' ? [selectedProject?.screen_size, selectedProject?.resolution, selectedProject?.refresh_rate, selectedProject?.panel_type] : [selectedProject?.specs])].filter(value => String(value || '').trim()).join(' · ')}</span></div>
+            <div className="project-detail-actions"><CostPackageButton project={selectedProject} boms={boms} targets={targets} measures={measures} reviews={reviews} snapshots={costSnapshots} /><Button size="small" icon={<UploadOutlined />} onClick={() => selectProjectTab('tender')}>导入报价</Button><Button size="small" onClick={() => { setEditing(selectedProject); form.setFieldsValue(selectedProject); setModalOpen(true); }}>编辑项目</Button><Button type="primary" size="small" icon={<PlusOutlined />} onClick={async () => { setAllParts(await getParts('', '', '')); setBomEdit(null); bomForm.resetFields(); bomForm.setFieldsValue({ _addMode: 'module', quantity: 1, _quantity: 1, _cost: 0 }); setBomModal(true); }}>新增器件</Button></div>
           </div>
-          <div className="project-summary-strip"><span><small>BOM成本</small><b>¥{bomTotal.toFixed(2)}</b></span><span><small>整机成本</small><b>¥{wholeMachineCost.toFixed(2)}</b></span><span><small>平台 + 利润</small><b>{selectedProject?.platform_fee_rate || 0}% + {selectedProject?.profit_rate || 0}%</b></span><span><small>器件</small><b>{boms.length} 项</b></span></div>
+          <div className="project-summary-strip"><span><small>可分解成本</small><b>{bomTotalLabel}</b></span><span><small>标准成本</small><b>{wholeMachineCostLabel}</b></span><span><small>平台费率</small><b>{selectedProject?.platform_fee_rate || 0}%</b></span><span><small>BOM行</small><b>{boms.length} 项</b></span></div>
+          {!bomComplete && <Alert type="warning" showIcon message={`当前 BOM 有 ${bomCostState.missing.length} 行价格或数量证据缺口`} description="缺口不会按 0 计入成本；补齐后才能冻结目标成本或使用完整成本口径。" style={{ marginBottom: 14 }} />}
           <div className="module-target-section"><div className="section-heading"><div><span className="eyebrow">成本控制</span><h2>领域目标达成</h2><small className="section-caption">按 BOM 大类汇总实际成本，与领域目标逐项核对</small></div><Button size="small" type="link" onClick={() => setDomainFocus(null)}>清除筛选</Button></div><div className="module-target-grid">{Object.entries(domainSummary).map(([name, cost]) => { const target = targets.find((t: any) => t.domain === name)?.target_cost || 0; const diff = target ? cost - target : 0; const pct = target ? Math.min(100, (cost / target) * 100) : 0; const good = target > 0 && diff <= 0; return <button key={name} className={`module-target-card ${domainFocus === name ? 'is-selected' : ''}`} onClick={() => setDomainFocus(domainFocus === name ? null : name)}><div className="module-target-meta"><b>{name}</b><span>{target ? (good ? `达成，可降 ¥${Math.abs(diff).toFixed(2)}` : `超目标 ¥${diff.toFixed(2)}`) : '未设目标'}</span></div><div className="module-target-values"><strong>¥{cost.toFixed(2)}</strong><small>{target ? `目标 ¥${target.toFixed(2)}` : '目标 —'}</small></div><div className="module-target-track"><i style={{ width: `${pct}%`, background: target ? (good ? '#28A56A' : '#E45A5A') : '#94A3B8' }} /><em style={{ left: target ? '100%' : '0%' }} /></div></button>; })}</div></div>
           {/* AI 体检条（规则驱动，点击问题直达对应 tab） */}
           {healthIssues.length > 0 && (
@@ -1583,7 +1711,7 @@ export default function Projects() {
               )}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {healthIssues.map((i, idx) => (
-                  <div key={idx} onClick={() => i.actionTab && setActiveTab(i.actionTab)}
+                  <div key={idx} onClick={() => i.actionTab && selectProjectTab(i.actionTab)}
                     title={i.actionTab ? '点击定位' : ''}
                     style={{ border: i.level === 'danger' ? '1px solid #FECACA' : i.level === 'warn' ? '1px solid #FDE68A' : '1px solid #BFDBFE', background: i.level === 'danger' ? '#FFF5F5' : i.level === 'warn' ? '#FFFBEB' : '#F0F7FF', borderRadius: 8, padding: '6px 10px', cursor: i.actionTab ? 'pointer' : 'default', fontSize: 12.5, maxWidth: 380, transition: 'box-shadow 0.15s' }}
                     onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'; }}
@@ -1596,9 +1724,9 @@ export default function Projects() {
             </div>
           )}
           <Row className="project-legacy-summary" gutter={14} style={{ marginBottom: 14 }}>
-            <Col span={5}><Card size="small"><Statistic title="BOM总成本" value={bomTotal} precision={2} prefix="¥" valueStyle={{ color: '#CF0A2C' }} /></Card></Col>
-            <Col span={5}><Card size="small"><Statistic title="整机成本" value={wholeMachineCost} precision={2} prefix="¥" valueStyle={{ color: '#2563EB' }} /></Card></Col>
-            <Col span={4}><Card size="small"><Statistic title="费率" value={`${selectedProject?.platform_fee_rate || 0}% + ${selectedProject?.profit_rate || 0}%`} valueStyle={{ fontSize: 18 }} /></Card></Col>
+            <Col span={5}><Card size="small"><Statistic title="BOM总成本" value={bomComplete ? bomTotal : '待补证据'} precision={2} prefix={bomComplete ? '¥' : undefined} valueStyle={{ color: '#CF0A2C' }} /></Card></Col>
+            <Col span={5}><Card size="small"><Statistic title="标准成本" value={bomComplete ? wholeMachineCost : '待补证据'} precision={2} prefix={bomComplete ? '¥' : undefined} valueStyle={{ color: '#2563EB' }} /></Card></Col>
+            <Col span={4}><Card size="small"><Statistic title="平台费率" value={`${selectedProject?.platform_fee_rate || 0}%`} valueStyle={{ fontSize: 18 }} /></Card></Col>
             <Col span={10}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {Object.entries(moduleSummary).map(([name, cost]) => (
@@ -1607,7 +1735,25 @@ export default function Projects() {
               </div>
             </Col>
           </Row>
-          <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
+          <div className="project-workspace-nav" aria-label="项目工作区">
+            <Tabs
+              activeKey={workspace}
+              onChange={key => selectProjectWorkspace(key as ProjectWorkspace)}
+              items={Object.entries(PROJECT_WORKSPACE_LABELS).map(([key, label]) => ({ key, label }))}
+            />
+            {PROJECT_WORKSPACE_VIEWS[workspace].length > 1 && (
+              <Segmented
+                aria-label="工作区视图"
+                value={activeTab}
+                onChange={value => selectProjectTab(String(value))}
+                options={PROJECT_WORKSPACE_VIEWS[workspace].map(view => ({ label: view.label, value: view.key }))}
+              />
+            )}
+          </div>
+          <Tabs activeKey={activeTab} onChange={selectProjectTab} tabBarStyle={{ display: 'none' }} items={[
+            {
+              key: 'overview', label: <span><BarChartOutlined /> 项目总览</span>, children: <ProjectOverviewPanel project={selectedProject} boms={boms} targets={targets} measures={measures} reviews={reviews} snapshots={costSnapshots} suppliers={projectSuppliers} referenceProject={selectedReferenceProject} referenceBoms={refProjBoms} />,
+            },
             {
               key: 'tender', label: <span><AimOutlined /> 招标工作台</span>, children: <TenderWorkspace projectId={selectedPid!} project={selectedProject} />,
             },
@@ -1618,19 +1764,20 @@ export default function Projects() {
                   <div className="bom-command-bar" style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
                     <Space>
                       <Button type="primary" size="small" icon={<PlusOutlined />} onClick={async () => { setAllParts(await getParts('', '', '')); setBomEdit(null); setPreviewModItems([]); bomForm.resetFields(); bomForm.setFieldsValue({ _addMode: 'module', quantity: 1, _quantity: 1, _cost: 0 }); setBomModal(true); }}>添加器件</Button>
-                      <Upload beforeUpload={handleImportFile} showUploadList={false} accept=".xlsx,.xls"><Button size="small" icon={<UploadOutlined />}>导入</Button></Upload>
-                      <Button size="small" icon={<DownloadOutlined />} onClick={() => { const data = boms.map(b => ({ 模块: b.module_name, 大类: b.main_category, 子类: b.sub_category, 器件名称: b.part_name, 型号: b.part_model, 单价: b.part_cost, 数量: b.quantity, 小计: (b.part_cost || 0) * b.quantity, ...(() => { try { const d = JSON.parse(b.custom_data || '{}'); return Object.fromEntries(bomCustomColumns.map((column: any) => [column.title, d[column.field_key] ?? ''])); } catch { return {}; } })(), 备注: b.remark })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'BOM'); XLSX.writeFile(wb, `BOM_${projects.find(p => p.id === selectedPid)?.code || 'export'}.xlsx`); message.success('已导出'); }}>导出</Button>
+                      <Upload beforeUpload={handleImportFile} showUploadList={false} accept=".xlsx,.xls"><Button size="small" icon={<UploadOutlined />}>导入</Button></Upload><Button size="small" icon={<DownloadOutlined />} onClick={downloadProjectBomTemplate}>模板</Button>
+                      <Button size="small" icon={<DownloadOutlined />} onClick={() => { const data = boms.map(b => ({ 模块: b.module_name, 大类: b.main_category, 子类: b.sub_category, 器件名称: b.part_name, 型号: b.part_model, 单价: b.part_cost, 数量: b.quantity, 小计: bomExtendedCostStrict(b), ...(() => { try { const d = JSON.parse(b.custom_data || '{}'); return Object.fromEntries(bomCustomColumns.map((column: any) => [column.title, d[column.field_key] ?? ''])); } catch { return {}; } })(), 备注: b.remark })); const ws = XLSX.utils.json_to_sheet(data); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'BOM'); XLSX.writeFile(wb, `BOM_${projects.find(p => p.id === selectedPid)?.code || 'export'}.xlsx`); message.success('已导出'); }}>导出</Button>
                       <Input size="small" allowClear value={bomSearch} onChange={e => setBomSearch(e.target.value)} placeholder="搜索器件 / 型号 / 规格" style={{ width: 210 }} />
                       <Segmented size="small" value={bomTableMode} onChange={v => { const mode = v as 'module' | 'flat'; setBomTableMode(mode); if (mode !== 'flat') setBomFullscreen(false); }} options={[{ label: '模块分组', value: 'module' }, { label: '全量表格', value: 'flat' }]} />
                       {bomTableMode === 'flat' && <Tooltip title={bomFullscreen ? '退出 BOM 全屏（Esc）' : '将 BOM 表格铺满窗口（Esc 退出）'}><Button size="small" icon={bomFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} onClick={() => setBomFullscreen(value => !value)}>{bomFullscreen ? '退出全屏' : '全屏'}</Button></Tooltip>}
                       <Button size="small" icon={<BulbOutlined />} onClick={() => setNegotiationOpen(true)}>议价机会</Button>
                       {bomTableMode === 'flat' && <Tooltip title="复制选中的 BOM 行为制表符文本，可直接粘贴到 Excel"><Button size="small" icon={<CopyOutlined />} onClick={copySelectedBomRows}>复制选中</Button></Tooltip>}
                       {bomTableMode === 'flat' && <Button size="small" icon={<PlusOutlined />} onClick={() => setCustomColumnModal(true)}>添加列</Button>}
+                      <Tooltip title="BOM回收站"><Button size="small" type="text" className="bom-recycle-trigger" icon={<DeleteOutlined />} onClick={openRecycle} aria-label="BOM回收站" /></Tooltip>
                     </Space>
                     {bomSelKeys.length > 0 && (
                       <Space>
                         <Tag color="blue">{bomSelKeys.length} 项选中</Tag>
-                        <Tag color="red">合计: ¥{boms.filter(b => bomSelKeys.includes(b.id)).reduce((s, b) => s + (b.part_cost || 0) * b.quantity, 0).toFixed(2)}</Tag>
+                        <Tag color="red">合计: {selectedBomCost.missing.length ? '待补证据' : `¥${selectedBomCost.total.toFixed(2)}`}</Tag>
                         <Popconfirm title={`删除选中 ${bomSelKeys.length} 项？`} onConfirm={async () => { for (const id of bomSelKeys) await deleteBOMItem(Number(id), false); await recordProjectCostSnapshot(selectedPid!, 'parts_deleted', `批量删除 ${bomSelKeys.length} 个BOM项`); setBomSelKeys([]); loadBOM(selectedPid!); loadCostSnapshots(selectedPid!); scheduleAutoCompare(); message.success('已删除'); }}>
                           <Button size="small" danger icon={<DeleteOutlined />}>批量删除</Button>
                         </Popconfirm>
@@ -1651,9 +1798,26 @@ export default function Projects() {
                         onChange={v => loadRefProj(v || null)}
                         options={projects.filter((p: any) => p.id !== selectedPid).map((p: any) => ({ label: `[${p.code}] ${p.name}${p.project_type === '已完成' ? ' · 已完成' : ''}`, value: p.id }))}
                       />
-                      {selectedReferenceProject && <div className="bom-reference-overview"><span>{selectedReferenceProject.code || selectedReferenceProject.name}</span><b>¥{referenceBomTotal.toFixed(2)}</b><em className={referenceDelta > 0 ? 'is-over' : referenceDelta < 0 ? 'is-under' : ''}>{referenceDelta > 0 ? '+' : ''}¥{referenceDelta.toFixed(2)}</em></div>}
+                      {selectedReferenceProject && <div className="bom-reference-overview"><span>{selectedReferenceProject.code || selectedReferenceProject.name}</span><b>{referenceCostState.missing.length ? '待补证据' : `¥${referenceBomTotal.toFixed(2)}`}</b><em className={referenceDelta !== null && referenceDelta > 0 ? 'is-over' : referenceDelta !== null && referenceDelta < 0 ? 'is-under' : ''}>{referenceDelta === null ? '待补证据' : `${referenceDelta > 0 ? '+' : ''}¥${referenceDelta.toFixed(2)}`}</em></div>}
                     </div>
                   </div>
+                  {bomTableMode === 'module' && sortedModNames.length > 0 && <nav className="bom-module-navigation" aria-label="模块快速定位">
+                    <strong>模块快速定位</strong>
+                    <Select
+                      aria-label="搜索并定位模块"
+                      showSearch
+                      value={null}
+                      placeholder="输入模块名搜索或选择"
+                      optionFilterProp="label"
+                      options={sortedModNames.map(name => ({ value: name, label: `${name}（${groupedBOMs[name].length} 件）` }))}
+                      onChange={name => {
+                        const target = document.getElementById(`module-${name}`);
+                        target?.scrollIntoView({ block: 'start', behavior: 'instant' });
+                        target?.focus({ preventScroll: true });
+                      }}
+                    />
+                    <span>{sortedModNames.length} 个模块</span>
+                  </nav>}
                   {bomTableMode === 'flat' && <div className="bom-spreadsheet-hint">连续表格模式 · 双击或 Enter/F2 编辑 · Tab/方向键移动 · 可从 Excel 粘贴多行 · 横向滚动查看完整字段</div>}
                   {bomTableMode === 'flat' ? (
                     <>
@@ -1666,17 +1830,19 @@ export default function Projects() {
                         rowKey="id"
                         size="small"
                         pagination={false}
-                        scroll={{ x: 1240, y: bomFullscreen ? 'calc(100vh - 160px)' : 560 }}
+                        scroll={bomFullscreen ? { x: 1240, y: 'calc(100vh - 160px)' } : { x: 1240 }}
                         rowSelection={{ fixed: false, selectedRowKeys: bomSelKeys, onChange: keys => setBomSelKeys(keys) }}
                       />
-                      <div className="bom-spreadsheet-statusbar"><span>显示 {visibleBoms.length} / {boms.length} 行</span><span>当前合计 <b>¥{visibleBoms.reduce((sum: number, row: any) => sum + (row.part_cost || 0) * (row.quantity || 0), 0).toFixed(4)}</b></span><span>已选 {bomSelKeys.filter(id => visibleBoms.some((row: any) => row.id === id)).length} 行</span><span className="bom-spreadsheet-status-note">双击或 Enter/F2 编辑 · Tab/方向键移动 · 可粘贴 Excel 数据</span></div>
+                      <div className="bom-spreadsheet-statusbar"><span>显示 {visibleBoms.length} / {boms.length} 行</span><span>当前合计 <b>{visibleBomCost.missing.length ? '待补证据' : `¥${visibleBomCost.total.toFixed(4)}`}</b></span><span>已选 {bomSelKeys.filter(id => visibleBoms.some((row: any) => row.id === id)).length} 行</span><span className="bom-spreadsheet-status-note">双击或 Enter/F2 编辑 · Tab/方向键移动 · 可粘贴 Excel 数据</span></div>
                     </>
                   ) : sortedModNames.map((modName: string) => {
                     const items = groupedBOMs[modName];
-                    const modTotal = items.reduce((s: number, b: any) => s + (b.part_cost || 0) * b.quantity, 0);
+                    const modCostState = sumBomCostStrict(items);
+                    const modTotal = modCostState.missing.length ? null : modCostState.total;
                     const ref = modRefMap[modName];
                     const refItems = ref?.items || [];
-                    const refTotal = refItems.reduce((s: number, b: any) => s + (b.part_cost || 0) * b.quantity, 0);
+                    const refCostState = sumBomCostStrict(refItems);
+                    const refTotal = refCostState.missing.length ? null : refCostState.total;
                     // Compute extended columns
                     const hasRef = ref && refItems.length > 0;
                     // 参考匹配：同模块 + 名称完全相等 + 型号完全相等（避免跨模块/模糊匹配错位，
@@ -1686,7 +1852,7 @@ export default function Projects() {
                       && rb.part_name === r.part_name
                       && (rb.part_model || '') === (r.part_model || ''));
                     const refProject = ref?.pid ? projects.find((p: any) => p.id === ref.pid) : null;
-                    const refDelta = modTotal - refTotal;
+                    const refDelta = modTotal !== null && refTotal !== null ? modTotal - refTotal : null;
                     const extCols = hasRef ? [
                       ...editableBomCols.slice(0, -1),
                       { title: '参考单价', width: 85, align: 'right' as const, render: (_: any, r: any) => {
@@ -1695,29 +1861,32 @@ export default function Projects() {
                       }},
                       { title: '参考小计', width: 90, align: 'right' as const, render: (_: any, r: any) => {
                         const rref = findRef(r);
-                        const refSub = rref ? (rref.part_cost || 0) * rref.quantity : 0;
-                        const ourSub = (r.part_cost || 0) * r.quantity;
-                        return rref ? <span style={{ color: refSub > ourSub ? '#EF4444' : '#10B981', fontSize: 12, fontWeight: 600 }}>¥{refSub.toFixed(4)}</span> : <span style={{ color: '#DDD', fontSize: 12 }}>—</span>;
+                        const refSub = rref ? bomExtendedCostStrict(rref) : null;
+                        const ourSub = bomExtendedCostStrict(r);
+                        return rref && refSub !== null && ourSub !== null ? <span style={{ color: refSub > ourSub ? '#EF4444' : '#10B981', fontSize: 12, fontWeight: 600 }}>¥{refSub.toFixed(4)}</span> : <span style={{ color: '#DDD', fontSize: 12 }}>{rref ? '待补证据' : '—'}</span>;
                       }},
                       { title: '差异', width: 80, align: 'right' as const, render: (_: any, r: any) => {
                         const rref = findRef(r);
                         if (!rref) return <span style={{ color: '#DDD', fontSize: 12 }}>—</span>;
-                        const diff = ((rref.part_cost || 0) * rref.quantity) - ((r.part_cost || 0) * r.quantity);
+                        const refSub = bomExtendedCostStrict(rref);
+                        const ourSub = bomExtendedCostStrict(r);
+                        if (refSub === null || ourSub === null) return <span style={{ color: '#D97706', fontSize: 12 }}>待补证据</span>;
+                        const diff = refSub - ourSub;
                         return <span style={{ color: diff > 0 ? '#EF4444' : diff < 0 ? '#10B981' : '#666', fontWeight: 600, fontSize: 12 }}>{diff >= 0 ? '+' : ''}¥{diff.toFixed(4)}</span>;
                       }},
                       editableBomCols[editableBomCols.length - 1],
                     ] : editableBomCols;
                     return (
-                      <div key={modName} id={`module-${modName}`} className="bom-module-card" style={{ scrollMarginTop: 80 }}>
+                      <div key={modName} id={`module-${modName}`} className="bom-module-card" tabIndex={-1} style={{ scrollMarginTop: 64 }}>
                         <div className="bom-module-header">
                           <div className="bom-module-heading">
                             <div className="bom-module-name"><b>{modName}</b><span>{items.length} 件</span></div>
                             <div className="bom-module-metrics">
-                              <span><small>当前小计</small><strong>¥{modTotal.toFixed(4)}</strong></span>
+                              <span><small>当前小计</small><strong>{modTotal === null ? '待补证据' : `¥${modTotal.toFixed(4)}`}</strong></span>
                               {hasRef ? <>
                                 <i />
-                                <span><small>参照小计 · {refProject?.code || '参照项目'}</small><strong className="is-reference">¥{refTotal.toFixed(4)}</strong></span>
-                                <span className={`bom-module-delta ${refDelta > 0 ? 'is-over' : 'is-under'}`}><small>{refDelta > 0 ? '高于参照' : refDelta < 0 ? '低于参照' : '与参照一致'}</small><strong>{refDelta > 0 ? '+' : ''}¥{refDelta.toFixed(4)}</strong></span>
+                                <span><small>参照小计 · {refProject?.code || '参照项目'}</small><strong className="is-reference">{refTotal === null ? '待补证据' : `¥${refTotal.toFixed(4)}`}</strong></span>
+                                <span className={`bom-module-delta ${refDelta !== null && refDelta > 0 ? 'is-over' : refDelta !== null && refDelta < 0 ? 'is-under' : ''}`}><small>{refDelta === null ? '待补证据' : refDelta > 0 ? '高于参照' : refDelta < 0 ? '低于参照' : '与参照一致'}</small><strong>{refDelta === null ? '待补证据' : `${refDelta > 0 ? '+' : ''}¥${refDelta.toFixed(4)}`}</strong></span>
                               </> : refProjPid ? <span className="bom-module-no-reference"><small>{projects.find((p: any) => p.id === refProjPid)?.code || '参照项目'}</small><strong>暂无此模块</strong></span> : null}
                             </div>
                           </div>
@@ -1761,8 +1930,8 @@ export default function Projects() {
                               <Table.Summary.Cell index={0} colSpan={extCols.length + 1}>
                                 <div className="bom-module-summary">
                                   <b>{modName} 合计</b>
-                                  <span>当前 <strong>¥{modTotal.toFixed(4)}</strong></span>
-                                  {hasRef && <><span>参照 <strong className="is-reference">¥{refTotal.toFixed(4)}</strong></span><span className={refDelta > 0 ? 'is-over' : 'is-under'}>差异 <strong>{refDelta > 0 ? '+' : ''}¥{refDelta.toFixed(4)}</strong></span></>}
+                                  <span>当前 <strong>{modTotal === null ? '待补证据' : `¥${modTotal.toFixed(4)}`}</strong></span>
+                                  {hasRef && <><span>参照 <strong className="is-reference">{refTotal === null ? '待补证据' : `¥${refTotal.toFixed(4)}`}</strong></span><span className={refDelta !== null && refDelta > 0 ? 'is-over' : 'is-under'}>差异 <strong>{refDelta === null ? '待补证据' : `${refDelta > 0 ? '+' : ''}¥${refDelta.toFixed(4)}`}</strong></span></>}
                                 </div>
                               </Table.Summary.Cell>
                             </Table.Summary.Row>
@@ -1776,81 +1945,7 @@ export default function Projects() {
               ),
             },
             {
-              key: 'analysis', label: <span><DollarOutlined /> 成本分析</span>, children: (() => {
-                // Module cost data
-                const byModule: Record<string, number> = {};
-                boms.forEach(b => { const m = b.module_name || '未归类'; byModule[m] = (byModule[m] || 0) + (b.part_cost || 0) * b.quantity; });
-                const modData = Object.entries(byModule).map(([k, v]) => ({ name: k, value: Math.round(v * 100) / 100 })).sort((a, b) => b.value - a.value);
-                // Domain cost data with targets
-                const byDomain: Record<string, number> = {};
-                boms.forEach(b => { const d = b.main_category || '其他'; byDomain[d] = (byDomain[d] || 0) + (b.part_cost || 0) * b.quantity; });
-                const targetMap: Record<string, number> = {};
-                targets.forEach(t => { targetMap[t.domain] = t.target_cost; });
-
-                const modBarOption = {
-                  tooltip: chartTooltip('axis'),
-                  grid: { left: 100, right: 40, top: 5, bottom: 5 },
-                  xAxis: { type: 'value', name: '¥', axisLabel: { color: chartTextMuted(), fontSize: 11 }, splitLine: { lineStyle: { color: chartSplitLine() } } },
-                  yAxis: { type: 'category', data: modData.map(d => d.name), axisLabel: { fontSize: 11, color: chartTextMuted() }, inverse: true, axisLine: { show: false }, axisTick: { show: false } },
-                  series: [{ type: 'bar', barWidth: '55%', data: modData.map(d => ({ value: d.value, itemStyle: { color: barGradient('#0A84FF'), borderRadius: [0, 8, 8, 0] } })), label: { show: true, position: 'right', formatter: (p: any) => `¥${p.value.toFixed(0)}`, fontSize: 10, color: chartTextMuted() } }],
-                };
-
-                const domainBarOption = {
-                  tooltip: chartTooltip('axis'),
-                  legend: { data: ['实际成本', '目标成本'], top: 0, right: 0, orient: 'horizontal', textStyle: { color: chartTextMuted() } },
-                  grid: { left: 80, right: 40, top: 5, bottom: 30 },
-                  xAxis: { type: 'category', data: [...new Set([...Object.keys(byDomain), ...Object.keys(targetMap)])].sort(), ...chartAxisStyle(10, { rotate: 25 }) },
-                  yAxis: { type: 'value', name: '¥', ...chartAxisStyle() },
-                  color: ['#0A84FF', '#94A3B8'],
-                  series: [
-                    { name: '实际成本', type: 'bar', barGap: '10%', data: [...new Set([...Object.keys(byDomain), ...Object.keys(targetMap)])].sort().map(c => byDomain[c] || 0), itemStyle: { borderRadius: [8, 8, 0, 0], color: (p: any) => {
-                        // 超过目标 → 红色渐变，达标 → 蓝色渐变
-                        const cat = [...new Set([...Object.keys(byDomain), ...Object.keys(targetMap)])].sort()[p.dataIndex];
-                        const target = targetMap[cat];
-                        const actual = p.value;
-                        return target && actual > target ? barGradient('#FF375F') : barGradient('#0A84FF');
-                      } } },
-                    { name: '目标成本', type: 'bar', data: [...new Set([...Object.keys(byDomain), ...Object.keys(targetMap)])].sort().map(c => targetMap[c] || 0), itemStyle: { borderRadius: [8, 8, 0, 0], color: '#94A3B8' } },
-                  ],
-                };
-
-                return (
-                  <div>
-                    <Row gutter={14} style={{ marginBottom: 14 }}>
-                      <Col span={12}><div className="content-card" style={{ margin: 0, padding: 12 }}><div className="card-header"><h3>模块成本分布</h3></div><ReactECharts echarts={echarts} option={modBarOption} style={{ height: 280, maxHeight: 400 }} /></div></Col>
-                      <Col span={12}><div className="content-card" style={{ margin: 0, padding: 12 }}><div className="card-header"><h3>领域成本 vs 目标</h3></div><ReactECharts echarts={echarts} option={domainBarOption} style={{ height: 280 }} /></div></Col>
-                    </Row>
-                    <TargetAllocationPanel projectId={selectedPid!} />
-                    {/* Target setting table */}
-                    <div className="content-card" style={{ margin: 0, padding: 12 }}>
-                      <div className="card-header"><h3>领域成本目标设定</h3><Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { setEditTarget(null); targetForm.resetFields(); setTargetModal(true); }}>设定目标</Button></div>
-                      <Table dataSource={(Object.keys(byDomain).length > 0 ? Object.keys(byDomain) : targets.map((t: any) => t.domain).filter(Boolean)).concat(targets.map((t: any) => t.domain).filter((d: string) => !byDomain[d])).filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => ((targets.find((t:any) => t.domain === b)?.target_cost || 0) - (targets.find((t:any) => t.domain === a)?.target_cost || 0))).map(c => {
-                        const actual = byDomain[c] || 0;
-                        const t = targets.find((x: any) => x.domain === c);
-                        const target = t?.target_cost || 0;
-                        const diff = target ? actual - target : 0;
-                        const rate = target ? Math.round((2 - actual / target) * 100) : 0;
-                        return { key: c, domain: c, actual, target, diff, rate, id: t?.id };
-                      })} rowKey="key" size="small" pagination={false}
-                        columns={[
-                          { title: '领域', dataIndex: 'domain', width: 100, render: (v: string) => <Tag color={getCategoryColor(v)}>{v}</Tag> },
-                          { title: '实际成本(¥)', dataIndex: 'actual', width: 120, align: 'right' as const, render: (v: number) => <b>{v.toFixed(2)}</b> },
-                          { title: '目标成本(¥)', dataIndex: 'target', width: 120, align: 'right' as const, render: (v: number) => v > 0 ? <span style={{ color: '#2563EB' }}>{v.toFixed(2)}</span> : <span style={{ color: '#CCC' }}>未设定</span> },
-                          { title: '差异(¥)', dataIndex: 'diff', width: 110, align: 'right' as const, render: (v: number, r: any) => r.target > 0 ? <span style={{ color: v <= 0 ? '#10B981' : '#EF4444', fontWeight: 600 }}>{v.toFixed(2)}</span> : <span style={{ color: '#CCC' }}>—</span> },
-                          { title: '达成率', dataIndex: 'rate', width: 90, align: 'center' as const, render: (v: number, r: any) => r.target > 0 ? <Tag color={v >= 100 ? 'green' : 'red'}>{v}%</Tag> : <span style={{ color: '#CCC' }}>—</span> },
-                          { title: '操作', width: 100, render: (_: any, r: any) => r.id ? (
-                            <Space size="small">
-                              <Button type="link" size="small" onClick={() => { setEditTarget({ id: r.id, domain: r.domain, target_cost: r.target }); targetForm.setFieldsValue({ domain: r.domain, target_cost: r.target }); setTargetModal(true); }}>编辑</Button>
-                              <Popconfirm title="删除？" onConfirm={async () => { await deleteTarget(r.id); loadTargets(selectedPid!); }}><Button type="link" size="small" danger>删除</Button></Popconfirm>
-                            </Space>
-                          ) : (
-                            <Button type="link" size="small" onClick={() => { setEditTarget(null); targetForm.setFieldsValue({ domain: r.domain, target_cost: 0 }); setTargetModal(true); }}>设定</Button>
-                          )},
-                        ]} />
-                    </div>
-                  </div>
-                );
-              })(),
+              key: 'analysis', label: <span><DollarOutlined /> 报价审核</span>, children: <CostPlanningWorkspace projectId={selectedPid!} project={selectedProject} projects={projects} onTargetsChanged={() => loadTargets(selectedPid!)} onProjectChanged={loadProjects} />,
             },
             {
               key: 'cost-history', label: <span><LineChartOutlined /> 整机成本历史 ({costSnapshots.length})</span>, children: (() => {
@@ -1859,9 +1954,9 @@ export default function Projects() {
                   <div>
                     <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <Space>
-                        <Tag color="red">当前BOM: ¥{bomTotal.toFixed(2)}</Tag>
-                        <Tag color="blue">当前整机: ¥{wholeMachineCost.toFixed(2)}</Tag>
-                        <Tag>公式: BOM × (1 + {selectedProject?.platform_fee_rate || 0}% + {selectedProject?.profit_rate || 0}%)</Tag>
+                        <Tag color="red">当前BOM: {bomTotalLabel}</Tag>
+                        <Tag color="blue">当前标准成本: {wholeMachineCostLabel}</Tag>
+                        <Tag>公式: 可分解成本 × (1 + 平台费率 {selectedProject?.platform_fee_rate || 0}%)；利润不计入标准成本</Tag>
                       </Space>
                       <Space>
                         {snapshotSelKeys.length > 0 && (
@@ -1884,11 +1979,11 @@ export default function Projects() {
                                     // 建立器件映射
                                     const map1: Record<string, any> = {};
                                     const map2: Record<string, any> = {};
-                                    bom1.forEach(item => {
+                                    bom1.forEach((item: any) => {
                                       const key = `${item.part_name}_${item.part_model}`;
                                       map1[key] = item;
                                     });
-                                    bom2.forEach(item => {
+                                    bom2.forEach((item: any) => {
                                       const key = `${item.part_name}_${item.part_model}`;
                                       map2[key] = item;
                                     });
@@ -2096,7 +2191,7 @@ export default function Projects() {
                                       compareText += `【${idx + 1}】${snap.created_at || ''}\n`;
                                       compareText += `  BOM: ¥${Number(snap.bom_cost || 0).toFixed(2)}\n`;
                                       compareText += `  整机: ¥${Number(snap.total_cost || 0).toFixed(2)}\n`;
-                                      compareText += `  费率: ${snap.platform_fee_rate || 0}% + ${snap.profit_rate || 0}%\n`;
+                                      compareText += `  平台费率: ${snap.platform_fee_rate || 0}%（利润率 ${snap.profit_rate || 0}% 仅作历史兼容记录）\n`;
                                       compareText += `  模块/器件: ${snap.module_count || 0} / ${snap.item_count || 0}\n\n`;
                                     });
 
@@ -2240,7 +2335,7 @@ export default function Projects() {
               })(),
             },
             {
-              key: 'reviews', label: <span><BarChartOutlined /> 成本测算</span>, children: (
+              key: 'reviews', label: <span><BarChartOutlined /> 阶段评审</span>, children: (
                 <div>
                   <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { setEditing(null); form.resetFields(); setReviewModal(true); }} style={{ marginBottom: 12 }}>添加测算</Button>
                   {/* Trend chart */}
@@ -2278,7 +2373,9 @@ export default function Projects() {
                     columns={[
                       { title: '领域', dataIndex: 'main_category', width: 80, render: (v: string) => <Tag color={getCategoryColor(v)}>{v}</Tag> },
                       { title: '措施', dataIndex: 'measure' },
-                      { title: '状态', dataIndex: 'status', width: 80, render: (v: string) => <Tag color={v === '已完成' ? 'green' : v === '执行中' ? 'blue' : 'default'}>{v}</Tag> },
+                      { title: '预计节省', dataIndex: 'forecast_saving', width: 90, align: 'right' as const, render: (v: number) => v ? `¥${Number(v).toFixed(2)}` : '—' },
+                      { title: '已实现', dataIndex: 'realized_saving', width: 90, align: 'right' as const, render: (v: number) => v ? `¥${Number(v).toFixed(2)}` : '—' },
+                      { title: '状态', dataIndex: 'status', width: 80, render: (v: string) => <Tag color={['已完成', '已实现'].includes(v) ? 'green' : v === '执行中' ? 'blue' : 'default'}>{v}</Tag> },
                       { title: '负责人', dataIndex: 'owner', width: 70 }, { title: '截止', dataIndex: 'due_date', width: 100 },
                       { title: '操作', width: 100, render: (_: any, r: any) => (
                         <Space size="small">
@@ -2379,7 +2476,7 @@ export default function Projects() {
                       <Space wrap>
                         <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { setSkuEdit(null); skuForm.resetFields(); setSkuModal(true); }}>添加 SKU</Button>
                         <Button size="small" icon={<PlusCircleOutlined />} onClick={() => { addPartForm.resetFields(); setAddPartModal(true); }}>＋ 新增差异器件</Button>
-                        <Upload beforeUpload={handleSkuImportFile} showUploadList={false} accept=".xlsx,.xls"><Button size="small" icon={<UploadOutlined />}>导入差异（Excel）</Button></Upload>
+                        <Upload beforeUpload={handleSkuImportFile} showUploadList={false} accept=".xlsx,.xls"><Button size="small" icon={<UploadOutlined />}>导入差异（Excel）</Button></Upload><Button size="small" icon={<DownloadOutlined />} onClick={downloadSkuDiffTemplate}>模板</Button>
                         {skus.length > 0 && <Button size="small" icon={<EyeOutlined />} onClick={() => setSkuDetail(skus[0])}>查看全量 BOM</Button>}
                         <span style={{ fontSize: 11.5, color: '#94A3B8' }}>
                           点某 SKU 的格子编辑：数量/单价直接改，填「换型号」= 替换（如 8GB→16GB），⊖ 移除（如 outbox→inbox 简包装）；改回基座值自动还原；基座降价自动联动所有 SKU
@@ -2394,7 +2491,7 @@ export default function Projects() {
                             <tr style={{ background: '#F8FAFC' }}>
                               <th style={{ padding: '6px 8px', borderBottom: '1px solid #E8ECF1', textAlign: 'left', whiteSpace: 'nowrap' }}>模块 / 器件</th>
                               <th style={{ padding: '6px 8px', borderBottom: '1px solid #E8ECF1', textAlign: 'left', whiteSpace: 'nowrap' }}>型号</th>
-                              <th style={{ padding: '6px 8px', borderBottom: '1px solid #E8ECF1', textAlign: 'right', background: '#EEF2FF', whiteSpace: 'nowrap' }}>基座<br /><span style={{ fontWeight: 400 }}>¥{bomTotal.toFixed(2)}</span></th>
+                              <th style={{ padding: '6px 8px', borderBottom: '1px solid #E8ECF1', textAlign: 'right', background: '#EEF2FF', whiteSpace: 'nowrap' }}>基座<br /><span style={{ fontWeight: 400 }}>{bomTotalLabel}</span></th>
                               {skus.map(s => (
                                 <th key={s.id} style={{ padding: '6px 8px', borderBottom: '1px solid #E8ECF1', textAlign: 'right', background: '#FAF5FF', whiteSpace: 'nowrap' }}>
                                   {s.sku_code}{s.sku_name ? ` ${s.sku_name}` : ''}<br />
@@ -2604,7 +2701,7 @@ export default function Projects() {
           ))}
           {negotiationRows.length === 0 && <div className="project-rail-empty">当前 BOM 暂无可分析器件。</div>}
         </div>
-        <Button type="primary" block onClick={() => { setNegotiationOpen(false); setActiveTab('tender'); }}>进入招标工作台查看报价证据</Button>
+        <Button type="primary" block onClick={() => { setNegotiationOpen(false); selectProjectTab('tender'); }}>进入招标工作台查看报价证据</Button>
       </Drawer>
 
       <Modal
@@ -2624,9 +2721,20 @@ export default function Projects() {
         </div>
       </Modal>
 
+      <Modal title="BOM 回收站" open={recycleOpen} footer={null} onCancel={() => setRecycleOpen(false)} width={760}>
+        <Alert type="info" showIcon message="软删除的 BOM 行会保留原始报价和修改记录；恢复后回到当前 BOM 草稿，不会改写已冻结版本。" style={{ marginBottom: 12 }} />
+        {deletedBoms.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="回收站为空" /> : <Table size="small" rowKey="id" pagination={false} dataSource={deletedBoms} columns={[
+          { title: '模块', dataIndex: 'module_name', width: 120 },
+          { title: '器件', dataIndex: 'part_name', ellipsis: true },
+          { title: '型号', dataIndex: 'part_model', ellipsis: true },
+          { title: '删除时间', dataIndex: 'deleted_at', width: 160 },
+          { title: '操作', width: 90, render: (_: any, row: any) => <Button type="link" size="small" onClick={async () => { await restoreBOMItem(row.id); setDeletedBoms(await getDeletedBOMItems(selectedPid!)); await loadBOM(selectedPid!); await loadCostSnapshots(selectedPid!); message.success('BOM 项已恢复'); }}>恢复</Button> },
+        ]} />}
+      </Modal>
+
       {/* Project edit modal */}
       <Modal title={editing?.id ? '编辑项目' : '新建项目'} open={modalOpen} onOk={handleSaveProject} onCancel={() => { setModalOpen(false); setEditing(null); }} width={640} destroyOnClose>
-        <Form form={form} layout="vertical" initialValues={editing || { project_type: '在研', tier: '主流级', status: '进行中', category: '未分类', specs: '', platform_fee_rate: 0, profit_rate: 0 }}>
+        <Form form={form} layout="vertical" initialValues={editing || { project_type: '在研', stage: 'Charter', tier: '主流级', status: '进行中', category: '未分类', specs: '', platform_fee_rate: 0, profit_rate: 0 }}>
           <Row gutter={16}>
             <Col span={8}><Form.Item label="项目代号*" name="code" rules={[{ required: true }]}><Input /></Form.Item></Col>
             <Col span={8}><Form.Item label="项目名称*" name="name" rules={[{ required: true }]}><Input /></Form.Item></Col>
@@ -2635,7 +2743,8 @@ export default function Projects() {
           <Row gutter={16}>
             <Col span={8}><Form.Item label="品类" name="category" extra="如：显示器、手写笔、鼠标"><AutoComplete options={categories.map((c: any) => ({ label: c.name, value: c.name }))} placeholder="选择或输入品类" allowClear /></Form.Item></Col>
             <Col span={8}><Form.Item label="档位" name="tier"><Select options={TIERS.map(t => ({ label: t, value: t }))} /></Form.Item></Col>
-            <Col span={8}><Form.Item label="状态" name="status"><Select options={PROJECT_STATUSES.map(s => ({ label: s, value: s }))} /></Form.Item></Col>
+            <Col span={4}><Form.Item label="阶段" name="stage"><Select options={['Charter', 'CDCP', 'PDCP', 'ADCP', '量产后降本'].map(stage => ({ label: stage, value: stage }))} /></Form.Item></Col>
+            <Col span={4}><Form.Item label="状态" name="status"><Select options={PROJECT_STATUSES.map(s => ({ label: s, value: s }))} /></Form.Item></Col>
           </Row>
           {watchCategory === '显示器' ? (
             <Row gutter={16}>
@@ -2645,10 +2754,15 @@ export default function Projects() {
               <Col span={4}><Form.Item label="面板" name="panel_type"><Select options={PANEL_TYPES.map(p => ({ label: p, value: p }))} allowClear /></Form.Item></Col>
             </Row>
           ) : (
-            <Form.Item label="关键规格" name="specs" extra="该品类的核心规格（如：DPI/传感器/连接方式，或 SoC/内存/存储），用于列表展示与后续成本参考">
-              <Input placeholder="如：无线 / DPI 1600 / 重量 89g" />
+            <Form.Item label={watchCategory === '手写笔' ? '关键规格（笔尖 / 压感 / 延迟）' : watchCategory === '鼠标' ? '关键规格（DPI / 重量 / 连接）' : '关键规格'} name="specs" extra="非显示器品类不填写屏幕尺寸；把影响报价和选型的关键指标写在这里">
+              <Input placeholder={watchCategory === '手写笔' ? '如：笔尖 0.7mm / 8192级 / 延迟 10ms' : watchCategory === '鼠标' ? '如：PAW3395 / 26000 DPI / 59g / 2.4G+蓝牙' : '如：无线 / DPI 1600 / 重量 89g'} />
             </Form.Item>
           )}
+          <Row gutter={16}>
+            <Col span={8}><Form.Item label="目标售价(¥)" name="target_price" extra="Charter 输入，不反推成本"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+            <Col span={8}><Form.Item label="财务整机目标成本(¥)" name="financial_target_cost" extra="由财务录入，不自动推导"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+            <Col span={8}><Form.Item label="Charter 假设" name="charter_assumptions"><Input placeholder="主要假设与风险" /></Form.Item></Col>
+          </Row>
           <Row gutter={16}>
             <Col span={8}><Form.Item label="平台费率(%)" name="platform_fee_rate"><InputNumber min={0} max={100} style={{ width: '100%' }} /></Form.Item></Col>
             <Col span={8}><Form.Item label="利润/管销研费率(%)" name="profit_rate"><InputNumber min={0} max={100} style={{ width: '100%' }} /></Form.Item></Col>
@@ -2760,10 +2874,7 @@ export default function Projects() {
               mainCategory: v._main_category ?? bomEdit.main_category,
               subCategory: v._sub_category ?? bomEdit.sub_category,
             });
-            // Sync to parts library
-            if (bomEdit.part_id) {
-              await savePart({ id: bomEdit.part_id, main_category: v._main_category || bomEdit.main_category, sub_category: v._sub_category || bomEdit.sub_category, category: v._main_category || bomEdit.main_category, name: v._part_name || bomEdit.part_name, model: v._part_model || bomEdit.part_model, cost: v._cost ?? bomEdit.part_cost, specs: bomEdit.part_specs || '', projects: bomEdit.projects || '', remark: v.remark || '' }, false);
-            }
+            // BOM 编辑只更新项目快照，不反向改写器件主档或其他项目的价格事实。
             await recordProjectCostSnapshot(selectedPid!, 'part_changed', `调整BOM项：${v._part_name || bomEdit.part_name || ''}`);
           } else if (mode === 'module') {
             // Import all items from selected module
@@ -2988,7 +3099,7 @@ export default function Projects() {
           <Form.Item label="新名称" name="name" rules={[{ required: true }]}><Input /></Form.Item>
         </Form>
       </Modal>
-      <Modal title="成本测算" open={reviewModal} onOk={async () => { const v = await form.validateFields(); const date = v._review_date; await saveCostReview({ project_id: selectedPid, stage: v.stage, reviewed_cost: v.reviewed_cost, reviewer: v.reviewer, remark: v.remark, reviewed_at: date ? date.format('YYYY-MM-DD HH:mm:ss') : undefined }); setReviewModal(false); loadReviews(selectedPid!); }} onCancel={() => setReviewModal(false)} width={420}>
+      <Modal title="阶段评审" open={reviewModal} onOk={async () => { const v = await form.validateFields(); const date = v._review_date; await saveCostReview({ project_id: selectedPid, stage: v.stage, reviewed_cost: v.reviewed_cost, reviewer: v.reviewer, remark: v.remark, reviewed_at: date ? date.format('YYYY-MM-DD HH:mm:ss') : undefined }); setReviewModal(false); loadReviews(selectedPid!); }} onCancel={() => setReviewModal(false)} width={420}>
         <Form form={form} layout="vertical">
           <Form.Item label="阶段" name="stage" rules={[{ required: true }]}><Select options={['Charter','CDCP','PDCP','ADCP','量产后降本'].map(s=>({label:s,value:s}))} /></Form.Item>
           <Form.Item label="成本(¥)" name="reviewed_cost" rules={[{ required: true }]}><InputNumber min={0} style={{ width:'100%' }} prefix="¥" /></Form.Item>
@@ -2999,8 +3110,8 @@ export default function Projects() {
           <Form.Item label="备注" name="remark"><Input /></Form.Item>
         </Form>
       </Modal>
-      <Modal title={editing?.id ? '编辑措施' : '添加降本措施'} open={measureModal} onOk={async () => { const v = await form.validateFields(); await saveMeasure({ project_id: selectedPid, ...editing, ...v }); setMeasureModal(false); setEditing(null); loadMeasures(selectedPid!); message.success('已保存'); }} onCancel={() => { setMeasureModal(false); setEditing(null); }}>
-        <Form form={form} layout="vertical"><Form.Item label="领域" name="main_category" rules={[{ required: true }]}><Select options={mainCats.map(c=>({label:c,value:c}))} /></Form.Item><Form.Item label="措施" name="measure" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="状态" name="status"><Select options={MEASURE_STATUSES.map(s=>({label:s,value:s}))} /></Form.Item><Form.Item label="负责人" name="owner"><Input /></Form.Item><Form.Item label="截止" name="due_date"><Input /></Form.Item><Form.Item label="备注" name="remark"><Input /></Form.Item></Form>
+      <Modal title={editing?.id ? '编辑措施' : '添加降本措施'} open={measureModal} onOk={async () => { const v = await form.validateFields(); if (['已实现', '已完成'].includes(v.status) && Number(v.realized_saving || 0) > 0 && !String(v.realized_evidence || '').trim()) { message.warning('已实现降本必须填写报价或 BOM 版本证据'); return; } await saveMeasure({ project_id: selectedPid, ...editing, ...v }); setMeasureModal(false); setEditing(null); loadMeasures(selectedPid!); message.success('已保存'); }} onCancel={() => { setMeasureModal(false); setEditing(null); }}>
+        <Form form={form} layout="vertical"><Form.Item label="领域" name="main_category" rules={[{ required: true }]}><Select options={mainCats.map(c=>({label:c,value:c}))} /></Form.Item><Form.Item label="措施" name="measure" rules={[{ required: true }]}><Input /></Form.Item><Form.Item label="状态" name="status"><Select options={MEASURE_STATUSES.map(s=>({label:s,value:s}))} /></Form.Item><Row gutter={12}><Col span={12}><Form.Item label="预计节省（¥）" name="forecast_saving"><InputNumber min={0} precision={2} style={{ width: '100%' }} /></Form.Item></Col><Col span={12}><Form.Item label="已实现节省（¥）" name="realized_saving"><InputNumber min={0} precision={2} style={{ width: '100%' }} /></Form.Item></Col></Row><Form.Item label="实现证据（报价/BOM版本）" name="realized_evidence"><Input placeholder="如：报价批次#12、BOM v3" /></Form.Item><Form.Item label="负责人" name="owner"><Input /></Form.Item><Form.Item label="截止" name="due_date"><Input /></Form.Item><Form.Item label="备注" name="remark"><Input /></Form.Item></Form>
       </Modal>
       {/* ODM 整机供应商编辑弹窗 */}
       {(() => {
@@ -3025,7 +3136,7 @@ export default function Projects() {
       >
         <Form form={psForm} layout="vertical" initialValues={{ is_active: 1 }}>
           <Form.Item label="ODM 供应商名称" name="supplier_name" rules={[{ required: true, message: '请输入供应商名称' }]}>
-            <Input placeholder="如：富士康、冠捷" />
+            <SupplierNameInput />
           </Form.Item>
           <Form.Item label="整机报价(¥)" name="quoted_price" rules={[{ required: true, message: '请输入整机报价' }]}>
             <InputNumber min={0} style={{ width: '100%' }} prefix="¥" placeholder="整机含税报价" />
@@ -3132,7 +3243,7 @@ export default function Projects() {
           return (
             <div>
               <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 12, alignItems: 'flex-end' }}>
-                <div><div style={{ fontSize: 10.5, color: '#94A3B8' }}>基座 BOM 成本</div><b style={{ fontSize: 16, fontVariantNumeric: 'tabular-nums' }}>¥{bomTotal.toFixed(2)}</b></div>
+                <div><div style={{ fontSize: 10.5, color: '#94A3B8' }}>基座 BOM 成本</div><b style={{ fontSize: 16, fontVariantNumeric: 'tabular-nums' }}>{bomTotalLabel}</b></div>
                 <div><div style={{ fontSize: 10.5, color: '#94A3B8' }}>差异合计</div><b style={{ fontSize: 16, color: c.delta > 0 ? '#D97706' : c.delta < 0 ? '#10B981' : '#64748B', fontVariantNumeric: 'tabular-nums' }}>{c.delta > 0 ? '+' : ''}{c.delta.toFixed(2)}</b></div>
                 <div><div style={{ fontSize: 10.5, color: '#94A3B8' }}>SKU 整机成本</div><b style={{ fontSize: 22, color: '#CF0A2C', fontVariantNumeric: 'tabular-nums' }}>¥{c.cost.toFixed(2)}</b></div>
                 {skuDetail.spec_desc && <div style={{ maxWidth: 320 }}><div style={{ fontSize: 10.5, color: '#94A3B8' }}>规格差异</div><span style={{ fontSize: 12 }}>{skuDetail.spec_desc}</span></div>}
@@ -3390,11 +3501,11 @@ export default function Projects() {
       </Modal>
 
       {/* ====== 报价情报弹窗（后台自动识别发现的问题） ====== */}
-      <Modal title={<span><BulbOutlined /> AI 情报中心（报价差异 · 自主建议 · 巡检发现）</span>} open={insightModal} onCancel={() => setInsightModal(false)} footer={null} width={820}
+      <Modal title={<span><BulbOutlined /> AI 情报中心（报价差异 · 自主建议 · 巡检发现）</span>} open={insightModal} onCancel={() => { insightOpenGeneration.current++; setInsightModal(false); }} footer={null} width={820}
         styles={{ body: { maxHeight: '72vh', overflow: 'auto' } }}>
         <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <Segmented size="small" value={aiTab} onChange={(v: any) => setAiTab(v as any)}
-            options={[{ label: '📊 报价差异', value: 'diff' }, { label: '💡 自主建议', value: 'advice' }, { label: '🔍 巡检发现', value: 'audit' }]} />
+          <Segmented size="small" value={aiTab} onChange={(v: any) => { insightOpenGeneration.current++; setAiTab(v as any); }}
+            options={[{ label: `报价差异 ${insights.filter((x: any) => x.status === 'unread').length}`, value: 'diff' }, { label: `自主建议 ${adviceList.filter((x: any) => x.status === 'open').length}`, value: 'advice' }, { label: `巡检发现 ${auditList.filter((x: any) => x.status === 'unread').length}`, value: 'audit' }]} />
           <span style={{ fontSize: 11.5, color: '#94A3B8' }}>
             {aiTab === 'diff' ? '跨项目同物料报价差异（确认/标记/归档）' : aiTab === 'advice' ? '成本机会/风险点（后台规则发现 + AI 润色）' : '数据质量与风险检查（可标记已读/忽略）'}
           </span>
@@ -3405,8 +3516,24 @@ export default function Projects() {
               <Button size="small" type={adviceShowDone ? 'default' : 'primary'} onClick={() => setAdviceShowDone(!adviceShowDone)}>
                 {adviceShowDone ? '显示全部' : '仅看待处理'}{(() => { const c = adviceList.filter((x: any) => x.status !== 'open').length; return c > 0 ? `（已处理 ${c}）` : ''; })()}
               </Button>
-              <span style={{ fontSize: 11.5, color: '#94A3B8' }}>处理入口与完整详情见驾驶舱「待处理事项」</span>
+              <span style={{ fontSize: 11.5, color: '#94A3B8' }}>展开建议查看依据，并选择后续处理动作</span>
             </div>
+            {recommendationList.length > 0 && <details style={{ marginBottom: 12 }}><summary style={{ cursor: 'pointer', color: 'var(--color-text-secondary)', padding: '8px 0' }}>结构化分析参考（{recommendationList.length} 条）</summary>{(() => {
+              const list = adviceShowDone ? recommendationList : recommendationList.filter(item => item.status === 'open');
+              if (list.length === 0) return <div style={{ textAlign: 'center', padding: 30, color: '#94A3B8', fontSize: 12 }}>暂无待处理结构化建议</div>;
+              return list.map(recommendation => (
+                <RecommendationCard
+                  key={`structured-${recommendation.id}`}
+                  recommendation={recommendation}
+                  onOpen={() => openRecommendation(recommendation)}
+                  onTodo={() => recommendationTodo(recommendation)}
+                  onAdopt={() => recommendationFeedback(recommendation, { adoptionStatus: 'adopted' })}
+                  onResult={input => recommendationFeedback(recommendation, { adoptionStatus: 'done', ...input })}
+                  onUseful={() => recommendationFeedback(recommendation, { usefulness: 'useful' })}
+                  onNotUseful={() => recommendationFeedback(recommendation, { usefulness: 'not_useful' })}
+                />
+              ));
+            })()}</details>}
             {(() => {
               const list = adviceShowDone ? adviceList : adviceList.filter((x: any) => x.status === 'open');
               if (list.length === 0) return <div style={{ textAlign: 'center', padding: 30, color: '#94A3B8', fontSize: 12 }}>暂无建议——系统空闲时自动分析成本机会/风险点</div>;
@@ -3421,6 +3548,8 @@ export default function Projects() {
                   <div style={{ fontSize: 12, color: '#64748B', lineHeight: 1.6, marginTop: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{a.detail}</div>
                   {a.status === 'open' && (
                     <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
+                      <Button size="small" type="primary" onClick={() => void convertAdvisorToMeasure(a)}>转为措施</Button>
+                      {a.ref_type === 'part' && <Button size="small" onClick={() => void convertAdvisorToNegotiation(a)}>转为谈价项</Button>}
                       <Button size="small" type="primary" onClick={async () => { try { await updateAdvisorStatus(a.id, 'done'); window.dispatchEvent(new CustomEvent('costhub-advisor-done')); const r = await getAdvisorInsights(); setAdviceList(r); } catch (e: any) { message.error('操作失败：' + String(e?.message || e)); } }}>✓ 已处理</Button>
                       <Button size="small" onClick={async () => { try { await updateAdvisorStatus(a.id, 'dismissed'); window.dispatchEvent(new CustomEvent('costhub-advisor-done')); const r = await getAdvisorInsights(); setAdviceList(r); } catch (e: any) { message.error('操作失败：' + String(e?.message || e)); } }}>忽略</Button>
                     </div>
@@ -3433,7 +3562,7 @@ export default function Projects() {
         {aiTab === 'audit' && (
           <div>
             {(() => {
-              const list = auditList;
+              const list = [...auditList].sort((a, b) => Number(b.status === 'unread') - Number(a.status === 'unread'));
               if (list.length === 0) return <div style={{ textAlign: 'center', padding: 30, color: '#94A3B8', fontSize: 12 }}>暂无巡检发现——数据无异常时保持安静</div>;
               return list.map((ft: any) => (
                 <div key={ft.id} style={{ padding: '9px 12px', background: ft.level === 'warn' ? '#FFFBEB' : '#F0F7FF', border: ft.level === 'warn' ? '1px solid #FDE68A' : '1px solid #BFDBFE', borderRadius: 8, marginBottom: 6 }}>
@@ -3453,7 +3582,7 @@ export default function Projects() {
         <>
         <div style={{ marginBottom: 10, fontSize: 12, color: '#94A3B8' }}>
           导入 BOM 或报价变动后自动后台识别；发现"疑似同物料但报价差异明显"时在此提醒。
-          确认同一 → 沉淀别名自动归组（组即消除，不再重现）；标记不同 → AI 永不再建议；归档（已读）→ 移出待处理，可在「全部」查看或恢复。
+          确认同一 → 沉淀别名自动归组（组即消除，不再重现）；标记不同 → 沉淀否定组合，AI/规则均不再建议；归档（已读）→ 移出待处理，可在「全部」查看或恢复。
         </div>
         <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
           <Segmented size="small" value={insightView} options={[{ label: '待处理', value: 'pending' }, { label: '全部', value: 'all' }, { label: '已处理', value: 'done' }]}
@@ -3584,3 +3713,4 @@ export default function Projects() {
     </div>
   );
 }
+

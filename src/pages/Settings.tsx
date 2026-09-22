@@ -1,4 +1,6 @@
+import { requestChannel } from '../ai/requestChannel';
 import { useEffect, useState, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { EmojiIcon } from '../iconMap';
 import * as XLSX from 'xlsx';
 import {
@@ -7,7 +9,7 @@ import {
 } from 'antd';
 import {
   ApiOutlined, CheckCircleOutlined, DeleteOutlined, EditOutlined,
-  LinkOutlined, SafetyCertificateOutlined, CloudServerOutlined, ThunderboltOutlined,
+  LinkOutlined, SafetyCertificateOutlined, ThunderboltOutlined,
   PlusOutlined, DragOutlined, CheckOutlined, CloseOutlined, KeyOutlined,
   StopOutlined, HistoryOutlined, SettingOutlined, SearchOutlined, RobotOutlined,
   BulbOutlined, BookOutlined, RadarChartOutlined, LockOutlined, UserOutlined, DatabaseOutlined, DownloadOutlined, FileTextOutlined, FolderOpenOutlined, QuestionCircleOutlined,
@@ -20,10 +22,13 @@ import {
   getApiProviders, saveApiProvider, deleteApiProvider, setActiveProvider,
   PRESET_PROVIDERS, updateProviderPriorities, ensurePresetProviders,
   getAllChecklistWithLogs, updateChecklistActive, deleteAnalysisChecklistItem,
-getWriteAuditLogs } from '../db';
-import { encryptText } from '../apiConfig';
+  getWriteAuditLogs, getSetting, setSetting } from '../db';
 import LocalAISecurityStatus from '../components/LocalAISecurityStatus';
+import LocalBackendSettings from '../components/LocalBackendSettings';
 import CloudPolicyControl from '../components/CloudPolicyControl';
+import { getEvalResults, getRecommendationMetrics } from '../db/ai';
+import { runLocalEvaluation } from '../ai/eval/run';
+import { summarizeEval, type EvalScore } from '../ai/eval/scorer';
 
 const STRENGTH_COLORS: Record<string, string> = {
   'observing': '#94A3B8',
@@ -35,6 +40,10 @@ const STRENGTH_LABELS: Record<string, string> = {
   'active': '已生效',
   'stable': '稳定记忆',
 };
+
+function InfoTip({ children }: { children: ReactNode }) {
+  return <Tooltip title={children} overlayStyle={{ maxWidth: 460 }}><QuestionCircleOutlined className="settings-info-tip" tabIndex={0} aria-label="查看说明" /></Tooltip>;
+}
 
 export default function Settings({embedded }: { embedded?: boolean }) {
   // AI 写入记录加载（2026-08-19 防止工具乱改：展示审计留痕 + 撤销）
@@ -62,6 +71,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
   const [activeTab, setActiveTab] = useState('search');
   // ====== 左侧导航分类（Claude 风格设置页） ======
   const [activeSection, setActiveSection] = useState('ai');
+  const [auditView, setAuditView] = useState<'local' | 'egress' | 'write'>('local');
   const SECTIONS = [
     { key: 'ai', label: '本地 AI', icon: <RobotOutlined />, desc: '本机模型 / 分析记忆' },
     { key: 'skills', label: '分析框架', icon: <RadarChartOutlined />, desc: 'Skill 方法论配置' },
@@ -104,8 +114,14 @@ export default function Settings({embedded }: { embedded?: boolean }) {
   };
   // ====== Token 用量统计 ======
   const [tokenStats, setTokenStats] = useState<any>(null);
+  const [evalSummary, setEvalSummary] = useState<ReturnType<typeof summarizeEval> | null>(null);
+  const [evalRows, setEvalRows] = useState<any[]>([]);
+  const [recommendationMetrics, setRecommendationMetrics] = useState<any>(null);
+  const [evalRunning, setEvalRunning] = useState(false);
   // 模型原生搜索开关（DeepSeek 官方 web_search）
   const [nativeSearchEnabled, setNativeSearchEnabled] = useState(true);
+  const [localSemanticReview, setLocalSemanticReview] = useState(false);
+  useEffect(() => { getSetting('ai_local_semantic_review', '0').then(value => setLocalSemanticReview(value === '1')).catch(() => {}); }, []);
   // ====== 数据管理（备份/恢复） ======
   const [backups, setBackups] = useState<any[]>([]);
   const [backingUp, setBackingUp] = useState(false);
@@ -113,9 +129,35 @@ export default function Settings({embedded }: { embedded?: boolean }) {
   const [exportTypes, setExportTypes] = useState<string[]>(['parts']);
   const [exporting, setExporting] = useState(false);
   const [exports, setExports] = useState<any[]>([]);
+  const [defaultAiWorkFolder, setDefaultAiWorkFolder] = useState('');
+  const [aiWorkFolder, setAiWorkFolder] = useState('');
   // 项目导出范围：'' = 全部项目，否则为指定项目 id
   const [exportProjectId, setExportProjectId] = useState<number | ''>('');
   const [allProjects, setAllProjects] = useState<any[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const defaultPath = await invoke<string>('get_default_ai_work_folder');
+        setDefaultAiWorkFolder(defaultPath);
+        setAiWorkFolder(await getSetting('ai_work_folder', ''));
+      } catch { /* 浏览器预览环境没有 Tauri 路径 */ }
+    })();
+  }, []);
+
+  const saveAiWorkFolder = async (value: string) => {
+    const next = value.trim();
+    try {
+      if (next) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('validate_ai_work_folder', { path: next });
+      }
+      await setSetting('ai_work_folder', next);
+      setAiWorkFolder(next);
+      message.success(next ? 'AI 工作文件夹已保存' : '已恢复跟随程序目录');
+    } catch (error) { message.error('文件夹不可用：' + String((error as Error).message || error)); }
+  };
 
   useEffect(() => {
     (async () => {
@@ -138,7 +180,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
   const loadExports = async () => {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      setExports(await invoke<any[]>('list_exports'));
+      setExports(await invoke<any[]>('list_exports', { targetDir: aiWorkFolder.trim() || undefined }));
     } catch { /* 忽略 */ }
   };
 
@@ -324,7 +366,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
       const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
       const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
       const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('save_export_file', { fileName: fname, base64Data: b64 });
+      await invoke('save_export_file', { fileName: fname, base64Data: b64, targetDir: aiWorkFolder.trim() || undefined });
       message.success(`已导出 ${fname}（${exportTypes.length} 类内容）`);
       loadExports();
     } catch (e: any) {
@@ -402,6 +444,44 @@ export default function Settings({embedded }: { embedded?: boolean }) {
     } catch { }
   };
   useEffect(() => { loadTokenStats(); }, []);
+
+  const loadEvalMetrics = async () => {
+    try {
+      const [rows, feedback] = await Promise.all([getEvalResults(200), getRecommendationMetrics()]);
+      setEvalRows(rows);
+      setRecommendationMetrics(feedback);
+      const byFixture = new Map<string, EvalScore>();
+      const seenMetrics = new Set<string>();
+      for (const row of rows) {
+        const score = byFixture.get(row.fixture_id) || {
+          fixtureId: row.fixture_id, toolSuccess: 0, evidenceCoverage: 0, toolSelection: 0, numericAccuracy: 0,
+          durationMs: 0, recommendationAdoption: 0, actualSaving: 0, leakageBlocked: 0, safeWriteBlocked: 0,
+        };
+        const metricKey = `${row.fixture_id}:${row.metric}`;
+        if (row.metric in score && !seenMetrics.has(metricKey)) {
+          (score as any)[row.metric] = Number(row.score) || 0;
+          seenMetrics.add(metricKey);
+        }
+        byFixture.set(row.fixture_id, score);
+      }
+      setEvalSummary(byFixture.size ? summarizeEval([...byFixture.values()]) : null);
+    } catch { /* 数据库尚未初始化时保持空状态 */ }
+  };
+  useEffect(() => { loadEvalMetrics(); }, []);
+
+  const runEvaluation = async () => {
+    setEvalRunning(true);
+    try {
+      const result = await runLocalEvaluation();
+      setEvalSummary(result.summary);
+      await loadEvalMetrics();
+      message.success(`本地脱敏评测完成：${result.summary.count} 个样例`);
+    } catch (e: any) {
+      message.error('评测失败：' + String(e?.message || e).slice(0, 160));
+    } finally {
+      setEvalRunning(false);
+    }
+  };
 
   const handleChangePwd = async () => {
     if (!oldPwd) { message.warning('请输入当前密码'); return; }
@@ -508,16 +588,28 @@ export default function Settings({embedded }: { embedded?: boolean }) {
   };
 
   const loadProviders = async () => {
-    try { setProviders(await getApiProviders()); } catch (e) { console.error(e); }
+    try { setProviders(await getApiProviders()); } catch (e: any) { console.error(e); message.error(`供应商配置读取失败：${String(e?.message || e).slice(0, 160)}`); }
   };
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await ensurePresetProviders();
-      await loadProviders();
-      await loadMemoryItems();
-      setLoading(false);
+      try {
+        await loadProviders();
+      } catch (e) {
+        console.error('系统设置初始化失败', e);
+      } finally {
+        setLoading(false);
+      }
+      void (async () => {
+        try {
+          await ensurePresetProviders();
+          await loadProviders();
+        } catch (e) {
+          console.error('预置服务加载失败', e);
+        }
+      })();
+      void loadMemoryItems();
     })();
   }, []);
 
@@ -568,32 +660,20 @@ export default function Settings({embedded }: { embedded?: boolean }) {
 
   const handleSaveProvider = async () => {
     if (!editingProvider?.provider_name) { message.warning('请输入供应商名称'); return; }
-    const data = { ...editingProvider };
-    const looksEncrypted = data.api_key && data.api_key.startsWith('{') && data.api_key.includes('"salt"');
-    if (data.api_key && data.api_key.length > 0 && !looksEncrypted) {
-      try {
-        data.api_key = await encryptText(data.api_key);
-      } catch (e: any) {
-        message.warning('Key 加密失败，将以明文存储（不推荐）');
-      }
+    try {
+      const activate = editingProvider.is_active || !editingProvider.id || Boolean(String(editingProvider.api_key || '').trim());
+      await saveApiProvider({ ...editingProvider, is_active: activate ? 1 : 0 });
+      message.success('已保存；API Key 只显示配置状态，不会回显明文');
+      setProviderModalOpen(false);
+      setEditingProvider(null);
+      await loadProviders();
+    } catch (e: any) {
+      message.error(`保存供应商失败：${String(e?.message || e).slice(0, 200)}`);
     }
-    await saveApiProvider(data);
-    message.success('已保存');
-    setProviderModalOpen(false);
-    setEditingProvider(null);
-    loadProviders();
   };
 
   const openEditProvider = async (provider: any) => {
-    if (provider.api_key && provider.api_key.startsWith('{')) {
-      try {
-        const { decryptText } = await import('../apiConfig');
-        const decrypted = await decryptText(provider.api_key);
-        setEditingProvider({ ...provider, api_key: decrypted });
-      } catch { setEditingProvider({ ...provider, api_key: '' }); }
-    } else {
-      setEditingProvider({ ...provider });
-    }
+    setEditingProvider({ ...provider, api_key: '' });
     setProviderModalOpen(true);
   };
 
@@ -614,6 +694,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
       base_url: preset.base_url || '',
       model_name: preset.model_name || '',
       priority: preset.priority || 50,
+      is_active: 1,
       is_preset: 0,
       monthly_quota_note: preset.monthly_quota_note || '',
       registration_url: preset.registration_url || '',
@@ -637,14 +718,10 @@ export default function Settings({embedded }: { embedded?: boolean }) {
     setTestingLLM(false);
   };
 
-  const maskKey = (key: string) => {
-    if (!key || key.length < 8) return '未配置';
-    return key.slice(0, 4) + '••••••••' + key.slice(-4);
-  };
-
   const renderProviderCard = (provider: any) => {
     const isDrag = dragId === provider.id;
-    const hasKey = provider.api_key && provider.api_key.length > 10;
+    const hasKey = provider.credential_configured;
+    const keyReadError = Boolean(provider.credential_error);
     return (
       <div
         key={provider.id}
@@ -702,10 +779,11 @@ export default function Settings({embedded }: { embedded?: boolean }) {
               <div style={{ fontSize: 12, lineHeight: '1.8' }}>
                 <div>
                   <KeyOutlined style={{ marginRight: 4 }} />
-                  <Tag color={hasKey ? 'green' : 'red'} style={{ fontSize: 10 }}>
-                    {hasKey ? '已加密' : '未填 Key'}
+                  <Tag color={hasKey ? 'green' : keyReadError ? 'orange' : 'red'} style={{ fontSize: 10 }}>
+                    {hasKey ? '已加密' : keyReadError ? '读取失败' : '未填 Key'}
                   </Tag>
                 </div>
+                {keyReadError && <div style={{ color: '#B45309', fontSize: 11 }}>安全保险库读取失败，请重启应用；仍失败时重新录入 API Key。</div>}
                 {provider.base_url && (
                   <div style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     <ApiOutlined style={{ marginRight: 4 }} />
@@ -733,9 +811,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
                     </a>
                   </div>
                 )}
-                {hasKey && (
-                  <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>Key: {maskKey(provider.api_key)}</div>
-                )}
+                {hasKey && <div style={{ color: 'var(--text-muted)', fontSize: 10 }}>Key: 已由本机安全保险库托管</div>}
               </div>
             }
           />
@@ -802,11 +878,9 @@ export default function Settings({embedded }: { embedded?: boolean }) {
                 fontSize: 15, color: activeSection === s.key ? '#4F46E5' : '#9AA7BD',
                 display: 'inline-flex', width: 20, justifyContent: 'center',
               }}>{s.icon}</span>
-              <div>
-                <div style={{ fontSize: 13.5, fontWeight: activeSection === s.key ? 700 : 500, color: activeSection === s.key ? '#1E293B' : '#475569' }}>
-                  {s.label}
-                </div>
-                <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 1 }}>{s.desc}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ fontSize: 13.5, fontWeight: activeSection === s.key ? 700 : 500, color: activeSection === s.key ? '#1E293B' : '#475569' }}>{s.label}</div>
+                <InfoTip>{s.desc}</InfoTip>
               </div>
             </div>
           ))}
@@ -821,52 +895,36 @@ export default function Settings({embedded }: { embedded?: boolean }) {
       <Alert
         type="success"
         showIcon
-        message="本地 27B 主脑 + 受控云端研究"
-        description="成本数据库只交给本机 Ollama。云端只能通过专用网关查询公开行情：先做敏感字段审查，再按条件进入审批；普通 HTTP、Skill 和模型无法直接访问公网。"
+        message={<span>本地模型 + 受控云端研究 <InfoTip>成本数据库只交给本机 Ollama。云端只能通过专用网关查询公开行情：先做敏感字段审查，再按条件进入审批；普通 HTTP、Skill 和模型无法直接访问公网。</InfoTip></span>}
         style={{ marginBottom: 16 }}
       />
+      <LocalBackendSettings />
       <LocalAISecurityStatus />
+      <Card size="small" title="本地模型敏感复核" style={{ marginBottom: 16 }}>
+        <div style={{ color: '#64748B', fontSize: 12, lineHeight: 1.7, marginBottom: 8 }}>审核外发内容时额外调用本机模型标记潜在敏感片段（未发布产品名、内部代号、报价、客户身份等）。只在本机运行，不把内容发给云端；模型可能误判，标记只作核对提示。</div>
+        <Switch checked={localSemanticReview} onChange={async checked => {
+          setLocalSemanticReview(checked);
+          try { await setSetting('ai_local_semantic_review', checked ? '1' : '0'); message.success(checked ? '已开启本地模型敏感复核（审批时可能变慢）' : '已关闭本地模型敏感复核'); }
+          catch (error) { message.error('保存失败：' + String((error as Error)?.message || error)); }
+        }} /> <span style={{ fontSize: 12, color: '#64748B' }}>{localSemanticReview ? '已开启（审批时可能变慢）' : '已关闭'}</span>
+      </Card>
       <CloudPolicyControl />
-      {/* 顶部提示卡片 */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-        gap: 16,
-        marginBottom: 32
-      }}>
-        <div style={{
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          borderRadius: 12,
-          padding: 20,
-          color: 'white',
-          boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-            <CloudServerOutlined style={{ fontSize: 24 }} />
-            <div style={{ fontSize: 16, fontWeight: 600 }}>工作模式</div>
-          </div>
-          <div style={{ fontSize: 13, opacity: 0.95 }}>
-            本地 27B 模型 + 白名单数据工具，不允许原始 SQL 与外部网络
-          </div>
+      <Card title="AI 工作文件夹" style={{ marginBottom: 16 }}>
+        <div style={{ color: '#64748B', fontSize: 12, lineHeight: 1.7, marginBottom: 8 }}>AI 生成的报告、表格和图表默认保存到程序所在文件夹。自定义目录只影响后续新任务；任务内部临时文件仍保持隔离。</div>
+        <Input value={aiWorkFolder} onChange={event => setAiWorkFolder(event.target.value)} placeholder={`跟随程序目录：${defaultAiWorkFolder || '读取中'}`} aria-label="AI 工作文件夹路径" />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+          <Button onClick={async () => {
+            try {
+              const { invoke } = await import('@tauri-apps/api/core');
+              const picked = await invoke<string | null>('pick_ai_work_folder');
+              if (picked) setAiWorkFolder(picked);
+            } catch (error) { message.error('选择文件夹失败：' + String((error as Error)?.message || error)); }
+          }}>选择文件夹</Button>
+          <Button type="primary" onClick={() => void saveAiWorkFolder(aiWorkFolder)}>保存位置</Button>
+          <Button onClick={() => void saveAiWorkFolder('')}>恢复默认（程序所在文件夹）</Button>
+          <Button icon={<FolderOpenOutlined />} onClick={async () => { try { const { invoke } = await import('@tauri-apps/api/core'); await invoke('open_ai_work_folder', { path: aiWorkFolder.trim() || undefined }); } catch (error) { message.error('无法打开文件夹：' + String((error as Error).message || error)); } }}>打开文件夹</Button>
         </div>
-
-        <div style={{
-          background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-          borderRadius: 12,
-          padding: 20,
-          color: 'white',
-          boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-            <SafetyCertificateOutlined style={{ fontSize: 24 }} />
-            <div style={{ fontSize: 16, fontWeight: 600 }}>隐私保护</div>
-          </div>
-          <div style={{ fontSize: 13, opacity: 0.95 }}>
-            成本、物料、供应商、项目与提示词均不得离开本机
-          </div>
-        </div>
-      </div>
-
+      </Card>
       {/* ====== 供应商管理 ====== */}
       <div style={{
         background: 'white',
@@ -888,10 +946,8 @@ export default function Settings({embedded }: { embedded?: boolean }) {
             }}>
               <ApiOutlined style={{ color: '#8b5cf6' }} />
               供应商管理
+              <InfoTip>配置搜索引擎和 LLM 服务，支持多供应商降级。</InfoTip>
             </h2>
-            <p style={{ margin: '4px 0 0 34px', color: '#6b7280', fontSize: 13 }}>
-              配置搜索引擎和LLM服务，支持多供应商降级
-            </p>
           </div>
           <Space size="middle">
             <Select
@@ -1114,8 +1170,8 @@ export default function Settings({embedded }: { embedded?: boolean }) {
                 <Select.Option value="llm"><RobotOutlined /> 大模型</Select.Option>
               </Select>
             </Form.Item>
-            <Form.Item label="API Key（留空不变，新填则加密存储）">
-              <Input.Password value={editingProvider.api_key || ''} onChange={e => setEditingProvider({ ...editingProvider, api_key: e.target.value })} placeholder="API Key" />
+            <Form.Item label="API Key（留空不变，新填则写入本机安全保险库）" extra={editingProvider.credential_configured ? '已配置；出于安全原因不回显明文，留空保存会保留原 Key。' : editingProvider.credential_error ? '安全保险库读取失败；请重新输入并保存。' : '尚未配置，请输入后保存。'}>
+              <Input.Password value={editingProvider.api_key || ''} onChange={e => setEditingProvider({ ...editingProvider, api_key: e.target.value })} placeholder={editingProvider.credential_configured ? '已配置（留空保持不变）' : 'API Key'} />
             </Form.Item>
             <Form.Item label="Base URL">
               <Input value={editingProvider.base_url || ''} onChange={e => setEditingProvider({ ...editingProvider, base_url: e.target.value })} placeholder="https://api.example.com/v1/chat/completions" />
@@ -1160,10 +1216,8 @@ export default function Settings({embedded }: { embedded?: boolean }) {
           }}>
             <ThunderboltOutlined style={{ color: '#f59e0b' }} />
             分析 Skill 配置
+            <InfoTip>选择洞察时使用的 Skill 框架（可多选），不同 Skill 从不同维度搜索和分析。</InfoTip>
           </h2>
-          <p style={{ margin: '4px 0 0 34px', color: '#6b7280', fontSize: 13 }}>
-            选择洞察时使用的Skill框架（可多选）。不同Skill从不同维度搜索和分析
-          </p>
         </div>
 
         <div>
@@ -1663,10 +1717,8 @@ export default function Settings({embedded }: { embedded?: boolean }) {
       <div style={{ background: 'white', borderRadius: 14, padding: 28, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
         <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0, color: '#111827', display: 'flex', alignItems: 'center', gap: 10 }}>
           <LockOutlined style={{ color: '#4F46E5' }} /> 安全设置
+          <InfoTip>应用访问密码与用户名管理，用于保护成本数据。</InfoTip>
         </h2>
-        <p style={{ margin: '4px 0 0 34px', color: '#6b7280', fontSize: 13 }}>
-          应用访问密码与用户名管理（成本数据机密保护）
-        </p>
         <div style={{ marginTop: 20 }}>
           {/* 用户名设置 */}
           <Card size="small" style={{ marginBottom: 16 }}>
@@ -1720,10 +1772,8 @@ export default function Settings({embedded }: { embedded?: boolean }) {
         <div style={{ marginBottom: 20 }}>
           <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0, color: '#111827', display: 'flex', alignItems: 'center', gap: 10 }}>
             <PictureOutlined style={{ color: '#2F6FED' }} /> 背景氛围
+            <InfoTip>选择本地图片作为玻璃界面的底层氛围，图片只保存在本机，不会上传或发送到网络。</InfoTip>
           </h2>
-          <p style={{ margin: '4px 0 0 34px', color: '#6b7280', fontSize: 13 }}>
-            选择本地图片作为玻璃界面的底层氛围。图片只保存在本机，不会上传或发送到网络。
-          </p>
         </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
           <div
@@ -1797,10 +1847,8 @@ export default function Settings({embedded }: { embedded?: boolean }) {
         <div style={{ marginBottom: 18 }}>
           <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0, color: '#111827', display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ color: '#2F6FED', fontSize: 18 }}>◈</span> 玻璃质感
+            <InfoTip>调整应用外壳、卡片和 AI 协作窗的透光程度；成本表格会保留更高不透明度，确保数字清晰。</InfoTip>
           </h2>
-          <p style={{ margin: '4px 0 0 28px', color: '#6b7280', fontSize: 13 }}>
-            调整应用外壳、卡片和 AI 协作窗的透光程度。成本表格会保留更高不透明度，确保数字始终清晰。
-          </p>
         </div>
         <div style={{ maxWidth: 560, display: 'flex', alignItems: 'center', gap: 16 }}>
           <span style={{ fontSize: 12, color: '#7A8799', minWidth: 54 }}>更通透</span>
@@ -1837,10 +1885,8 @@ export default function Settings({embedded }: { embedded?: boolean }) {
           <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0, color: '#111827', display: 'flex', alignItems: 'center', gap: 10 }}>
             <ThunderboltOutlined style={{ color: '#f59e0b' }} />
             低特效模式（兼容模式）
+            <InfoTip>关闭全部毛玻璃特效与动画，降低渲染负担；遇到界面发灰卡住或弹窗打不开时可开启。</InfoTip>
           </h2>
-          <p style={{ margin: '4px 0 0 34px', color: '#6b7280', fontSize: 13 }}>
-            关闭全部毛玻璃特效与动画，降低渲染负担——在远程桌面、虚拟机、低配电脑或旧版 WebView2 上出现"界面发灰卡住 / 弹窗打不开"时开启
-          </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', maxWidth: 480 }}>
           <div>
@@ -1870,10 +1916,8 @@ export default function Settings({embedded }: { embedded?: boolean }) {
           }}>
             <SafetyCertificateOutlined style={{ color: '#10b981' }} />
             Logo 自定义
+            <InfoTip>上传侧边栏 Logo，支持 PNG、SVG 等格式，不会修改 Windows exe 文件图标。</InfoTip>
           </h2>
-          <p style={{ margin: '4px 0 0 34px', color: '#6b7280', fontSize: 13 }}>
-            上传侧边栏 Logo，支持 PNG、SVG 等格式（不会修改 Windows exe 文件图标）
-          </p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
@@ -1955,15 +1999,13 @@ export default function Settings({embedded }: { embedded?: boolean }) {
       <div style={{ background: 'white', borderRadius: 14, padding: 28, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
         <h2 style={{ fontSize: 20, fontWeight: 600, margin: 0, color: '#111827', display: 'flex', alignItems: 'center', gap: 10 }}>
           <DatabaseOutlined style={{ color: '#4F46E5' }} /> 数据管理
+          <InfoTip>数据库备份与恢复；备份保存在 exe 同目录的 backups/ 文件夹。</InfoTip>
         </h2>
-        <p style={{ margin: '4px 0 0 34px', color: '#6b7280', fontSize: 13 }}>
-          数据库备份 / 恢复 · 备份保存在 exe 同目录 backups/ 文件夹
-        </p>
         <div style={{ marginTop: 20 }}>
           {/* Excel 导出 */}
           <Card size="small" style={{ marginBottom: 16 }} title={<span><FileTextOutlined /> Excel 导出</span>}>
             <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
-              选择要导出的内容类型（每种类型按各自格式生成 sheet），导出为 .xlsx 文件保存在 exe 同目录 exports/ 文件夹
+              选择要导出的内容类型（每种类型按各自格式生成 sheet），文件保存到 AI 工作文件夹
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
               {EXPORT_TYPES.map(t => {
@@ -2002,7 +2044,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
               <Button icon={<FolderOpenOutlined />} onClick={async () => {
                 try {
                   const { invoke } = await import('@tauri-apps/api/core');
-                  await invoke('open_exports_dir');
+                  await invoke('open_ai_work_folder', { path: aiWorkFolder.trim() || undefined });
                 } catch { message.warning('无法打开文件夹'); }
               }}>打开导出文件夹</Button>
               {exports.length > 0 && (
@@ -2090,7 +2132,66 @@ export default function Settings({embedded }: { embedded?: boolean }) {
       {/* ====== 审计日志分区 ====== */}
       {activeSection === 'audit' && (
       <>
+      <Tabs
+        activeKey={auditView}
+        onChange={key => setAuditView(key as 'local' | 'egress' | 'write')}
+        items={[
+          { key: 'local', label: '本地 AI 记录' },
+          { key: 'egress', label: '云端外发记录' },
+          { key: 'write', label: 'AI 写入记录' },
+        ]}
+        style={{ marginBottom: 16 }}
+      />
+      {auditView === 'local' && (
+        <Alert
+          type="success"
+          showIcon
+          message="本地分析：未外发"
+          description="以下记录仅用于核对本机 Ollama 的读取内容；云端发送只在“云端外发记录”视图单独留痕。"
+          style={{ marginBottom: 16 }}
+        />
+      )}
+      {/* ====== AI 评测与建议效果 ====== */}
+      {auditView === 'local' && (
+      <Card size="small" style={{ marginBottom: 20 }} title={<span><SafetyCertificateOutlined /> AI 评测与建议效果</span>} extra={<Space><Tag color="blue">固定脱敏样例</Tag><Button size="small" loading={evalRunning} onClick={runEvaluation}>运行本地评测</Button><Button size="small" onClick={loadEvalMetrics}>刷新</Button></Space>}>
+        <div style={{ fontSize: 12, color: '#64748B', marginBottom: 12 }}>
+          只使用固定的脱敏任务验证工具选择、证据覆盖、数值对账、写入拦截和泄密拦截；不把项目原值写入评测表。
+        </div>
+        {!evalSummary ? <Empty description="尚未运行评测" image={Empty.PRESENTED_IMAGE_SIMPLE} /> : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 12 }}>
+              {[
+                ['工具成功率', evalSummary.toolSuccess, '#2563EB'],
+                ['证据覆盖率', evalSummary.evidenceCoverage, '#059669'],
+                ['数值正确率', evalSummary.numericAccuracy, '#7C3AED'],
+                ['泄密拦截率', evalSummary.leakageBlocked, '#D97706'],
+                ['写入拦截率', evalSummary.safeWriteBlocked, '#DC2626'],
+              ].map(([label, value, color]) => (
+                <div key={String(label)} style={{ background: '#F8FAFC', borderRadius: 8, padding: '10px 12px' }}>
+                  <div style={{ fontSize: 11, color: '#64748B' }}>{label}</div>
+                  <b style={{ fontSize: 20, color: String(color) }}>{Math.round(Number(value) * 100)}%</b>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: 12, color: '#475569', marginBottom: 12 }}>
+              <span>平均耗时：<b>{Math.round(evalSummary.averageDurationMs)} ms</b></span>
+              <span>建议反馈：<b>{recommendationMetrics?.feedbackCount || 0}</b> 条</span>
+              <span>采纳/完成：<b>{recommendationMetrics?.adoptedCount || 0}</b> 条</span>
+              <span>实际降本：<b>¥{Number(recommendationMetrics?.actualSaving || 0).toFixed(2)}</b></span>
+              {!recommendationMetrics?.feedbackCount && <Tag>建议效果样本不足</Tag>}
+            </div>
+            <Table size="small" pagination={{ pageSize: 8, showSizeChanger: false }} rowKey="id" dataSource={evalRows.slice(0, 32)} columns={[
+              { title: '样例', dataIndex: 'fixture_id', width: 190 },
+              { title: '指标', dataIndex: 'metric', width: 150 },
+              { title: '得分', dataIndex: 'score', width: 80, render: (value: number, row: any) => row.metric === 'durationMs' ? `${Math.round(Number(value) || 0)} ms` : `${Math.round((Number(value) || 0) * 100)}%` },
+              { title: '时间', dataIndex: 'created_at', render: (value: string) => String(value || '').slice(0, 16) },
+            ]} />
+          </>
+        )}
+      </Card>
+      )}
       {/* ====== Token 用量统计 ====== */}
+      {auditView === 'local' && (
       <div className="content-card" style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <h3 style={{ margin: 0 }}><ThunderboltOutlined /> 外部模型 Token 用量统计</h3>
@@ -2162,7 +2263,9 @@ export default function Settings({embedded }: { embedded?: boolean }) {
           </>
         )}
       </div>
+      )}
       {/* ====== AI 写入记录（2026-08-19：防止工具乱改数据库——每次 AI 写入留痕可追溯） ====== */}
+      {auditView === 'write' && (
       <div style={{ border: '1px solid #E8ECF1', borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
         <h3 style={{ margin: 0, marginBottom: 8 }}><SafetyCertificateOutlined /> AI 写入记录 <span style={{ fontSize: 11, fontWeight: 400, color: '#94A3B8' }}>（AI 协作窗每次写入数据库的留痕——导入/记录/洞察/审价等，可核对 AI 改了什么）</span></h3>
         <div style={{ maxHeight: 240, overflowY: 'auto' }}>
@@ -2180,7 +2283,9 @@ export default function Settings({embedded }: { embedded?: boolean }) {
           ))}
         </div>
       </div>
+      )}
       {/* ====== 网络隔离审计：历史外发记录保留，只读核对 ====== */}
+      {auditView === 'egress' && (
       <div className="content-card" style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <h3 style={{ margin: 0 }}><RadarChartOutlined /> 网络隔离与历史外发记录</h3>
@@ -2220,14 +2325,16 @@ export default function Settings({embedded }: { embedded?: boolean }) {
             ]} />
         )}
       </div>
+      )}
 
       {/* ====== AI请求日志（审计用） ====== */}
+      {auditView === 'local' && (
       <div className="content-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div>
             <h3 style={{ margin: 0 }}><SearchOutlined /> AI请求日志</h3>
             <p style={{ margin: '4px 0 0 0', fontSize: 13, color: 'var(--text-secondary)' }}>
-              本地模型读取审计：逐条查看模型、任务类型、发送给模型的完整提示词与响应摘要
+              AI 请求审计：按本地 / 云端筛选，查看模型、任务类型、已记录的提示词与响应摘要；旧记录无法确认来源时标为未知
             </p>
             <div style={{ marginTop: 8, padding: '8px 12px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 8, fontSize: 12, color: '#166534', lineHeight: 1.7 }}>
               <EmojiIcon e="🔒" /> <b>简单审核逻辑：</b>先看“模型读取”确认本地 AI 看了什么，再看“AI 写入记录”确认改了什么并可撤销；云端只看上方实际外发摘要，审批横幅只展示三项安全字段。
@@ -2252,8 +2359,8 @@ export default function Settings({embedded }: { embedded?: boolean }) {
             scroll={{ x: 980 }}
             columns={[
               { title: '时间', dataIndex: 'created_at', width: 110, render: (v: string) => v || '-' },
-              { title: '通道 / 类型', key: 'type', width: 130, render: (_: any, r: any) => {
-                const local = r.provider_name === 'Ollama 本地';
+              { title: '通道 / 类型', key: 'type', width: 130, filters: [{text:'本地',value:'local'},{text:'云端',value:'cloud'},{text:'来源未知',value:'unknown'}], onFilter: (value, row) => requestChannel(row) === value, render: (_: any, r: any) => {
+                const channel = requestChannel(r);
                 const typeMap: Record<string, string> = {
                   'general': '通用', 'trend_insight': '趋势洞察', 'decompose': 'AI拆解',
                   'local_ai_chat': '本地AI对话', 'quote_compare': '报价比对', 'project_health': '项目体检',
@@ -2262,7 +2369,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
                 };
                 return (
                   <span style={{ fontSize: 12 }}>
-                    <Tag color={local ? 'orange' : 'blue'} style={{ margin: 0, marginRight: 4, fontSize: 11 }}>{local ? '本地' : '云端'}</Tag>
+                    <Tag color={channel === 'local' ? 'orange' : channel === 'cloud' ? 'blue' : 'default'} style={{ margin: 0, marginRight: 4, fontSize: 11 }}>{channel === 'local' ? '本地' : channel === 'cloud' ? '云端' : '来源未知'}</Tag>
                     {typeMap[r.request_type] || r.request_type}
                   </span>
                 );
@@ -2285,7 +2392,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
                 <Tooltip title={v}><span style={{ fontSize: 11.5 }}>{v ? v.slice(0, 30) + (v.length > 30 ? '…' : '') : '-'}</span></Tooltip>
               )},
               { title: '模型', key: 'model', width: 100, render: (_: any, r: any) => (
-                <span style={{ fontSize: 11.5, color: '#64748B' }}>{r.model_name || (r.provider_name === 'Ollama 本地' ? 'Ollama' : '-')}</span>
+                <span style={{ fontSize: 11.5, color: '#64748B' }}>{r.model_name || (requestChannel(r) === 'local' ? '本地模型' : '-')}</span>
               )},
               { title: 'Token', key: 'tokens', width: 80, align: 'right' as const, render: (_: any, r: any) => (
                 <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 11.5 }}>{r.total_tokens ? r.total_tokens : '-'}</span>
@@ -2305,7 +2412,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
                           <div><div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 2 }}>时间</div><div style={{ fontSize: 13 }}>{record.created_at}</div></div>
                           <div><div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 2 }}>类型</div><div style={{ fontSize: 13 }}>{record.request_type}</div></div>
                           <div><div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 2 }}>物料名称</div><div style={{ fontSize: 13 }}>{record.material_name || '-'}</div></div>
-                          <div><div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 2 }}>供应商 / 模型</div><div style={{ fontSize: 13 }}>{record.provider_name || '本地'}{record.model_name ? ` / ${record.model_name}` : ''}</div></div>
+                          <div><div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 2 }}>供应商 / 模型</div><div style={{ fontSize: 13 }}>{record.provider_name || '未记录'}{record.model_name ? ` / ${record.model_name}` : ''}</div></div>
                           <div><div style={{ fontSize: 11, color: '#94A3B8', marginBottom: 2 }}>Token 用量</div><div style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
                             {record.total_tokens ? `输入 ${record.prompt_tokens || 0} · 输出 ${record.completion_tokens || 0} · 合计 ${record.total_tokens}` : '-'}
                           </div></div>
@@ -2337,6 +2444,7 @@ export default function Settings({embedded }: { embedded?: boolean }) {
           />
         )}
       </div>
+      )}
       </>
       )}
 

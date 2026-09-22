@@ -3,6 +3,15 @@
 
 import { getDb } from './core';
 
+export type AdvisorUpsertDecision = 'create' | 'refresh' | 'reopen';
+
+/** 巡视问题的稳定生命周期：证据不变不重发，证据变化重新打开。 */
+export function decideAdvisorUpsert(existing: { status?: string; evidenceFingerprint?: string } | null, evidenceFingerprint: string): AdvisorUpsertDecision {
+  if (!existing) return 'create';
+  return existing.evidenceFingerprint === evidenceFingerprint ? 'refresh' : 'reopen';
+}
+function impactBand(value: number) { return value >= 100 ? 'high' : value >= 20 ? 'medium' : 'low'; }
+
 // 全部建议（按时间倒序）
 export async function getAdvisorInsights(status?: string) {
   const d = await getDb();
@@ -22,15 +31,60 @@ export async function getOpenAdvisorCount(): Promise<number> {
 // 指纹查重（同指纹已存在 open/done 则跳过；dismissed 允许再次出现——用户主动忽略后可再提醒）
 export async function findAdvisorByFingerprint(fingerprint: string) {
   const d = await getDb();
-  const rows = await d.select<any[]>('SELECT id FROM ai_advisor_insights WHERE fingerprint = ? AND status != \'dismissed\' LIMIT 1', [fingerprint]);
+  const rows = await d.select<any[]>('SELECT id FROM ai_advisor_insights WHERE (evidence_fingerprint = ? OR fingerprint = ?) AND status != \'dismissed\' LIMIT 1', [fingerprint, fingerprint]);
   return rows?.[0] || null;
 }
 
 // 降噪：被忽略过的建议（数据未变时指纹相同）→ 不重提；指纹含数据版本，数据变化自然生成新指纹重新提醒
 export async function findDismissedByFingerprint(fingerprint: string) {
   const d = await getDb();
-  const rows = await d.select<any[]>('SELECT id FROM ai_advisor_insights WHERE fingerprint = ? AND status = \'dismissed\' LIMIT 1', [fingerprint]);
+  const rows = await d.select<any[]>('SELECT id FROM ai_advisor_insights WHERE (evidence_fingerprint = ? OR fingerprint = ?) AND status = \'dismissed\' LIMIT 1', [fingerprint, fingerprint]);
   return rows?.[0] || null;
+}
+
+export async function upsertAdvisorInsight(ins: {
+  insight_type: string;
+  title: string;
+  detail?: string;
+  ref_type?: string;
+  ref_id?: number;
+  ref_name?: string;
+  prompt?: string;
+  source?: string;
+  fingerprint: string;
+  issue_key?: string;
+  evidence_fingerprint?: string;
+  severity?: string;
+  impact_amount?: number;
+}) {
+  const d = await getDb();
+  const issueKey = ins.issue_key || `${ins.insight_type}|${ins.ref_type || ''}|${ins.ref_id || 0}`;
+  const evidenceFingerprint = ins.evidence_fingerprint || ins.fingerprint;
+  const rows = await d.select<any[]>('SELECT id, status, evidence_fingerprint, fingerprint FROM ai_advisor_insights WHERE issue_key = ? ORDER BY id DESC LIMIT 1', [issueKey]);
+  const existing = rows[0] ? { status: rows[0].status, evidenceFingerprint: rows[0].evidence_fingerprint || rows[0].fingerprint } : null;
+  const decision = decideAdvisorUpsert(existing, evidenceFingerprint);
+  if (rows[0] && decision === 'refresh') {
+    // Evidence is unchanged: preserve AI analysis, user feedback and handled state.
+    await d.execute("UPDATE ai_advisor_insights SET last_seen_at=datetime('now','localtime'), occurrence_count=COALESCE(occurrence_count,0)+1 WHERE id=?", [rows[0].id]);
+    return { id: Number(rows[0].id), decision, created: false, reopened: false };
+  }
+  const impactAmount = Number.isFinite(Number(ins.impact_amount)) ? Number(ins.impact_amount) : 0;
+  const severity = ins.severity || (impactAmount >= 100 ? 'high' : impactAmount >= 20 ? 'warning' : 'info');
+  const band = impactBand(impactAmount);
+  if (!rows[0]) {
+    const result = await d.execute(
+      'INSERT INTO ai_advisor_insights (insight_type, title, detail, ref_type, ref_id, ref_name, prompt, status, source, fingerprint, issue_key, evidence_fingerprint, severity, impact_amount, impact_band) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [ins.insight_type, ins.title, ins.detail || '', ins.ref_type || '', ins.ref_id || 0, ins.ref_name || '', ins.prompt || '', 'open', ins.source || 'rule', ins.fingerprint, issueKey, evidenceFingerprint, severity, impactAmount, band]
+    );
+    await d.execute("UPDATE ai_advisor_insights SET first_seen_at=datetime('now','localtime'), last_seen_at=datetime('now','localtime'), last_notified_at=datetime('now','localtime'), occurrence_count=1 WHERE id=?", [result.lastInsertId]);
+    return { id: Number(result.lastInsertId) || 0, decision, created: true, reopened: false };
+  }
+  const status = decision === 'reopen' ? 'open' : rows[0].status;
+  await d.execute(
+    "UPDATE ai_advisor_insights SET insight_type=?, title=?, detail=?, ref_type=?, ref_id=?, ref_name=?, prompt=?, source=?, status=?, fingerprint=?, evidence_fingerprint=?, severity=?, impact_amount=?, impact_band=?, first_seen_at=COALESCE(NULLIF(first_seen_at,''), datetime('now','localtime')), last_seen_at=datetime('now','localtime'), last_notified_at=CASE WHEN ?='reopen' THEN datetime('now','localtime') ELSE last_notified_at END, occurrence_count=COALESCE(occurrence_count,0)+1, updated_at=datetime('now','localtime') WHERE id=?",
+    [ins.insight_type, ins.title, ins.detail || '', ins.ref_type || '', ins.ref_id || 0, ins.ref_name || '', ins.prompt || '', ins.source || 'rule', status, ins.fingerprint, evidenceFingerprint, severity, impactAmount, band, decision, rows[0].id]
+  );
+  return { id: Number(rows[0].id), decision, created: false, reopened: decision === 'reopen' };
 }
 
 export async function saveAdvisorInsight(ins: {
@@ -43,12 +97,10 @@ export async function saveAdvisorInsight(ins: {
   prompt?: string;
   source?: string;
   fingerprint: string;
+  issue_key?: string;
+  evidence_fingerprint?: string;
 }) {
-  const d = await getDb();
-  await d.execute(
-    'INSERT INTO ai_advisor_insights (insight_type, title, detail, ref_type, ref_id, ref_name, prompt, status, source, fingerprint) VALUES (?,?,?,?,?,?,?,?,?,?)',
-    [ins.insight_type, ins.title, ins.detail || '', ins.ref_type || '', ins.ref_id || 0, ins.ref_name || '', ins.prompt || '', 'open', ins.source || 'rule', ins.fingerprint]
-  );
+  return upsertAdvisorInsight(ins);
 }
 
 // 更新状态：done（已处理）/ dismissed（忽略）；可回填行业洞察结论

@@ -1,0 +1,14 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>审批卡片合成交互检查</title><div id="root"></div>
+<script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { CloudApprovalCard } from '/src/components/CloudApprovalCards.tsx';
+function Check() {
+  const [result, setResult] = React.useState('等待用户选择');
+  return React.createElement('main', {style:{maxWidth:384,margin:'20px auto',fontFamily:'sans-serif'}},
+    React.createElement('p', null, '合成检查 · 不发送网络请求'),
+    React.createElement(CloudApprovalCard, {title:'批准本次 CloudSafe 请求',content:'目标：测试端点\n公开问题：显示器分辨率的含义',onDecision:value=>setResult(value?'已批准':'已拒绝')}),
+    React.createElement('p', {role:'status'}, result));
+}
+createRoot(document.getElementById('root')).render(React.createElement(Check));
+</script></html>

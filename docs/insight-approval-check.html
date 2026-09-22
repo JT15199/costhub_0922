@@ -1,0 +1,30 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>物料审批合成检查</title><div id="root"></div>
+<script type="module">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { CloudApprovalCard } from '/src/components/CloudApprovalCards.tsx';
+function Check() {
+  const [attempts, setAttempts] = React.useState(0);
+  const [result, setResult] = React.useState('等待');
+  return React.createElement('main', { style: {maxWidth: 680, margin: '20px auto'} },
+    React.createElement(CloudApprovalCard, {
+      title: '公开搜索主题', searchScope: true, target: 'https://api.tavily.com/search',
+      content: JSON.stringify({material:'铜', category:'原材料', question:'公开行情'}),
+      onDecision: async approved => {
+        await new Promise(resolve => setTimeout(resolve, 30));
+        setAttempts(value => value + 1);
+        setResult(approved ? (attempts === 0 ? '模拟授权失败，可重试' : '已批准搜索') : '已拒绝');
+      },
+    }),
+    React.createElement(CloudApprovalCard, {
+      title: '公开分析完整正文', previewJson: JSON.stringify({model:'test', messages:[{role:'user',content:'公开报告中的价格：123元，需要人工核对来源。'}]}),
+      onDecision: approved => setResult(approved ? '已批准完整正文' : '已拒绝'),
+    }),
+    React.createElement(CloudApprovalCard, {
+      title: '已知内部数据禁止发送', previewJson: '{"messages":[]}', localAudit: {status:'blocked', matches:['内部数据']},
+      onDecision: () => setResult('不应被批准'),
+    }),
+    React.createElement('p', {role:'status'}, result));
+}
+createRoot(document.getElementById('root')).render(React.createElement(Check));
+</script></html>

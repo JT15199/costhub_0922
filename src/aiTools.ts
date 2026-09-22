@@ -1,9 +1,10 @@
+import { withNativeSchema, prepareBusinessArgs, validateNestedArgs, parseToolArray } from './ai/toolSchema';
 // 成本领域工具注册表（P1 Agent，2026-08-16；招标分析扩展 2026-08-31）
-// 设计：现有能力（查询/分析）包装成统一"工具"，本地模型编排调用序列（计划-执行-总结）
-// 安全：分析工具只读；物料行情走现有受控网关，招标分析仅读本地聚合数据；无任何写操作工具
+// 设计：现有能力（查询/分析/写入）包装成统一"工具"，本地模型编排调用序列（计划-执行-总结）
+// 安全：风险由 src/ai/toolRegistry.ts Manifest 声明；写工具只能经 executeTool 的确认门禁
 // 审计：每次 Agent 任务由调用方 logLocalAICall(request_type=agent_plan/agent_answer) 留痕
 
-import { getProjects, getProjectBOMs, getParts, getWorkLogs, getSellingPoints, getSellingPointMaps, getTenderOverview, getTenderMatrix } from './db';
+import { getProjects, getProjectBOMs, getParts, getWorkLogs, getSellingPoints, getSellingPointMaps, getTenderOverview, getTenderMatrix, getSetting } from './db';
 import { getAllPartSuppliers, getSupplierPriceHistory } from './db/parts';
 import { getProjectCostSnapshots, getTargets } from './db/projects';
 import { getInsights } from './db/compare';
@@ -14,6 +15,18 @@ import { computeTargetStatuses } from './targetInsight';
 import { computeSellingPointRows, computeModuleValueRows } from './sellingPointAnalyzer';
 import { startOllamaStream, logLocalAICall } from './ollama';
 import { buildQuoteReviewPrompt, parseQuoteReview } from './quoteReview';
+import { executeStructuredTool as executeStructuredToolAdapter, getToolManifest as resolveToolManifest, STRUCTURED_TOOL_IDS } from './ai/toolRegistry';
+import { bomExtendedCostStrict, sumBomCostStrict } from './ai/contracts';
+import type { AiToolManifest, AiToolResult, ExecuteToolOptions, RunContext, ToolCall } from './ai/contracts';
+import { evaluateExpression } from './ai/calc';
+import { detectVoiceSheet, resolveVoiceItems } from './voiceImport';
+import { diagnoseSearchConfig } from './apiConfig';
+import { getPendingConfirms, requestCloudConfirm } from './cloudConfirm';
+import { sanitizeC2Payload } from './ai/c2Bridge';
+import { getDataReadiness, readinessToText } from './dataReadiness';
+import { detectOllama } from './aiStatus';
+
+export { AI_TOOL_MANIFESTS, listToolManifests, toolRequiresConfirmation, WRITE_TOOL_IDS } from './ai/toolRegistry';
 // 工具图标（2026-08-16：按数据特征选择——查询=清单/文件夹，成本=钱币，趋势=折线，洞察=闪电，目标=靶心…）
 import React from 'react';
 import {
@@ -38,6 +51,7 @@ export const TOOL_ICONS: Record<string, React.ComponentType> = {
   query_worklog: BookOutlined,
   query_todos: CheckSquareOutlined,
   insight_material_trend: ThunderboltOutlined,
+  cloud_abstract_analysis: SafetyCertificateOutlined,
   compare_subcategory_cost: BarChartOutlined,
   quote_review: AuditOutlined,
   query_project_module_value: AppstoreOutlined,
@@ -63,16 +77,24 @@ export const TOOL_ICONS: Record<string, React.ComponentType> = {
   query_supplier_profile: ShopOutlined,
   canonicalize_project: AuditOutlined,
   query_tender_analysis: BarChartOutlined,
+  estimate_similar_projects: HistoryOutlined,
+  rank_quote_negotiations: DollarOutlined,
+  explain_quote_change: HistoryOutlined,
 };
 export function toolIcon(id: string): React.ComponentType {
   return TOOL_ICONS[id] || FolderOutlined;
 }
 
 export interface AiToolParam {
+  schema?: Record<string, unknown>;
   key: string;
-  type: 'string' | 'number' | 'boolean';
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
   required?: boolean;
   desc: string;
+  enum?: string[];
+  minimum?: number;
+  maximum?: number;
+  items?: 'string' | 'number' | 'boolean';
 }
 
 export interface AiTool {
@@ -80,10 +102,11 @@ export interface AiTool {
   name: string;        // 中文名（UI 展示）
   desc: string;        // 给模型的描述：何时用 + 参数说明
   params: AiToolParam[];
-  execute: (args: Record<string, any>) => Promise<string>;  // 返回文本（供模型消费）
+  execute: (args: Record<string, any>, options?: ExecuteToolOptions) => Promise<string>;  // 返回文本（供模型消费）
+  manifest?: AiToolManifest;
 }
 
-const fmtMoney = (n: any) => '¥' + (Number(n) || 0).toFixed(2);
+const fmtMoney = (n: any) => n === null || n === undefined || n === '' || !Number.isFinite(Number(n)) ? '待补证据' : '¥' + Number(n).toFixed(2);
 const fmtDate = (t?: string) => (t || '').slice(5, 16) || '';
 
 // ===== 工具辅助：读 Excel（read_excel 用；WebView 环境弹文件选择框，用户选文件） =====
@@ -96,14 +119,17 @@ function pickExcelFile(): Promise<File | null> {
     input.click();
   });
 }
-async function readExcelText(file: File, maxRows: number): Promise<string> {
+async function readExcelText(file: File, maxRows: number, offset = 0, sheetName = ''): Promise<string> {
   const XLSX = await import('xlsx');
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf);
-  const ws = wb.Sheets[wb.SheetNames[0]];
+  const sheet = sheetName && wb.SheetNames.includes(sheetName) ? sheetName : wb.SheetNames[0];
+  const ws = wb.Sheets[sheet];
   const rows = XLSX.utils.sheet_to_json(ws, { defval: '', header: 1 }) as any[][];
-  const lines = rows.slice(0, maxRows).map((row: any[]) => (row || []).map(String).join('\t'));
-  return '文件：' + file.name + '（工作表 ' + wb.SheetNames.join('、') + '，共 ' + rows.length + ' 行，显示前 ' + Math.min(maxRows, rows.length) + ' 行）\n' + lines.join('\n');
+  const page = rows.slice(offset, offset + maxRows);
+  const pagination = { totalRows: rows.length, offset, returnedRows: page.length, nextOffset: offset + page.length < rows.length ? offset + page.length : null };
+  const lines = page.map((row: any[]) => (row || []).map(String).join('\t'));
+  return '文件：' + file.name + '（工作表 ' + sheet + '；可用工作表：' + wb.SheetNames.join('、') + '）\n分页：' + JSON.stringify(pagination) + '\n' + lines.join('\n');
 }
 
 // ===== 智能附件（2026-08-19）：AI 窗 📎 附加 Excel 后完整数据存 window.__costhub_attachment_data，工具直接读取 =====
@@ -115,6 +141,20 @@ function attachmentRows(type?: string): { rows: any[][]; name: string } | null {
     if (match && Array.isArray(match.rows) && match.rows.length > 1) return { rows: match.rows, name: match.name };
   } catch { }
   return null;
+}
+
+/** Return already-attached table rows to the model without opening a second file picker. */
+export function formatAttachmentRows(attachments: any[], maxRows = 8, offset = 0, sheetName = ''): string {
+  const limit = Math.max(1, Math.min(Number(maxRows) || 8, 200));
+  return (attachments || []).filter((item: any) => Array.isArray(item?.rows) || Array.isArray(item?.sheets)).map((item: any) => {
+    const source = sheetName && Array.isArray(item.sheets) ? item.sheets.find((sheet: any) => sheet.name === sheetName) : item;
+    if (!source || !Array.isArray(source.rows) || source.rows.length < 1) return '';
+    const safeOffset = Math.max(0, Math.floor(Number(offset) || 0));
+    const rows = source.rows.slice(safeOffset, safeOffset + limit);
+    const lines = rows.map((row: any[]) => (row || []).map((cell: any) => String(cell ?? '')).join('\t'));
+    const pagination = { totalRows: source.rows.length, offset: safeOffset, returnedRows: rows.length, nextOffset: safeOffset + rows.length < source.rows.length ? safeOffset + rows.length : null };
+    return `文件：${String(item.name || '附件')}（工作表 ${String(source.name || '默认')}；已从输入区读取）\n分页：${JSON.stringify(pagination)}\n${lines.join('\n')}`;
+  }).filter(Boolean).join('\n\n');
 }
 // 按表头列名映射成对象数组（第一行是表头）
 function mapColumns(rows: any[][], defs: { names: string[]; out: string }[]): Record<string, any>[] {
@@ -146,19 +186,27 @@ const tools: AiTool[] = [
   },
   {
     id: 'query_project_bom',
-    name: '查询项目 BOM 明细',
-    desc: '查某项目的 BOM 器件清单（模块/名称/型号/数量/单价/小计）。参数 project_code 必填（项目代号）。',
-    params: [{ key: 'project_code', type: 'string', required: true, desc: '项目代号，如 M270' }],
+    name: '查询与统计项目 BOM',
+    desc: '项目 BOM 的全量统计和明细。最贵/最便宜/前N名用 view=rank、metric=unit_cost或extended_cost、order=desc或asc、limit=N；总额/均价/极值用 summary；模块/类别占比用 group。工具先全量计算后截取，勿逐页查明细口算。单价与数量×单价小计是不同口径。仅查看明细用 details。可直接给项目名称或代号，无需先列全部项目。',
+    params: [
+      { key: 'project_code', type: 'string', required: true, desc: '项目完整代号或名称，忽略大小写及分隔符；歧义需澄清' },
+      { key: 'view', type: 'string', enum: ['details','summary','rank','group'], desc: 'summary汇总/极值/均价；rank排名；group分组；details明细' },
+      { key: 'metric', type: 'string', enum: ['unit_cost','extended_cost'], desc: '排名/极值/均价口径：unit_cost单价（默认），extended_cost数量×单价' },
+      { key: 'order', type: 'string', enum: ['desc','asc'], desc: 'desc最高优先（默认）；asc最低优先' },
+      { key: 'group_by', type: 'string', enum: ['module','category','sub_category'], desc: 'group时按模块（默认）、大类、子类分组，按组总成本排序' },
+      { key: 'module', type: 'string', desc: '只统计此模块，精确名称，可空' },
+      { key: 'category', type: 'string', desc: '只统计此大类或子类，精确名称，可空' },
+      { key: 'keyword', type: 'string', desc: '统计时筛选器件名称/型号包含此关键词，可空' },
+    ],
     execute: async (a) => {
       const projects = await getProjects('', '', '');
       const p = projects.find((x: any) => !x.is_deleted && x.code === a.project_code);
       if (!p) return '未找到项目代号：' + a.project_code;
       const boms = (await getProjectBOMs(p.id)).filter((b: any) => !b.is_deleted);
       if (boms.length === 0) return '项目 ' + a.project_code + ' 暂无 BOM 器件';
-      const cost = (b: any) => (b.part_cost ?? b.cost ?? 0) * (b.quantity ?? 1);
-      const total = boms.reduce((s: number, b: any) => s + cost(b), 0);
-      const lines2 = boms.map((b: any) => '[' + (b.module_name || '未分模块') + '] ' + (b.part_name || '') + ' ' + (b.part_model || '') + ' ×' + (b.quantity ?? 1) + ' @' + fmtMoney(b.part_cost ?? b.cost) + ' =' + fmtMoney(cost(b)));
-      return '项目 ' + a.project_code + ' BOM 共 ' + boms.length + ' 项，合计 ' + fmtMoney(total) + '\n' + lines2.join('\n');
+      const costing = sumBomCostStrict(boms);
+      const lines2 = boms.map((b: any) => { const value = bomExtendedCostStrict(b); return '[' + (b.module_name || '未分模块') + '] ' + (b.part_name || '') + ' ' + (b.part_model || '') + ' ×' + (b.quantity ?? 1) + ' @' + (bomExtendedCostStrict({ ...b, quantity: 1 }) == null ? '待补证据' : fmtMoney(b.part_cost ?? b.cost)) + ' =' + (value == null ? '待补证据' : fmtMoney(value)); });
+      return '项目 ' + a.project_code + ' BOM 共 ' + boms.length + ' 项，合计 ' + (costing.missing.length ? '待补证据（' + costing.missing.length + ' 项）' : fmtMoney(costing.total)) + '\n' + lines2.join('\n');
     },
   },
   {
@@ -172,15 +220,15 @@ const tools: AiTool[] = [
       if (!p) return '未找到项目代号：' + a.project_code;
       const boms = (await getProjectBOMs(p.id)).filter((b: any) => !b.is_deleted);
       if (boms.length === 0) return '项目 ' + a.project_code + ' 暂无 BOM 器件';
-      const cost = (b: any) => (b.part_cost ?? b.cost ?? 0) * (b.quantity ?? 1);
-      const total = boms.reduce((s: number, b: any) => s + cost(b), 0);
+      const costing = sumBomCostStrict(boms);
+      if (costing.missing.length) return '项目 ' + a.project_code + ' BOM 总成本待补证据（' + costing.missing.length + ' 项未确认），暂不生成模块占比';
       const modMap = new Map<string, number>();
       for (const b of boms) {
         const m = b.module_name || '未分模块';
-        modMap.set(m, (modMap.get(m) || 0) + cost(b));
+        modMap.set(m, (modMap.get(m) || 0) + (bomExtendedCostStrict(b) ?? 0));
       }
-      const modLines = [...modMap.entries()].sort((x, y) => y[1] - x[1]).map(([m, c]) => m + '：' + fmtMoney(c) + '（' + Math.round((c / total) * 100) + '%）');
-      return '项目 ' + a.project_code + ' BOM 总成本 ' + fmtMoney(total) + '\n' + modLines.join('\n');
+      const modLines = [...modMap.entries()].sort((x, y) => y[1] - x[1]).map(([m, c]) => m + '：' + fmtMoney(c) + '（' + Math.round((c / costing.total) * 100) + '%）');
+      return '项目 ' + a.project_code + ' BOM 总成本 ' + fmtMoney(costing.total) + '\n' + modLines.join('\n');
     },
   },
   {
@@ -329,10 +377,11 @@ const tools: AiTool[] = [
       for (const p of projects) {
         const boms = (await getProjectBOMs(p.id)).filter((b: any) => !b.is_deleted);
         if (boms.length === 0) continue;
-        const cost = (b: any) => (b.part_cost ?? b.cost ?? 0) * (b.quantity ?? 1);
-        const total = boms.reduce((s: number, b: any) => s + cost(b), 0);
+        const costing = sumBomCostStrict(boms);
+        if (costing.missing.length) continue;
+        const total = costing.total;
         const sub = boms.filter((b: any) => String(b.sub_category || '').trim() === a.sub_category)
-          .reduce((s: number, b: any) => s + cost(b), 0);
+          .reduce((s: number, b: any) => s + (bomExtendedCostStrict(b) ?? 0), 0);
         if (sub > 0) rows.push({ code: p.code || '', sub, total });
       }
       if (rows.length === 0) return '没有项目使用子类「' + a.sub_category + '」（子类需与 BOM 中 sub_category 完全一致，可用 query_project_bom 先确认写法）';
@@ -354,16 +403,33 @@ const tools: AiTool[] = [
       { key: 'material_name', type: 'string', required: true, desc: '物料通用名称，如 液晶面板' },
       { key: 'category', type: 'string', desc: '品类，如 硬件类，可空' },
     ],
-    execute: async (a) => {
+    execute: async (a, options) => {
       // ⚠️ 云端调用审批（2026-08-17，用户需求：本地 AI 要调云端时必须有提示+审批）——
       // preview 模式 → 挂入待确认队列（底部横幅「🔐 等待云端发送确认」），不发云端；确认后重发任务即放行（会话级记忆）
-      const { requestCloudConfirm } = await import('./cloudConfirm');
-      const ok = await requestCloudConfirm({ material: a.material_name, category: a.category || '' });
-      if (!ok) {
-        return '⚠️ 云端行情查询需审批：已加入待确认队列（屏幕底部「🔐 N 个物料洞察等待云端发送确认」横幅）。请在横幅中确认发送，确认后重新执行本任务即可获取行情。';
+      const { getSearchApprovalEndpoint, PUBLIC_TREND_QUESTION, isNativeSearchEnabled, isDeepSeekNativeSearchAvailable } = await import('./trendService');
+      const nativeReady = await isNativeSearchEnabled() && await isDeepSeekNativeSearchAvailable();
+      if (!nativeReady) {
+      const searchDiagnostic = await diagnoseSearchConfig();
+      if (searchDiagnostic.available) {
+        const ok = await requestCloudConfirm({ material: a.material_name, category: a.category || '', question: PUBLIC_TREND_QUESTION, requestUrl: await getSearchApprovalEndpoint(), requirementKind: 'insight', requirementTitle: '物料行情洞察 · ' + String(a.material_name || '') });
+        if (!ok) {
+          const fresh = getPendingConfirms().find(item => item.material === String(a.material_name || '').trim());
+          if (fresh) {
+            // ⚠️ 必须带上 APPROVAL_PENDING_MARKER：AiPanel 靠它判断"已入审批队列、还没发出去"，
+            // 从而在用户批准后自动续跑（2026-09-21 用户："让我反复确认云端行情查询提交，这个是个大bug"）。
+            const { APPROVAL_PENDING_MARKER } = await import('./cloudConfirm');
+            return `⚠️ 云端行情查询需审批：已生成真实待审批请求「${fresh.material}」，请在右侧 AI 协作窗或全局待审批中心核对完整请求后批准本次发送。（批准后系统会自动继续本次查询，无需重新提问）${APPROVAL_PENDING_MARKER}`;
+          }
+          return '⚠️ 尚未生成待审批请求：当前网络模式为纯本地，或查询内容未通过本地安全检查；本次没有发送任何云端请求。';
+        }
+      } else if (searchDiagnostic.inactiveConfigured.length) {
+        throw new Error('检测到已配置的搜索 API（' + searchDiagnostic.inactiveConfigured.join('、') + '）但未启用；请在 设置 -> AI 服务 中启用该供应商后重试。');
+      } else if (searchDiagnostic.missingCredential.length) {
+        throw new Error('搜索供应商（' + searchDiagnostic.missingCredential.join('、') + '）已启用，但本机 API Key 不可读；请在 设置 -> AI 服务 中重新录入 API Key 后重试。');
+      }
       }
       const { agentSearchLoop } = await import('./trendService');
-      const r = await agentSearchLoop(a.material_name, a.category || '', 'price-trend');
+      const r = await agentSearchLoop(a.material_name, a.category || '', 'price-trend', undefined, options?.networkTrace);
       // 2026-08-18 数据一致性：洞察结果同步写入 trend_snapshots（匹配物料洞察列表），Decomposition 卡片自动更新
       let synced = false;
       try {
@@ -383,6 +449,28 @@ const tools: AiTool[] = [
         }
       } catch (e) { console.error('同步洞察列表失败:', e); }
       return '「' + a.material_name + '」行情：趋势 ' + (r.trend_direction || '信号不明确') + '，置信度 ' + (r.confidence_level || '中') + (r.magnitude_min != null ? '，幅度 ' + r.magnitude_min + '%~' + (r.magnitude_max ?? '') + '%' : '') + '\n摘要：' + (r.summary || '') + (r.suggested_action ? '\n建议：' + r.suggested_action : '') + (synced ? '\n✅ 已同步更新洞察列表（物料趋势洞察页卡片已更新）' : '\n（该物料不在洞察列表 trend_items 中，未保存卡片；可去物料趋势洞察页添加后再次洞察）');
+    },
+  },
+  {
+    id: 'cloud_abstract_analysis',
+    name: 'C2 脱敏抽象分析',
+    desc: '仅将抽象领域、区间/等级特征和公开问题发送到受控云端。参数 domain 必填；features 必须是 JSON 对象，键只能是 size_band/resolution_band/refresh_band/panel_band/tier_band/module_band/supply_signal/demand_signal/availability_signal，值只能是 low/medium/high/unknown；每次都需要用户预览确认。',
+    params: [
+      { key: 'domain', type: 'string', required: true, desc: '不含编号和业务标识的抽象领域，如 显示器产品' },
+      { key: 'features', type: 'string', required: true, desc: '抽象特征 JSON，如 {"size_band":"medium","refresh_band":"high"}' },
+      { key: 'question', type: 'string', required: true, desc: '不含编号、金额和业务标识的公开问题' },
+    ],
+    execute: async (a, options) => {
+      let features: unknown;
+      try { features = JSON.parse(String(a.features || '{}')); } catch { return 'C2 参数错误：features 必须是 JSON 对象'; }
+      const checked = sanitizeC2Payload({ domain: String(a.domain || ''), features: features as Record<string, any>, question: String(a.question || '') });
+      if (!checked.ok) return 'C2 已拦截：' + checked.reason;
+      try {
+        const { runC2AbstractAnalysis } = await import('./trendService');
+        return await runC2AbstractAnalysis(checked.payload, options?.networkTrace);
+      } catch (e: any) {
+        return String(e?.message || e);
+      }
     },
   },
   {
@@ -437,8 +525,10 @@ const tools: AiTool[] = [
       if (sps.length === 0) return '项目 ' + a.project_code + ' 还没有卖点分析。请先在「用户原声分析」页的卖点价值分析中完成 AI 智能分析和归纳原声，再来查模块价值。';
       const maps = await getSellingPointMaps(p.id);
       const boms = (await getProjectBOMs(p.id)).filter((b: any) => !b.is_deleted);
+      const costState = sumBomCostStrict(boms);
+      if (costState.missing.length) return `项目 ${a.project_code} 有 ${costState.missing.length} 行成本或数量证据缺口，模块价值成本待补证据`;
       const moduleCosts: Record<string, number> = {};
-      boms.forEach((b: any) => { const m = b.module_name || '未归类'; moduleCosts[m] = (moduleCosts[m] || 0) + (Number(b.part_cost ?? b.cost) || 0) * (Number(b.quantity) || 1); });
+      boms.forEach((b: any) => { const m = b.module_name || '未归类'; moduleCosts[m] = (moduleCosts[m] || 0) + (bomExtendedCostStrict(b) ?? 0); });
       const rows = computeSellingPointRows({ sps: sps.map((s: any) => ({ id: s.id, name: s.name, positive: s.positive, negative: s.negative })), modules: maps.modules, moduleCosts });
       const modRows = computeModuleValueRows(rows, moduleCosts);
       if (modRows.length === 0) return '项目 ' + a.project_code + ' 没有模块关联到卖点（请先给卖点关联 BOM 模块）';
@@ -458,12 +548,15 @@ const tools: AiTool[] = [
       const out: string[] = [];
       out.push('项目 ' + a.project_code + '（' + (p.name || '') + '，' + (p.tier || '') + ' ' + (p.category || '') + '）');
       const boms = (await getProjectBOMs(p.id)).filter((b: any) => !b.is_deleted);
-      const cost = (b: any) => (b.part_cost ?? b.cost ?? 0) * (b.quantity ?? 1);
-      const total = boms.reduce((s: number, b: any) => s + cost(b), 0);
-      out.push('BOM 总成本 ' + fmtMoney(total) + '，共 ' + boms.length + ' 项');
-      const modMap = new Map<string, number>();
-      for (const b of boms) { const m = b.module_name || '未分模块'; modMap.set(m, (modMap.get(m) || 0) + cost(b)); }
-      out.push('模块成本（降序）：' + [...modMap.entries()].sort((x, y) => y[1] - x[1]).map(([m, c]) => m + ' ' + fmtMoney(c) + '(' + Math.round((c / total) * 100) + '%)').join('、'));
+      const costState = sumBomCostStrict(boms);
+      if (costState.missing.length) out.push('BOM 总成本 待补证据（' + costState.missing.length + ' 行成本或数量未确认），共 ' + boms.length + ' 项');
+      else {
+        const total = costState.total;
+        out.push('BOM 总成本 ' + fmtMoney(total) + '，共 ' + boms.length + ' 项');
+        const modMap = new Map<string, number>();
+        for (const b of boms) { const m = b.module_name || '未分模块'; modMap.set(m, (modMap.get(m) || 0) + (bomExtendedCostStrict(b) ?? 0)); }
+        out.push('模块成本（降序）：' + [...modMap.entries()].sort((x, y) => y[1] - x[1]).map(([m, c]) => m + ' ' + fmtMoney(c) + (total ? '(' + Math.round((c / total) * 100) + '%)' : '')).join('、'));
+      }
       try {
         const targets = await getTargets(p.id);
         if (targets.length) out.push('目标成本：' + targets.map((t: any) => t.domain + ' 目标 ' + fmtMoney(t.target_cost)).join('、'));
@@ -478,16 +571,19 @@ const tools: AiTool[] = [
   {
     id: 'read_excel',
     name: '读取 Excel 文件',
-    desc: '读取一个 Excel（.xlsx/.xls）文件，把第一个工作表返回为表格文本（每行 tab 分隔，最多 max_rows 行，默认 60）。可用于读供应商报价表/用户原声表/BOM 表/竞品表等。参数 file_path 可选；不填会弹出文件选择框由用户选择（推荐）。',
+    desc: '读取一个 Excel（.xlsx/.xls）文件，按 sheet/offset/limit 返回表格文本（每行 tab 分隔，默认 8 行；汇总/核对/对比优先使用 analyze_spreadsheet 批量处理）。可用于读供应商报价表/用户原声表/BOM 表/竞品表等。file_path 指定任务附件名时不会弹框；不填才弹出文件选择框。',
     params: [
-      { key: 'file_path', type: 'string', desc: 'Excel 文件路径（可空，空则弹出选择框由用户选）' },
-      { key: 'max_rows', type: 'number', desc: '最多返回行数，默认 60' },
+      { key: 'file_path', type: 'string', desc: '任务附件名/相对路径；指定后按该文件读取，不会忽略此参数' },
+      { key: 'sheet', type: 'string', desc: '工作表名称，可空，默认第一个工作表' },
+      { key: 'offset', type: 'number', minimum: 0, desc: '分页起点，从 0 开始' },
+      { key: 'max_rows', type: 'number', minimum: 1, maximum: 200, desc: '最多返回行数，默认 8' },
     ],
     execute: async (a) => {
-      const maxRows = Math.max(1, Math.min(Number(a.max_rows) || 60, 200));
+      const maxRows = Math.max(1, Math.min(Number(a.max_rows) || 8, 200));
+      const offset = Math.max(0, Math.floor(Number(a.offset) || 0));
       const file = await pickExcelFile();
       if (!file) return '用户取消选择文件';
-      return await readExcelText(file, maxRows);
+      return await readExcelText(file, maxRows, offset, String(a.sheet || ''));
     },
   },
   {
@@ -496,13 +592,11 @@ const tools: AiTool[] = [
     desc: '做算术计算（加减乘除/括号/百分比），返回结果。用于核验成本数字（BOM 合计、占比、单价×数量、加费率等），避免自己口算错。参数 expression 必填（如 (520*1+185*2)*1.05 或 45/300*100）。',
     params: [{ key: 'expression', type: 'string', required: true, desc: '算术表达式' }],
     execute: async (a) => {
-      const expr = String(a.expression || '').replace(/[^0-9+\-*/().%\s]/g, '');
-      if (!expr) return '表达式为空或不合法（只支持数字和 + - * / ( ) . %）';
+      const expr = String(a.expression || '').trim();
+      if (!expr) throw new Error('表达式为空或不合法（只支持数字和 + - * / ( ) . %）');
       try {
-        const result = new Function('return (' + expr + ')')();
-        if (typeof result !== 'number' || !isFinite(result)) return '无法计算：' + expr;
-        return expr + ' = ' + (Math.round(result * 10000) / 10000);
-      } catch { return '表达式无法解析：' + expr; }
+        return expr + ' = ' + evaluateExpression(expr);
+      } catch (error: any) { throw new Error('表达式无法解析：' + String(error?.message || error)); }
     },
   },
   {
@@ -530,7 +624,7 @@ const tools: AiTool[] = [
       const pad = (n: number) => String(n).padStart(2, '0');
       const date = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
       const content = String(a.content || '').trim();
-      if (!content) return '待办内容不能为空';
+      if (!content) throw new Error('待办内容不能为空');
       const id = await saveWorkLog({ log_date: date, title: '', content, category: '其他', tags: '', work_project: a.project || '', is_todo: 1, done: 0 });
       return '已创建待办：' + content + (a.project ? '（项目 ' + a.project + '）' : '') + '（id ' + id + '）';
     },
@@ -546,7 +640,7 @@ const tools: AiTool[] = [
     execute: async (a) => {
       const { saveGoal } = await import('./db/goals');
       const text = String(a.text || '').trim();
-      if (!text) return '目标内容不能为空';
+      if (!text) throw new Error('目标内容不能为空');
       const id = await saveGoal(text, a.linked_project || '');
       return '已下达目标：' + text + '（id ' + id + '，后台自主分析将优先推进）';
     },
@@ -580,8 +674,11 @@ const tools: AiTool[] = [
         out.push('竞品 ' + (c.brand || '') + ' ' + (c.model || '') + '：售价 ' + fmtMoney(c.market_price) + '，估算 BOM ' + fmtMoney(c.bom_cost) + '，档位 ' + (c.tier || ''));
         const boms = await getCompetitorBOMs(c.id);
         if (boms.length === 0) { out.push('  （无 BOM 估算明细）'); continue; }
+        const competitorRows = boms.map((b: any) => ({ ...b, part_cost: b.estimated_cost }));
+        const costing = sumBomCostStrict(competitorRows);
+        if (costing.missing.length) { out.push('  模块：待补证据（' + costing.missing.length + ' 项未确认）'); continue; }
         const modMap = new Map<string, number>();
-        for (const b of boms) { const m = b.module_name || '未分模块'; modMap.set(m, (modMap.get(m) || 0) + (Number(b.estimated_cost) || 0) * (Number(b.quantity) || 1)); }
+        for (const b of competitorRows) { const m = b.module_name || '未分模块'; modMap.set(m, (modMap.get(m) || 0) + (bomExtendedCostStrict(b) ?? 0)); }
         out.push('  模块：' + [...modMap.entries()].sort((x, y) => y[1] - x[1]).map(([m, c2]) => m + ' ' + fmtMoney(c2)).join('、'));
       }
       return out.join('\n');
@@ -593,7 +690,6 @@ const tools: AiTool[] = [
     desc: '扫描用户全部数据（本地模型/项目BOM/器件与供应商报价/用户原声/目标成本/竞品/规格分类），逐项给出 有/缺/半 状态、现在能做什么、缺了影响什么、建议补什么。用户问"我该补什么数据/现在能做哪些分析"或刚上手想了解能做什么时调用。无参数。',
     params: [],
     execute: async () => {
-      const { getDataReadiness, readinessToText } = await import('./dataReadiness');
       return readinessToText(await getDataReadiness());
     },
   },
@@ -638,9 +734,9 @@ const tools: AiTool[] = [
       const { getProjects } = await import('./db');
       const projs = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
       const p = projs.find((x: any) => x.code === a.project_code);
-      if (!p) return '未找到项目代号：' + a.project_code;
+      if (!p) throw new Error('未找到项目代号：' + a.project_code);
       const conclusion = String(a.conclusion || '').trim();
-      if (!conclusion) return '结论内容不能为空';
+      if (!conclusion) throw new Error('结论内容不能为空');
       const { saveSellingAnalysis } = await import('./db/selling');
       const id = await saveSellingAnalysis(p.id, p.code || '', conclusion);
       try { const W = window as any; W.__costhub_undo = { toolId: 'save_selling_analysis', inserts: { selling_point_analysis: [id] } }; } catch { }
@@ -660,9 +756,9 @@ const tools: AiTool[] = [
       const { getProjects } = await import('./db');
       const projs = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
       const p = projs.find((x: any) => x.code === a.project_code);
-      if (!p) return '未找到项目代号：' + a.project_code;
+      if (!p) throw new Error('未找到项目代号：' + a.project_code);
       const conclusion = String(a.conclusion || '').trim();
-      if (!conclusion) return '结论内容不能为空';
+      if (!conclusion) throw new Error('结论内容不能为空');
       const { saveProjectAnalysis } = await import('./db');
       const id2 = await saveProjectAnalysis(p.id, p.code || '', conclusion);
       try { const W = window as any; W.__costhub_undo = { toolId: 'save_project_analysis', inserts: { project_analysis_logs: [id2] } }; } catch { }
@@ -682,9 +778,9 @@ const tools: AiTool[] = [
       const { getProjects } = await import('./db');
       const projs = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
       const p = projs.find((x: any) => x.code === a.project_code);
-      if (!p) return '未找到项目代号：' + a.project_code;
+      if (!p) throw new Error('未找到项目代号：' + a.project_code);
       let items: any[] = [];
-      try { items = JSON.parse(String(a.items || '[]')); } catch { items = []; }
+      items = parseToolArray(a.items, 'items');
       if (!Array.isArray(items) || items.length === 0) {
         // 2026-08-19 智能附件：未传 items → 从附加的 BOM 表自动读取（列名映射）
         const att = attachmentRows('bom');
@@ -695,16 +791,16 @@ const tools: AiTool[] = [
             { names: ['数量', 'quantity', 'qty'], out: 'quantity' },
             { names: ['单价', '成本', '价格', 'cost', 'price'], out: 'cost' },
             { names: ['模块', 'module'], out: 'module' },
-          ]).map((x: any) => ({ name: String(x.name || '').trim(), model: String(x.model || '').trim(), quantity: Number(x.quantity) || 1, cost: Number(x.cost) || 0, module: String(x.module || '').trim() })).filter((x: any) => x.name);
+          ]).map((x: any) => ({ name: String(x.name || '').trim(), model: String(x.model || '').trim(), quantity: x.quantity === '' || x.quantity == null ? undefined : Number(x.quantity), cost: x.cost === '' || x.cost == null ? undefined : Number(x.cost), module: String(x.module || '').trim() })).filter((x: any) => x.name);
         }
       }
-      if (items.length === 0) return 'items 为空（可传 JSON 数组，或在输入区附加 BOM Excel 后重试）';
+      if (items.length === 0) throw new Error('items 为空（可传 JSON 数组，或在输入区附加 BOM Excel 后重试）');
       const { classifyByModule } = await import('./moduleRules');
       const norm = items.map((it: any) => {
         const cls = classifyByModule(String(it.name || ''));
         return {
           name: String(it.name || '').trim(), model: String(it.model || '').trim(),
-          quantity: Number(it.quantity) || 1, cost: Number(it.cost) || 0,
+          quantity: it.quantity === '' || it.quantity == null ? undefined : Number(it.quantity), cost: it.cost === '' || it.cost == null ? undefined : Number(it.cost),
           module: String(it.module || '').trim() || cls?.module || '',
           mainCat: String(it.mainCat || '').trim() || cls?.mainCat || '硬件类',
           sub: String(it.sub || '').trim() || cls?.sub || '',
@@ -724,7 +820,7 @@ const tools: AiTool[] = [
     params: [{ key: 'rows', type: 'string', required: true, desc: 'JSON 数组字符串' }],
     execute: async (a) => {
       let rows: any[] = [];
-      try { rows = JSON.parse(String(a.rows || '[]')); } catch { rows = []; }
+      rows = parseToolArray(a.rows, 'rows');
       if (!Array.isArray(rows) || rows.length === 0) {
         const att = attachmentRows('supplier');
         if (att) {
@@ -734,14 +830,14 @@ const tools: AiTool[] = [
             { names: ['供应商', '供应商名称', 'supplier'], out: 'supplier' },
             { names: ['价格', '单价', '报价', 'price'], out: 'price' },
             { names: ['份额', '占比', 'share'], out: 'share' },
-          ]).map((x: any) => ({ name: String(x.name || '').trim(), model: String(x.model || '').trim(), supplier: String(x.supplier || '').trim(), price: Number(x.price) || 0, share: Number(x.share) || 0 })).filter((x: any) => x.name && x.supplier);
+          ]).map((x: any) => ({ name: String(x.name || '').trim(), model: String(x.model || '').trim(), supplier: String(x.supplier || '').trim(), price: x.price === '' || x.price == null ? undefined : Number(x.price), share: x.share === '' || x.share == null ? undefined : Number(x.share) })).filter((x: any) => x.name && x.supplier);
         }
       }
-      if (rows.length === 0) return 'rows 为空（可传 JSON 数组，或在输入区附加供应商报价 Excel 后重试）';
+      if (rows.length === 0) throw new Error('rows 为空（可传 JSON 数组，或在输入区附加供应商报价 Excel 后重试）');
       const { importSupplierQuotes } = await import('./db');
       const st = await importSupplierQuotes(rows);
       try { window.dispatchEvent(new CustomEvent('costhub-supplier-updated')); } catch { }
-      return '供应商报价入库：共 ' + st.total + ' 条，匹配器件 ' + st.matched + ' 个、写入 ' + st.added + ' 条报价' + (st.unmatched > 0 ? '，未匹配器件 ' + st.unmatched + ' 个：' + st.unmatchedNames.slice(0, 10).join('、') + '（需先入器件库）' : '') + '。';
+      return '供应商报价入库：共 ' + st.total + ' 条，匹配器件 ' + st.matched + ' 个、写入 ' + st.added + ' 条报价' + (st.invalid ? '，跳过无效数据 ' + st.invalid + ' 条' : '') + (st.unmatched > 0 ? '，未匹配器件 ' + st.unmatched + ' 个：' + st.unmatchedNames.slice(0, 10).join('、') + '（需先入器件库）' : '') + '。';
     },
   },
   {
@@ -757,9 +853,9 @@ const tools: AiTool[] = [
       const { getCompetitors } = await import('./db');
       const comps = await getCompetitors();
       const c = comps.find((x: any) => String(x.brand || '').includes(String(a.brand || '')) && String(x.model || '').includes(String(a.model || '')));
-      if (!c) return '未找到竞品：' + a.brand + ' ' + a.model + '（可在竞品管理页先录入）';
+      if (!c) throw new Error('未找到竞品：' + a.brand + ' ' + a.model + '（可在竞品管理页先录入）');
       let rows: any[] = [];
-      try { rows = JSON.parse(String(a.rows || '[]')); } catch { rows = []; }
+      rows = parseToolArray(a.rows, 'rows');
       if (!Array.isArray(rows) || rows.length === 0) {
         const att = attachmentRows('competitor');
         if (att) {
@@ -769,19 +865,19 @@ const tools: AiTool[] = [
             { names: ['成本', '估算成本', '价格', 'cost'], out: 'cost' },
             { names: ['数量', 'quantity', 'qty'], out: 'quantity' },
             { names: ['模块', 'module'], out: 'module' },
-          ]).map((x: any) => ({ name: String(x.name || '').trim(), model: String(x.model || '').trim(), cost: Number(x.cost) || 0, quantity: Number(x.quantity) || 1, module: String(x.module || '').trim() })).filter((x: any) => x.name);
+          ]).map((x: any) => ({ name: String(x.name || '').trim(), model: String(x.model || '').trim(), cost: x.cost === '' || x.cost == null ? undefined : Number(x.cost), quantity: x.quantity === '' || x.quantity == null ? undefined : Number(x.quantity), module: String(x.module || '').trim() })).filter((x: any) => x.name);
         }
       }
-      if (rows.length === 0) return 'rows 为空（可传 JSON 数组，或在输入区附加竞品 Excel 后重试）';
+      if (rows.length === 0) throw new Error('rows 为空（可传 JSON 数组，或在输入区附加竞品 Excel 后重试）');
       const { classifyByModule } = await import('./moduleRules');
       const norm = rows.map((it: any) => {
         const cls = classifyByModule(String(it.name || ''));
-        return { name: String(it.name || '').trim(), model: String(it.model || '').trim(), cost: Number(it.cost) || 0, quantity: Number(it.quantity) || 1, module: String(it.module || '').trim() || cls?.module || '' };
+        return { name: String(it.name || '').trim(), model: String(it.model || '').trim(), cost: it.cost === '' || it.cost == null ? undefined : Number(it.cost), quantity: it.quantity === '' || it.quantity == null ? undefined : Number(it.quantity), module: String(it.module || '').trim() || cls?.module || '' };
       }).filter((x: any) => x.name);
       const { importCompetitorBom } = await import('./db');
       const st = await importCompetitorBom(c.id, norm);
       try { window.dispatchEvent(new CustomEvent('costhub-competitor-updated')); } catch { }
-      return '竞品 ' + c.brand + ' ' + c.model + ' BOM 入库完成：共 ' + st.total + ' 项，写入 ' + st.added + ' 项（竞品管理页可见）。';
+      return '竞品 ' + c.brand + ' ' + c.model + ' BOM 入库完成：共 ' + st.total + ' 项，写入 ' + st.added + ' 项' + (st.skipped ? '，跳过无效数据 ' + st.skipped + ' 项' : '') + '（竞品管理页可见）。';
     },
   },
   {
@@ -793,20 +889,15 @@ const tools: AiTool[] = [
       { key: 'items', type: 'string', required: true, desc: 'JSON 数组字符串' },
     ],
     execute: async (a) => {
-      let arr: any[] = [];
-      try { arr = JSON.parse(String(a.items || '[]')); } catch { arr = []; }
-      if (!Array.isArray(arr) || arr.length === 0) {
+      let contents = resolveVoiceItems(a.items);
+      if (contents.length === 0) {
         const att = attachmentRows('voice');
         if (att) {
-          const mapped = mapColumns(att.rows, [
-            { names: ['评价', '评论', '反馈', '内容', '意见', '点评', '口碑'], out: 'content' },
-          ]);
-          arr = mapped.map((x: any) => String(x.content || '')).filter(Boolean);
+          contents = detectVoiceSheet([{ name: att.name, rows: att.rows }]).contents;
         }
       }
-      if (arr.length === 0) return 'items 为空（可传 JSON 数组，或在输入区附加原声 Excel 后重试）';
-      const contents = arr.map((x: any) => String(typeof x === 'string' ? x : (x?.content ?? x?.text ?? '')).trim()).filter(Boolean);
-      if (contents.length === 0) return '没有有效原声内容';
+      if (contents.length === 0) throw new Error('没有有效原声内容（附件也未识别到正文列）');
+      if (!String(a.product || '').trim()) throw new Error('无法可靠识别产品归属，请明确产品名后再导入');
       const { importVoiceItems } = await import('./db');
       const st = await importVoiceItems(String(a.product || '').trim(), contents);
       try { window.dispatchEvent(new CustomEvent('costhub-voice-updated')); } catch { }
@@ -816,7 +907,7 @@ const tools: AiTool[] = [
   {
     id: 'generate_report',
     name: '生成报告（HTML/PPTX）',
-    desc: '把分析结论生成一份报告（HTML 网页报告 或 PPTX 演示），保存到应用导出目录 exports/。参数 title 必填（报告标题），slides 必填（JSON 数组 [{heading:小节标题, points:[要点数组]}]——把结论组织成 3-6 节，每节 2-5 个要点），format 可选（html/pptx，默认 html），subtitle 可选。用于"生成一份XX报告/演示"。',
+    desc: '把分析结论生成一份报告（HTML 网页报告 或 PPTX 演示），保存到 AI 工作文件夹。参数 title 必填（报告标题），slides 必填（JSON 数组 [{heading:小节标题, points:[要点数组]}]——把结论组织成 3-6 节，每节 2-5 个要点），format 可选（html/pptx，默认 html），subtitle 可选。用于"生成一份XX报告/演示"。',
     params: [
       { key: 'title', type: 'string', required: true, desc: '报告标题' },
       { key: 'slides', type: 'string', required: true, desc: 'JSON 数组 [{heading,points}]' },
@@ -825,10 +916,10 @@ const tools: AiTool[] = [
     ],
     execute: async (a) => {
       const title = String(a.title || '').trim();
-      if (!title) return '报告标题不能为空';
+      if (!title) throw new Error('报告标题不能为空');
       let slides: any[];
-      try { slides = JSON.parse(String(a.slides || '[]')); } catch { return 'slides 不是合法 JSON 数组'; }
-      if (!Array.isArray(slides) || slides.length === 0) return 'slides 为空（至少一节）';
+      slides = parseToolArray(a.slides, 'slides');
+      if (!Array.isArray(slides) || slides.length === 0) throw new Error('slides 为空（至少一节）');
       const format = String(a.format || '').toLowerCase() === 'pptx' ? 'pptx' : 'html';
       const subtitle = String(a.subtitle || '');
       const { buildHtmlReportBase64, buildPptxBase64 } = await import('./aiReport');
@@ -836,30 +927,37 @@ const tools: AiTool[] = [
       const safe = title.replace(/[\\/:*?"<>|]/g, '_');
       const name = '报告-' + safe + '-' + new Date().toISOString().slice(0, 10) + '.' + format;
       const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('save_export_file', { fileName: name, base64Data: b64 });
-      return '✅ 已生成报告：' + name + '（' + format + ' 格式，' + slides.length + ' 节，保存在应用导出目录 exports/，可在导出目录查看/打开）';
+      const configuredDir = (await getSetting('ai_work_folder', '')).trim();
+      const targetDir = configuredDir || await invoke<string>('get_default_ai_work_folder').catch(() => '');
+      const savedName = await invoke<string>('save_export_file', { fileName: name, base64Data: b64, targetDir: targetDir || undefined });
+      return '✅ 已生成报告：' + savedName + '（' + format + ' 格式，文件位置：' + targetDir + '）';
     },
   },
   {
     id: 'write_excel',
     name: '生成 Excel 表格',
-    desc: '把结构化数据生成 Excel 文件（.xlsx）保存到应用导出目录 exports/。参数 file_name 必填（文件名，可含或不含 .xlsx），sheets 必填（JSON 数组 [{name:工作表名, rows:[[单元格值...]...]}]，第一行通常为表头）。用于"把分析结果导出成 Excel 表格/清单"。',
+    desc: '把结构化数据生成 Excel 文件（.xlsx）保存到 AI 工作文件夹。参数 file_name 必填（文件名，可含或不含 .xlsx），sheets 必填（JSON 数组 [{name:工作表名, rows:[[单元格值...]...]}]，第一行通常为表头）。用于"把分析结果导出成 Excel 表格/清单"。',
     params: [
       { key: 'file_name', type: 'string', required: true, desc: '文件名' },
       { key: 'sheets', type: 'string', required: true, desc: 'JSON 数组 [{name,rows}]' },
     ],
     execute: async (a) => {
       let sheets: any[];
-      try { sheets = JSON.parse(String(a.sheets || '[]')); } catch { return 'sheets 不是合法 JSON 数组'; }
-      if (!Array.isArray(sheets) || sheets.length === 0) return 'sheets 为空';
+      sheets = parseToolArray(a.sheets, 'sheets');
+      if (!sheets.length) throw new Error('sheets 为空');
       const { buildWorkbookBase64 } = await import('./aiReport');
       const b64 = buildWorkbookBase64(sheets);
       const raw = String(a.file_name || '').trim().replace(/[\\/:*?"<>|]/g, '_') || ('导出-' + new Date().toISOString().slice(0, 10));
-      const name = raw.toLowerCase().endsWith('.xlsx') ? raw : raw + '.xlsx';
+      // write_excel always emits XLSX; avoid confusing names such as source.csv.xlsx
+      // when a small model echoes the attached source filename.
+      const withoutSourceExtension = raw.replace(/\.(?:csv|xls)$/i, '');
+      const name = withoutSourceExtension.toLowerCase().endsWith('.xlsx') ? withoutSourceExtension : withoutSourceExtension + '.xlsx';
       const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('save_export_file', { fileName: name, base64Data: b64 });
+      const configuredDir = (await getSetting('ai_work_folder', '')).trim();
+      const targetDir = configuredDir || await invoke<string>('get_default_ai_work_folder').catch(() => '');
+      const savedName = await invoke<string>('save_export_file', { fileName: name, base64Data: b64, targetDir: targetDir || undefined });
       const rowsTotal = sheets.reduce((s: number, sh: any) => s + ((sh.rows || []).length - 1), 0);
-      return '✅ 已生成 Excel：' + name + '（' + sheets.length + ' 个工作表，' + Math.max(0, rowsTotal) + ' 行数据，保存在导出目录 exports/）';
+      return '✅ 已生成 Excel：' + savedName + '（' + sheets.length + ' 个工作表，' + Math.max(0, rowsTotal) + ' 行数据，文件位置：' + targetDir + '）';
     },
   },
   {
@@ -897,9 +995,8 @@ const tools: AiTool[] = [
       const { getProjects } = await import('./db');
       const projs = (await getProjects('', '', '')).filter((p: any) => !p.is_deleted);
       const p = projs.find((x: any) => x.code === a.project_code);
-      if (!p) return '未找到项目代号：' + a.project_code;
+      if (!p) throw new Error('未找到项目代号：' + a.project_code);
       // 2026-08-27 预检：模型未就绪快速报原因，不空跑（Ollama 未运行 / 模型未下载）
-      const { detectOllama } = await import('./aiStatus');
       const pre = await detectOllama();
       if (!pre.connected) return '规范化需要本地模型，但 ' + (pre.reason === 'model-missing' ? '模型未下载（请先在 Ollama 拉取模型，或到设置→连接设置选择已下载的模型）' : 'Ollama 未运行（请先启动 Ollama，设置 → 连接设置 → 检测连接）') + '。本次未修改任何数据。';
       const { canonicalizeProject } = await import('./canonicalize');
@@ -947,22 +1044,50 @@ const tools: AiTool[] = [
         const groups = new Map<string, number>();
         for (const b of boms) {
           const key = dimension === 'module' ? (b.module_name || '未分模块') : (b[dimension] || '未分类');
-          const value = (Number(b.part_cost ?? b.cost) || 0) * (Number(b.quantity) || 1);
+          const value = bomExtendedCostStrict(b);
+          if (value === null) continue;
           groups.set(key, (groups.get(key) || 0) + value);
         }
         const rows = [...groups.entries()].sort((x, y) => y[1] - x[1]);
-        out.push(p.code + '｜' + rows.map(([k, v]) => k + ' ¥' + v.toFixed(2)).join('；'));
+        const missing = sumBomCostStrict(boms).missing.length;
+        out.push(p.code + '｜' + (missing ? '待补证据' : rows.map(([k, v]) => k + ' ¥' + v.toFixed(2)).join('；')));
       }
       return '图表数据已从本地 BOM 按 ' + dimension + ' 聚合（前端将直接渲染，不采用模型生成数字）：\n' + out.join('\n');
     },
   },
+  {
+    id: 'estimate_similar_projects',
+    name: '类似项目预估',
+    desc: '基于本地历史项目规格和 BOM 成本，找最多 3 个可比项目并给出成本区间、匹配字段和数据缺口。参数 project_code 必填；项目必须能唯一解析。',
+    params: [{ key: 'project_code', type: 'string', required: true, desc: '目标项目代号或名称' }, { key: 'limit', type: 'number', desc: '最多返回 3 个，默认 3' }],
+    execute: async () => '该工具由结构化 Skill 适配器执行。',
+  },
+  {
+    id: 'rank_quote_negotiations',
+    name: '报价议价排序',
+    desc: '读取项目当前报价轮次，只按 exact/equivalent 可比关系计算可争取金额，并按议价空间排序；reference/unmatched 不计入理论底价。参数 project_code 必填。',
+    params: [{ key: 'project_code', type: 'string', required: true, desc: '项目代号或名称' }, { key: 'limit', type: 'number', desc: '最多返回行数，默认 20' }],
+    execute: async () => '该工具由结构化 Skill 适配器执行。',
+  },
+  {
+    id: 'explain_quote_change',
+    name: '报价变化归因',
+    desc: '比较项目最近两个报价批次，把总价变化拆分为数量/单价变化、新增和删除物料，并提示规格基线独立核对。参数 project_code 必填。',
+    params: [{ key: 'project_code', type: 'string', required: true, desc: '项目代号或名称' }],
+    execute: async () => '该工具由结构化 Skill 适配器执行。',
+  },
 ];
 
 export function listTools(): AiTool[] {
-  return tools;
+  return tools.map(tool => withNativeSchema({ ...tool, manifest: resolveToolManifest(tool.id) }));
 }
 
-export function getTool(id: string): AiTool | undefined { return tools.find(t => t.id === id); }
+export function getToolManifest(id: string): AiToolManifest | undefined { return resolveToolManifest(id); }
+
+export function getTool(id: string): AiTool | undefined {
+  const tool = tools.find(t => t.id === id);
+  return tool ? withNativeSchema({ ...tool, manifest: resolveToolManifest(tool.id) }) : undefined;
+}
 
 /** 参数校验：返回错误信息或 null */
 export function validateArgs(tool: AiTool, args: any): string | null {
@@ -973,21 +1098,63 @@ export function validateArgs(tool: AiTool, args: any): string | null {
     if (v !== undefined && v !== null && v !== '') {
       if (p.type === 'number' && isNaN(Number(v))) return '参数 ' + p.key + ' 应为数字';
       if (p.type === 'string' && typeof v !== 'string' && typeof v !== 'number') return '参数 ' + p.key + ' 应为文本';
+      if (p.type === 'boolean' && typeof v !== 'boolean') return '参数 ' + p.key + ' 应为布尔值';
+      if (p.type === 'array' && !Array.isArray(v)) return '参数 ' + p.key + ' 应为数组';
+      if (p.type === 'object' && (typeof v !== 'object' || Array.isArray(v))) return '参数 ' + p.key + ' 应为对象';
+      if (p.enum?.length && !p.enum.includes(String(v))) return '参数 ' + p.key + ' 必须是：' + p.enum.join('、');
+      if (p.type === 'number' && p.minimum !== undefined && Number(v) < p.minimum) return '参数 ' + p.key + ' 不能小于 ' + p.minimum;
+      if (p.type === 'number' && p.maximum !== undefined && Number(v) > p.maximum) return '参数 ' + p.key + ' 不能大于 ' + p.maximum;
+      if (p.type === 'array' && p.items && v.some((item: unknown) => typeof item !== p.items)) return '参数 ' + p.key + ' 的元素类型应为 ' + p.items;
     }
   }
   return null;
 }
 
-/** 执行单个工具：校验 + 执行 + 结果截断（返回文本供模型消费） */
-export async function executeTool(id: string, args: any): Promise<{ ok: boolean; text: string }> {
+export async function executeStructuredTool(call: ToolCall, context: RunContext = {}): Promise<AiToolResult<unknown>> {
+  return executeStructuredToolAdapter(call, context);
+}
+
+/** 把 write_excel / generate_report 的文本回执转成可渲染的文件卡片元数据。 */
+function generatedFileToolResult(id: string, text: string): AiToolResult<unknown> | undefined {
+  if (id !== 'write_excel' && id !== 'generate_report') return undefined;
+  const nameMatch = /已生成(?:报告| excel)：([^（()]+)/i.exec(text);
+  const dirMatch = /文件位置：(.+?)(?:）|$)/m.exec(text);
+  if (!nameMatch || !dirMatch) return undefined;
+  const name = nameMatch[1].trim();
+  const dir = dirMatch[1].trim().replace(/[\\/]+$/, '');
+  const separator = dir.includes('\\') ? '\\' : '/';
+  const type = (name.split('.').pop() || (id === 'write_excel' ? 'xlsx' : 'html')).toLowerCase();
+  return {
+    ok: true,
+    summary: text,
+    data: { file: { name, type, dir, path: `${dir}${separator}${name}` } },
+    evidence: [],
+    warnings: [],
+    freshness: '',
+  };
+}
+
+/** 执行单个工具：风险门禁 + 参数校验 + 执行 + 结果截断 */
+export async function executeTool(id: string, args: any, options: ExecuteToolOptions = {}): Promise<{ ok: boolean; text: string; result?: AiToolResult<unknown>; requiresConfirmation?: boolean }> {
+  args = prepareBusinessArgs(id, args);
   const tool = getTool(id);
   if (!tool) return { ok: false, text: '未知工具：' + id };
+  const manifest = resolveToolManifest(id);
+  if (!manifest) return { ok: false, text: '工具未声明风险，已拒绝执行：' + id };
+  if (manifest.kind === 'write' && manifest.requiresConfirmation && !options.confirmed) {
+    return { ok: false, text: '写工具「' + tool.name + '」必须先取得用户确认，未执行任何写入。', requiresConfirmation: true };
+  }
   const err = validateArgs(tool, args);
   if (err) return { ok: false, text: '参数错误：' + err };
   try {
-    const text = await tool.execute(args || {});
+    validateNestedArgs(tool, args);
+    if (STRUCTURED_TOOL_IDS.some(toolId => toolId === id)) {
+      const structured = await executeStructuredTool({ name: id, args: args || {} }, {});
+      return { ok: structured.ok, text: structured.summary, result: structured };
+    }
+    const text = await tool.execute(args || {}, options);
     // 2026-08-18 单路深挖：结果放宽到 4000 字（thinkEngine 有 compressMessages 兜底上下文），关键数据尽量完整给模型
-    return { ok: true, text: text.length > 4000 ? text.slice(0, 4000) + '…（已截断）' : text };
+    return { ok: true, text, result: generatedFileToolResult(id, text) };
   } catch (e: any) {
     return { ok: false, text: '工具执行失败：' + String(e?.message || e).slice(0, 200) };
   }

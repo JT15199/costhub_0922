@@ -1,0 +1,48 @@
+
+> tauri-app@2.3.19 test
+> vitest run
+
+
+ RUN  v4.1.10 D:/AI coding folder/costhub
+
+stdout | docs/check-llama-reacceptance.test.ts > second acceptance: actual adapter and oversized rows > can recover a long cell tail from the advertised file without shell access
+long cell reread: [Line 16 is 87.9KB, exceeds 50.0KB limit. Use bash: sed -n '16p' .costhub-results/2077babb-5a56-4cb5-aabe-39769b26cfe8.json | head -c 51200]
+
+stdout | docs/check-llama-reacceptance.test.ts > second acceptance: actual adapter and oversized rows > bounds previews across many columns as well as within each cell
+many-column preview: { characters: 52698, tokens: 73488, inputHard: 21954 }
+
+ ❯ docs/check-llama-reacceptance.test.ts (5 tests | 2 failed) 403ms
+     × can recover a long cell tail from the advertised file without shell access 56ms
+     × bounds previews across many columns as well as within each cell 66ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  docs/check-llama-reacceptance.test.ts > second acceptance: actual adapter and oversized rows > can recover a long cell tail from the advertised file without shell access
+AssertionError: expected '[Line 16 is 87.9KB, exceeds 50.0KB li…' to contain 'CELL-END-EVIDENCE-927'
+
+Expected: "CELL-END-EVIDENCE-927"
+Received: "[Line 16 is 87.9KB, exceeds 50.0KB limit. Use bash: sed -n '16p' .costhub-results/2077babb-5a56-4cb5-aabe-39769b26cfe8.json | head -c 51200]"
+
+ ❯ docs/check-llama-reacceptance.test.ts:59:36
+     57|     const reread: any = await read.execute('tail', { path: preview.ful…
+     58|     console.log('long cell reread:', reread.content[0].text);
+     59|     expect(reread.content[0].text).toContain(marker);
+       |                                    ^
+     60|   });
+     61|   it('bounds previews across many columns as well as within each cell'…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  docs/check-llama-reacceptance.test.ts > second acceptance: actual adapter and oversized rows > bounds previews across many columns as well as within each cell
+AssertionError: expected 73488 to be less than or equal to 21954
+ ❯ docs/check-llama-reacceptance.test.ts:69:34
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 64 passed (65)
+      Tests  2 failed | 371 passed | 2 skipped (375)
+   Start at  07:52:34
+   Duration  7.37s (transform 8.36s, setup 0ms, import 60.21s, tests 7.93s, environment 13ms)
+

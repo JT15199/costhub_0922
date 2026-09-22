@@ -3,6 +3,23 @@
 export interface VoiceBlock { index: number; items: string[]; }
 export interface BlockDimension { name: string; sentiment: 'positive' | 'negative'; }
 
+export function findVoiceEvidence(name: string, items: string[]): string[] {
+  const needle = String(name || '').replace(/\s+/g, '');
+  if (!needle) return [];
+  const hits: string[] = [];
+  const normalized = (value: string) => String(value || '').replace(/\s+/g, '');
+  for (const item of items) {
+    if (normalized(item).includes(needle)) { hits.push(item); if (hits.length >= 3) break; }
+  }
+  if (!hits.length && needle.length >= 3) {
+    const prefix = needle.slice(0, 2);
+    for (const item of items) {
+      if (normalized(item).includes(prefix)) { hits.push(item); if (hits.length >= 3) break; }
+    }
+  }
+  return hits;
+}
+
 // 自动分块：按总字数预算切，块间不切断单条原声（一条完整归一块）
 export function chunkVoiceItems(items: string[], maxCharsPerChunk = 3000): VoiceBlock[] {
   const blocks: VoiceBlock[] = [];

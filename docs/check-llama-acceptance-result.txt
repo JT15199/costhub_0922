@@ -1,0 +1,127 @@
+
+ RUN  v4.1.10 D:/AI coding folder/costhub
+
+stdout | docs/check-llama-acceptance.test.ts > 27B acceptance gaps > reports a missing import target as failure
+missing-target result: { ok: true, text: '未找到项目代号：DOES-NOT-EXIST' }
+
+stdout | docs/check-llama-acceptance.test.ts > 27B acceptance gaps > advertises the worksheet selector in the actual Pi read schema
+read schema: {"type":"object","required":["path"],"properties":{"path":{"type":"string","description":"Path to the file to read (relative or absolute)"},"offset":{"type":"number","description":"Line number to start reading from (1-indexed)"},"limit":{"type":"number","description":"Maximum number of lines to read"}}}
+
+stdout | docs/check-llama-acceptance.test.ts > 27B acceptance gaps > keeps a wide workbook read within the next request budget
+wide workbook: {
+  responseCharacters: 499868,
+  estimatedTokens: 240518,
+  inputHard: 21954
+}
+
+ ❯ docs/check-llama-acceptance.test.ts (4 tests | 4 failed) 375ms
+     × does not resolve a broken stream as a completed answer 13ms
+     × reports a missing import target as failure 7ms
+     × advertises the worksheet selector in the actual Pi read schema 20ms
+     × keeps a wide workbook read within the next request budget 334ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  docs/check-llama-acceptance.test.ts > 27B acceptance gaps > does not resolve a broken stream as a completed answer
+AssertionError: promise resolved "{ finalText: '未完成的半句', rounds: 1, …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "finalText": "未完成的半句",
++   "messages": [
++     {
++       "content": [
++         {
++           "text": "hello",
++           "type": "text",
++         },
++       ],
++       "role": "user",
++       "timestamp": 1789219894568,
++     },
++     {
++       "api": "costhub-ollama",
++       "content": [
++         {
++           "text": "未完成的半句",
++           "type": "text",
++         },
++       ],
++       "errorMessage": "连接中断，未收到结束标记",
++       "model": "test",
++       "provider": "costhub",
++       "role": "assistant",
++       "stopReason": "error",
++       "timestamp": 1789219894571,
++       "usage": {
++         "cacheRead": 0,
++         "cacheWrite": 0,
++         "cost": {
++           "cacheRead": 0,
++           "cacheWrite": 0,
++           "input": 0,
++           "output": 0,
++           "total": 0,
++         },
++         "input": 0,
++         "output": 0,
++         "totalTokens": 0,
++       },
++     },
++   ],
++   "rounds": 1,
+  }
+
+ ❯ docs/check-llama-acceptance.test.ts:30:27
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  docs/check-llama-acceptance.test.ts > 27B acceptance gaps > reports a missing import target as failure
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ docs/check-llama-acceptance.test.ts:36:23
+     34|     const result = await executeTool('import_bom_to_project', { projec…
+     35|     console.log('missing-target result:', result);
+     36|     expect(result.ok).toBe(false);
+       |                       ^
+     37|   });
+     38|   it('advertises the worksheet selector in the actual Pi read schema',…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  docs/check-llama-acceptance.test.ts > 27B acceptance gaps > advertises the worksheet selector in the actual Pi read schema
+AssertionError: expected { Object (path, offset, ...) } to have property "sheet"
+ ❯ docs/check-llama-acceptance.test.ts:41:40
+     39|     const tool = await readTool();
+     40|     console.log('read schema:', JSON.stringify(tool.parameters));
+     41|     expect(tool.parameters.properties).toHaveProperty('sheet');
+       |                                        ^
+     42|   });
+     43|   it('keeps a wide workbook read within the next request budget', asyn…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  docs/check-llama-acceptance.test.ts > 27B acceptance gaps > keeps a wide workbook read within the next request budget
+AssertionError: expected 240518 to be less than or equal to 21954
+ ❯ docs/check-llama-acceptance.test.ts:48:34
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed (4)
+   Start at  21:31:32
+   Duration  2.65s (transform 298ms, setup 0ms, import 2.14s, tests 375ms, environment 0ms)
+

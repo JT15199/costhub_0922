@@ -8,6 +8,8 @@
 import { getProjects, getProjectBOMs, getSetting, setSetting, getInsights } from './db';
 import { getAdvisorInsights } from './db/advisor';
 import { getThinkLogs, saveThinkLog } from './db/think';
+import { requestCloudConfirm } from './cloudConfirm';
+import { bomExtendedCostStrict } from './ai/contracts';
 
 export interface AutoThinkResult { topic: string; logId: number; rounds: number; clouds: number; }
 
@@ -39,8 +41,9 @@ export async function buildThinkOverview(): Promise<string> {
     lines.push('在研项目 ' + projs.filter((p: any) => p.project_type === '在研').length + ' 个，已完成 ' + projs.filter((p: any) => p.project_type === '已完成').length + ' 个：');
     for (const p of projs.slice(0, 8)) {
       const boms = bomsByP[p.id] || [];
-      const bomCost = boms.reduce((s: number, b: any) => s + (b.part_cost || 0) * (b.quantity || 1), 0);
-      lines.push('- ' + (p.code || p.name) + '（' + (p.project_type || '') + '）BOM ¥' + Math.round(bomCost * 100) / 100 + '，' + boms.length + ' 项');
+      const values = boms.map(bomExtendedCostStrict);
+      const bomCost = values.some(value => value === null) ? null : values.reduce<number>((s, value) => s + (value ?? 0), 0);
+      lines.push('- ' + (p.code || p.name) + '（' + (p.project_type || '') + '）BOM ' + (bomCost == null ? '待补证据' : '¥' + Math.round(bomCost * 100) / 100) + '，' + boms.length + ' 项');
     }
     // 目标达成（领域级，2026-08-18 加入概览供模型规划目标差距分析任务）
     try {
@@ -59,10 +62,12 @@ export async function buildThinkOverview(): Promise<string> {
       const modAgg: Record<string, { cost: number; count: number; projCosts: Record<number, number> }> = {};
       projs.slice(0, 8).forEach(p => {
         const boms = bomsByP[p.id] || [];
-        const total = boms.reduce((s, b) => s + (b.part_cost || 0) * (b.quantity || 1), 0);
+        const values = boms.map(bomExtendedCostStrict);
+        if (values.some(value => value === null)) return;
+        const total = values.reduce<number>((s, value) => s + (value ?? 0), 0);
         if (total <= 0) return;
         const byMod: Record<string, number> = {};
-        boms.forEach(b => { const m = b.module_name || '未归类'; byMod[m] = (byMod[m] || 0) + (b.part_cost || 0) * (b.quantity || 1); });
+        boms.forEach((b, index) => { const m = b.module_name || '未归类'; byMod[m] = (byMod[m] || 0) + (values[index] ?? 0); });
         const top = Object.entries(byMod).sort((a, b) => b[1] - a[1])[0];
         if (top && top[1] / total >= 0.4) lines.push(p.code + ' 模块「' + top[0] + '」占比 ' + Math.round(top[1] / total * 100) + '%（关键依赖）');
         Object.entries(byMod).forEach(([m, cost]) => {
@@ -129,8 +134,6 @@ export async function runAutoThink(opts?: {
     }
     const { listTools } = await import('./aiTools');
     const { buildThinkSystemPrompt, runThinkLoop, cleanProtocolText } = await import('./thinkEngine');
-    const { requestCloudConfirm } = await import('./cloudConfirm');
-    const { agentSearchLoop } = await import('./trendService');
     const { getActiveGoals, appendGoalProgress } = await import('./db/goals');
     const activeGoals = await getActiveGoals();
     const sysPrompt = buildThinkSystemPrompt(listTools().map(t => t.name)) +
@@ -164,9 +167,12 @@ export async function runAutoThink(opts?: {
           routeReason = decideCloudRoute(call).reason;
         } catch { /* 忽略 */ }
         opts?.onEvent?.({ kind: 'cloud_request', call, routeReason });
-        return requestCloudConfirm({ material: call.material_name, category: call.category || '', question: call.question });
+        const { getSearchApprovalEndpoint } = await import('./trendService');
+        const { PUBLIC_TREND_QUESTION } = await import('./trendService');
+        return requestCloudConfirm({ material: call.material_name, category: call.category || '', question: PUBLIC_TREND_QUESTION, requestUrl: await getSearchApprovalEndpoint(), sourceType: 'background_task', requirementKind: 'background_insight', requirementTitle: '智能巡检洞察 · ' + String(call.material_name || '') });
       },
       runCloud: async (call) => {
+        const { agentSearchLoop } = await import('./trendService');
         // ⚠️ 云端去重（2026-08-17）：同一物料 7 天内已洞察 → 复用 ai_bridge_logs 结论，不重复烧云端
         try {
           const { materialKey, getRecentBridgeLog, saveBridgeLog } = await import('./db/advisor');

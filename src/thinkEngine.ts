@@ -7,6 +7,10 @@
 //   → 用户反馈对话里自主分析一直无内容。v2 改【文本协议】：模型在输出中写 [TOOL] 工具名 {...} / [CLOUD] {...} 标记行，
 //   前端流式解析执行并回填 [RESULT]，不依赖模型 function calling 能力，任何模型都能工作。
 
+import type { AiToolResult } from './ai/contracts';
+import { startOllamaStream } from './ollama';
+import { buildCompactionInstruction, frameCheckpoint, hasCheckpoint, validateSummaryLoose } from './ai/compactionCheckpoint';
+
 export const MAX_THINK_ROUNDS = 8;
 // 2026-08-18 单路高质量：每轮最多执行 2 个工具调用——强制模型一次追一个线索，
 // 避免单轮并排 5 个工具浅尝辄止（prompt 之外执行层硬约束）；多余调用下一轮继续
@@ -43,7 +47,7 @@ export function buildLocalToolDefs(tools: { id: string; desc: string; params: { 
       description: t.desc,
       parameters: {
         type: 'object',
-        properties: Object.fromEntries(t.params.map(p => [p.key, { type: p.type === 'number' ? 'number' : 'string', description: p.desc }])),
+        properties: Object.fromEntries(t.params.map(p => [p.key, { type: p.type === 'number' ? 'number' : p.type === 'boolean' ? 'boolean' : p.type === 'array' ? 'array' : p.type === 'object' ? 'object' : 'string', description: p.desc, ...(p.type === 'array' ? { items: { type: 'string' } } : {}) }])),
         required: t.params.filter(p => p.required).map(p => p.key),
       },
     },
@@ -119,6 +123,7 @@ export function buildThinkSystemPrompt(toolNames: string[], prefCtx = ''): strin
     '需要公开行情时写：[CLOUD] {"material_name":"不含型号的通用物料名","category":"品类","question":"公开行情问题"}\n' +
     '每次只写一个调用标记；调用结果会在下一轮以 [RESULT] 返回，你基于结果继续分析。\n' +
     '【工具】可用工具（名+参数说明）：\n' + toolNames.join('；') + '\n' +
+    '【动态工具目录】常驻工具不足时，先调用 [TOOL] discover_tools {"query":"任务关键词","domains":"project,tender,material,worklog,voice,file,write"}；结果会返回完整参数并在下一轮激活。也可以调用 activate_tools，tool_ids 传工具 ID 数组。目录匹配不是权限判定，写工具仍需用户明确授权和现有确认。\n' +
     '【数据边界】严禁把型号、金额、项目代号、供应商、BOM 或本地工具结果放入 [CLOUD]；发送前还会代码审查并按条件审批。审查/审批未通过就说明缺口，绝不编造。\n' +
     '【输出】思考过程可以持续；当你得出最终结论时，直接输出结论文本，不要再写调用标记。' +
     (prefCtx ? '\n\n【用户偏好】\n' + prefCtx : '')
@@ -153,8 +158,10 @@ export interface ThinkEventHandlers {
   onAnswer?: (text: string) => void;
   onRoundStart?: (round: number) => void;
   onPrompt?: (role: string, content: string) => void; // DSH 式轨迹：每次发给模型的 prompt（初始 + 每轮回填结果后的继续）
-  onToolResult?: (name: string, args: any, ok: boolean, text: string) => void;
+  onToolResult?: (name: string, args: any, ok: boolean, text: string, result?: AiToolResult<unknown>) => void;
   onCloudResult?: (call: any, ok: boolean, result: string) => void;
+  /** 发生了模型级上下文压缩（DSH 式检查点已写回），UI 可提示一次。 */
+  onContextCompacted?: (compacted: boolean) => void;
 }
 export interface ThinkLoopOptions {
   baseUrl: string;
@@ -162,20 +169,26 @@ export interface ThinkLoopOptions {
   systemPrompt: string;
   userContent: string;
   localTools: { id: string; desc: string; params: { key: string; type: string; required?: boolean; desc: string }[] }[];
-  executeTool: (id: string, args: any) => Promise<{ ok: boolean; text: string }>;
+  executeTool: (id: string, args: any) => Promise<{ ok: boolean; text: string; result?: AiToolResult<unknown> }>;
   approveCloud?: (call: any) => Promise<boolean | 'pending'>; // true=放行 false=用户拒绝 'pending'=已入队等待确认（不是拒绝，不要误报）
   abortRef?: { aborted: boolean }; // 2026-08-18 停止功能：外部置 true 立即停止（当前轮清理流式监听并结束，下一轮直接退出）
+  /** 2026-09-21 执行中补充指令：外部把用户输入 push 进这个数组，下一轮开始前会被注入（drain）。 */
+  steerQueue?: string[];
   think?: boolean; // 2026-08-18 深度思考开关（默认 true）；false 时思考被关闭，更快
   images?: string[]; // 2026-08-18 多模态：初始用户消息附带图片（base64 数组，Ollama images 字段，需 VL 模型）
   runCloud?: (call: any) => Promise<any>;
   onEvent?: ThinkEventHandlers;
   maxRounds?: number;
 }
-// 上下文预算（harness 阶段②，2026-08-18）：9B 本地模型上下文有限——历史超预算时把最旧的轮次折叠为一行摘要，
-// 只保留 system + 初始问题 + 最近一轮完整（避免长任务 token 膨胀导致质量下降/报错）
+// 上下文预算（harness 阶段②，2026-08-18）：本地模型上下文有限——历史超预算时折叠最旧轮次。
+// ⚠️ 2026-09-21 重写（用户："压缩上下文似乎没有作用，压缩的原理要跟 DSH 的压缩机制和作用一致"）：
+//   旧实现是按**字符数**（9000 chars）把中间轮次替换成一句固定话术——工具证据全部丢失、不可回溯、
+//   与模型真实预算无关，等于"信息没了但没换来有用的上下文"。
+//   现在改成 DSH 的机制：用**本地模型产出结构化检查点**（固定章节 Markdown），包在 <compacted-summary> 里
+//   作为"已确立的背景"写回；摘要失败时**退回原历史**（不丢信息、不阻塞）。
 export function compressMessages(messages: any[], budgetChars = 9000): any[] {
   let total = 0;
-  for (const m of messages) total += (m.content || '').length;
+  for (const m of messages) total += String(m.content || '').length;
   if (total <= budgetChars) return messages;
   const head = messages.slice(0, 2); // system + 初始 user
   const tail = messages.slice(2);
@@ -186,8 +199,73 @@ export function compressMessages(messages: any[], budgetChars = 9000): any[] {
   return [...head, { role: 'user', content: foldText }, ...keptTail];
 }
 
+/** 需要压缩的判定：按字符预算预估（本地模型上下文有限，字符数是够用的近似）。 */
+export function needsCompaction(messages: any[], budgetChars = 9000): boolean {
+  let total = 0;
+  for (const m of messages) total += String(m.content || '').length;
+  return total > budgetChars;
+}
+
+/**
+ * 用本地模型把待折叠的历史做成 DSH 式结构化检查点。
+ * 失败（模型不可用/输出太短）返回 null，调用方**保留原始历史**——宁可不压，不可丢证据。
+ */
+async function summarizeForCheckpoint(baseUrl: string, model: string, fold: any[], priorCheckpoint: boolean): Promise<string | null> {
+  if (fold.length === 0) return null;
+  const transcript = fold.map(m => `${m.role}: ${String(m.content || '').slice(0, 4000)}`).join('\n\n');
+  let output = '';
+  let lastOutputAt = Date.now();
+  const controller = new AbortController();
+  const watchdog = setInterval(() => { if (Date.now() - lastOutputAt > 180_000) controller.abort(); }, 1000);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: unknown) => {
+        if (settled) return;
+        settled = true;
+        if (error) reject(error instanceof Error ? error : new Error(String(error)));
+        else resolve();
+      };
+      startOllamaStream(
+        baseUrl, model,
+        [{ role: 'user', content: `${transcript}\n\n---\n\n${buildCompactionInstruction(priorCheckpoint)}` }],
+        token => { lastOutputAt = Date.now(); output += token; },
+        () => { },
+        () => finish(),
+        error => finish(error),
+        { endpoint: 'native', think: false, json: false, num_predict: 16384, signal: controller.signal },
+      ).then(stop => { if (settled) stop(); }).catch(finish);
+      controller.signal.addEventListener('abort', () => finish(new Error('摘要模型长时间无输出')), { once: true });
+    });
+    return validateSummaryLoose(output);
+  } catch {
+    return null;
+  } finally {
+    clearInterval(watchdog);
+  }
+}
+
+/**
+ * 上下文压缩（runThinkLoop 每轮末尾调用）：超预算时把最旧轮次做成检查点，保留最近一轮完整。
+ * @returns 压缩后的消息与本次是否真的用了模型摘要
+ */
+export async function compactThinkMessages(messages: any[], opts: { baseUrl: string; model: string; budgetChars?: number }): Promise<{ messages: any[]; compacted: boolean }> {
+  const budgetChars = opts.budgetChars ?? 9000;
+  if (!needsCompaction(messages, budgetChars)) return { messages, compacted: false };
+  const head = messages.slice(0, 2);
+  const tail = messages.slice(2);
+  const keepTail = Math.min(tail.length, 2);
+  const fold = tail.slice(0, tail.length - keepTail);
+  const keptTail = tail.slice(tail.length - keepTail);
+  if (fold.length === 0) return { messages, compacted: false };
+  const prior = hasCheckpoint(String(head[1]?.content || ''));
+  const summary = await summarizeForCheckpoint(opts.baseUrl, opts.model, fold, prior);
+  if (!summary) return { messages, compacted: false };
+  const checkpoint = { role: 'user', content: `${frameCheckpoint(summary)}\n\n（以上是被压缩的历史；需要细节时可以重新调用工具取真实数据，不要凭记忆编造数字。）` };
+  return { messages: [...head, checkpoint, ...keptTail], compacted: true };
+}
+
 export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText: string; rounds: number; clouds: { call: any; ok: boolean; result: string }[] }> {
-  const { startOllamaStream } = await import('./ollama');
   let messages: any[] = [{ role: 'system', content: opts.systemPrompt }, { role: 'user', content: opts.userContent, ...(opts.images && opts.images.length ? { images: opts.images } : {}) }];
   opts.onEvent?.onPrompt?.('user', opts.userContent); // 轨迹：初始问题
   const maxRounds = opts.maxRounds || MAX_THINK_ROUNDS;
@@ -280,17 +358,30 @@ export async function runThinkLoop(opts: ThinkLoopOptions): Promise<{ finalText:
       } else {
         const res = await opts.executeTool(call.name, call.args);
         if (res.ok) callCache.set(argsKey, res.text);
-        opts.onEvent?.onToolResult?.(call.name, call.args, res.ok, res.text);
+        opts.onEvent?.onToolResult?.(call.name, call.args, res.ok, res.text, res.result);
         toolResults.push({ role: 'user', content: '[RESULT]\n' + (res.ok ? '' : '[工具失败] ') + res.text });
       }
     }
     messages.push({ role: 'assistant', content: buffer });
     const roundHint = round >= maxRounds - 1 ? '（注意：这是最后一轮——如果你已有足够信息，请直接输出最终结论，不要再调用工具）' : '';
-    const followUp = toolResults.map(r => r.content).join('\n---\n') + '\n继续你的分析：如需本地数据输出 [TOOL]，确需公开行情且参数已脱敏才输出 [CLOUD]，否则直接给出最终结论。' + roundHint;
+    // ⚠️ 2026-09-21 执行中补充指令（用户："执行过程中对话框无法补充指令然后发出"）：
+    // 用户在本轮运行期间输入的内容进入 steerQueue，这里在下一轮开始前作为一条 user 消息注入，
+    // 模型会在下一步就看到它（而不是被静默丢弃、也没有任何反馈）。
+    const steered = (opts.steerQueue || []).splice(0);
+    const steerText = steered.length
+      ? '\n\n【用户在本次执行中补充的指令（最高优先级，请立即调整方向）】\n' + steered.map(text => '· ' + text).join('\n')
+      : '';
+    const followUp = toolResults.map(r => r.content).join('\n---\n') + steerText + '\n继续你的分析：如需本地数据输出 [TOOL]，确需公开行情且参数已脱敏才输出 [CLOUD]，否则直接给出最终结论。' + roundHint;
     opts.onEvent?.onPrompt?.('user', followUp); // 轨迹：工具结果回填后继续发给模型
     messages.push({ role: 'user', content: followUp });
-    // ⚠️ 上下文预算（阶段②）：超过 9000 字符即折叠最旧轮次，保住最近一轮完整
-    messages = compressMessages(messages);
+    // ⚠️ 上下文预算（阶段②）：超出预算时用本地模型做成 DSH 式结构化检查点（失败则保留原历史，不丢证据）
+    if (needsCompaction(messages)) {
+      const compiled = await compactThinkMessages(messages, { baseUrl: opts.baseUrl, model: opts.model });
+      if (compiled.compacted) {
+        messages = compiled.messages;
+        opts.onEvent?.onContextCompacted?.(true);
+      }
+    }
   }
   // ⚠️ 循环耗尽兜底（用户反馈：跑了一会儿停了没有结论）：最后一轮有调用时 finalText 为空 → 用最后一轮清理文本作结论
   if (!finalText) finalText = lastClean || '(思考循环达到上限未输出结论——可减少工具调用轮次或直接提问)';

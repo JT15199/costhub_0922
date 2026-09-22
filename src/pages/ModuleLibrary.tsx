@@ -1,18 +1,15 @@
 import { useEffect, useState, useMemo } from 'react';
 import { EmojiIcon } from '../iconMap';
-import { Table, Button, Select, Space, Modal, Form, Input, InputNumber, Tag, message, Popconfirm, Tooltip, AutoComplete, Checkbox } from 'antd';
-import { PlusOutlined, CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, AppstoreOutlined, TagOutlined, InboxOutlined, BarChartOutlined, CheckSquareOutlined, SortAscendingOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons';
+import { Table, Button, Select, Space, Modal, AutoComplete, Tag, message, Tooltip, Checkbox } from 'antd';
+import { EyeOutlined, AppstoreOutlined, TagOutlined, InboxOutlined, BarChartOutlined, SortAscendingOutlined, ArrowUpOutlined, ArrowDownOutlined, FileAddOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
-import { getProjects, getLibraryModules, getLibraryModuleItems, updateLibraryModuleItem, deleteLibraryModule, renameLibraryModule, saveModule, deleteBOMItem, addBOMItem, getParts, getMainCategories, getModuleCategories, recordProjectCostSnapshot } from '../db';
-import { MAIN_CATEGORIES, SUB_CATEGORIES, getCategoryColor } from '../constants';
+import { createChangePackage, getProjectBOMVersionLines, getProjectBOMVersions, getProjects, getLibraryModules, getLibraryModuleItems, getModuleCategories } from '../db';
+import { getCategoryColor } from '../constants';
 import DataTable from '../components/DataTable';
 import { chartTooltip, chartTextMuted, barGradient } from '../chartTheme';
 
 export default function ModuleLibrary() {
-  const [allMods, setAllMods] = useState<any[]>([]);
-  const [mainCats, setMainCats] = useState(MAIN_CATEGORIES);
-  useEffect(() => { (async () => { try { setMainCats(await getMainCategories()); } catch(e) {} })(); }, []);
   const [modGroups, setModGroups] = useState<any[]>([]);    // grouped by name: {name, projects: [{project, module, cost, count}]}
   const [moduleCategories, setModuleCategories] = useState<string[]>([]);
   // 分类顺序（用户可自定义，存 settings 表）
@@ -23,8 +20,6 @@ export default function ModuleLibrary() {
   const [prodCategoryFilter, setProdCategoryFilter] = useState('');
   // 项目筛选（选某项目只显示该项目下的模块）
   const [projectFilter, setProjectFilter] = useState<number | null>(null);
-  // 批量选择删除
-  const [checkedModIds, setCheckedModIds] = useState<Set<number>>(new Set());
   const [activeModName, setActiveModName] = useState<string | null>(null);
   const [activeGroup, setActiveGroup] = useState<any>(null);
   const [expandedPid, setExpandedPid] = useState<number | null>(null);
@@ -32,6 +27,7 @@ export default function ModuleLibrary() {
   const [expandedModName, setExpandedModName] = useState<string | null>(null);
   // 对比视图：参与对比的项目筛选（默认全部）——useMemo 保持引用稳定，避免筛选时 Select 重挂载导致下拉频闪
   const [cmpProjFilter, setCmpProjFilter] = useState<number[]>([]);
+  const [selectedModuleKeys, setSelectedModuleKeys] = useState<string[]>([]);
 
   // 参与器件级对比的项目（勾选列：勾选 = 参与对比，默认不勾 = 不对比，点哪个比哪个）
   const cmpProjects = useMemo(() => {
@@ -39,19 +35,11 @@ export default function ModuleLibrary() {
     return activeGroup.projects.filter((p: any) => cmpProjFilter.includes(p.project_id));
   }, [activeGroup, cmpProjFilter]);
 
-  const [modModal, setModModal] = useState(false);
-  const [editMod, setEditMod] = useState<any>(null);
   const [categoryModal, setCategoryModal] = useState(false);
   const [categoryTarget, setCategoryTarget] = useState<any>(null);
   const [categoryValue, setCategoryValue] = useState('');
-  const [selProjectForNewMod, setSelProjectForNewMod] = useState<number | null>(null);
-  const [itemModal, setItemModal] = useState(false);
-  const [editItem, setEditItem] = useState<any>(null);
   const [targetPid, setTargetPid] = useState<number | null>(null);
   const [projects, setProjects] = useState<any[]>([]);
-  const [form] = Form.useForm();
-  // 动态子类选项（从数据库实际数据生成，不硬编码）
-  const [dynamicSubCats, setDynamicSubCats] = useState<Record<string, string[]>>({});
 
   useEffect(() => { loadAll(); }, []);
 
@@ -66,35 +54,7 @@ export default function ModuleLibrary() {
     return () => window.removeEventListener('app-page-active', handler);
   }, []);
 
-  // 加载真实子类：按大类分组（来自器件库 parts + 模块库 module_items）
-  const loadDynamicSubCats = async () => {
-    try {
-      const m = await import('../db');
-      const db = await m.getDb();
-      const map: Record<string, string[]> = {};
-      const parts = await db.select<any[]>('SELECT DISTINCT main_category, sub_category FROM parts WHERE sub_category IS NOT NULL AND sub_category != \'\'');
-      parts.forEach((p: any) => {
-        if (!map[p.main_category]) map[p.main_category] = [];
-        if (!map[p.main_category].includes(p.sub_category)) map[p.main_category].push(p.sub_category);
-      });
-      // 单一数据源：子类从 project_boms 快照列取（module_items 仅是兼容层，可能不完整）
-      const items = await db.select<any[]>('SELECT DISTINCT main_category, sub_category FROM project_boms WHERE sub_category IS NOT NULL AND sub_category != \'\'');
-      items.forEach((p: any) => {
-        if (!map[p.main_category]) map[p.main_category] = [];
-        if (!map[p.main_category].includes(p.sub_category)) map[p.main_category].push(p.sub_category);
-      });
-      // 常量表兜底（实际数据没有时仍可用）
-      Object.keys(SUB_CATEGORIES).forEach(k => {
-        if (!map[k]) map[k] = [];
-        SUB_CATEGORIES[k].forEach((s: string) => { if (!map[k].includes(s)) map[k].push(s); });
-      });
-      setDynamicSubCats(map);
-    } catch { /* 失败不阻塞 */ }
-  };
-
-  useEffect(() => { loadDynamicSubCats(); }, []);
-
-  const loadAll = async () => {
+  async function loadAll() {
     const projs = await getProjects(); setProjects(projs);
     try {
       // 分类筛选：只显示实际用到的模块分类（从数据库取，不硬编码默认值）
@@ -110,7 +70,6 @@ export default function ModuleLibrary() {
     } catch {}
     // 单一数据源：模块库直接读 project_boms（与项目管理页同一份数据，任何一边改动另一边自动反映）
     const all = await getLibraryModules();
-    setAllMods(all);
     // Group by name
     const groups: Record<string, any> = {};
     for (const m of all) {
@@ -131,7 +90,7 @@ export default function ModuleLibrary() {
       return a.name.localeCompare(b.name);
     });
     setModGroups(groupsArr);
-  };
+  }
 
   const selectModGroup = async (group: any) => {
     setActiveModName(group.name); setActiveGroup(group);
@@ -144,41 +103,6 @@ export default function ModuleLibrary() {
     setExpandedItems(await getLibraryModuleItems(pid, modName));
   };
 
-  const handleSaveMod = async () => {
-    const v = await form.validateFields();
-    const pid = editMod?.project_id ?? selProjectForNewMod;
-    if (!pid) { message.warning('请选择所属项目'); return; }
-    const oldName = editMod?.module_name || editMod?.name;
-    // 单一数据源：模块名直接写 project_boms（改名同步所有 BOM 行）+ 分类/描述存 modules 表
-    if (editMod && oldName && v.name && v.name !== oldName) {
-      await renameLibraryModule(pid, oldName, v.name);
-    }
-    await saveModule({ project_id: pid, name: v.name, module_category: v.module_category || '未分类', description: v.description || '' });
-    await recordProjectCostSnapshot(pid, editMod?.id ? 'module_changed' : 'module_added', `${editMod?.id ? '编辑' : '新建'}模块：${v.name}`);
-    setModModal(false); setEditMod(null); loadAll(); message.success('已保存');
-  };
-
-  const handleSaveItem = async () => {
-    const v = await form.validateFields();
-    // 单一数据源：直接更新 project_boms 行（项目页 BOM 自动同步）
-    if (editItem?.id) {
-      await updateLibraryModuleItem(editItem.id, v);
-    } else if (expandedPid && expandedModName) {
-      // 添加器件：先建 parts，再插入 BOM 行
-      let partId: number | undefined = v.part_id;
-      if (!partId) {
-        const allParts = await getParts(v.part_name || '', '', '');
-        const match = allParts.find((p: any) => p.name === v.part_name && (p.model || '') === (v.part_model || ''));
-        partId = match?.id || await (await import('../db')).savePart({ main_category: v.main_category || '硬件类', sub_category: v.sub_category || '', category: v.main_category || '硬件类', name: v.part_name, model: v.part_model || '', cost: v.cost ?? 0, specs: '', projects: '', remark: v.remark || '' }, false);
-      }
-      await addBOMItem(expandedPid, partId!, v.quantity ?? 1, expandedModName, v.remark || '', 0, false);
-    }
-    if (expandedPid) await recordProjectCostSnapshot(expandedPid, editItem?.id ? 'module_item_changed' : 'module_item_added', `${editItem?.id ? '编辑' : '新增'}模块器件：${v.part_name || ''}`);
-    setItemModal(false); setEditItem(null);
-    if (expandedPid && expandedModName) setExpandedItems(await getLibraryModuleItems(expandedPid, expandedModName));
-    loadAll(); message.success('已保存');
-  };
-
   const handleSaveCategory = async () => {
     if (!categoryTarget) return;
     const { updateModuleCategoryByName } = await import('../db');
@@ -189,22 +113,28 @@ export default function ModuleLibrary() {
     loadAll();
   };
 
-  const copyModuleToProject = async () => {
+  const openProjectBOM = (pid: number) => window.dispatchEvent(new CustomEvent('costhub-open-project', { detail: { pid, tab: 'bom' } }));
+
+  const createReferenceChangePackage = async () => {
     if (!expandedPid || !expandedModName || !targetPid) { message.warning('请先选择目标项目'); return; }
-    const srcMod = allMods.find(m => m.project_id === expandedPid && (m.module_name || m.name) === expandedModName); if (!srcMod) return;
-    // 复制模块：把该模块的 BOM 行复制到目标项目（同一数据源 project_boms，两边自动一致）
-    const items = await getLibraryModuleItems(expandedPid, expandedModName);
-    for (const item of items) {
-      let partId = item.part_id;
-      if (!partId) {
-        const allParts = await getParts(item.part_name || '', '', '');
-        const match = allParts.find((p: any) => p.name === item.part_name && (p.model || '') === (item.part_model || ''));
-        partId = match?.id || await (await import('../db')).savePart({ main_category: item.main_category, sub_category: item.sub_category, category: item.main_category, name: item.part_name, model: item.part_model, cost: item.part_cost, specs: '', projects: '', remark: '' }, false);
-      }
-      await addBOMItem(targetPid, partId!, item.quantity, srcMod.name, item.remark || '', 0, false);
-    }
-    await recordProjectCostSnapshot(targetPid, 'module_copied', `复制模块「${srcMod.name}」到项目`);
-    message.success(`已复制到目标项目`); setTargetPid(null); loadAll();
+    const sourceVersion = (await getProjectBOMVersions(expandedPid)).find(row => row.status === 'frozen');
+    if (!sourceVersion) { message.warning('源项目还没有冻结 BOM，先在项目页冻结后再创建参考变更包'); return; }
+    const lines = await getProjectBOMVersionLines(sourceVersion.id);
+    const sourceItems = await getLibraryModuleItems(expandedPid, expandedModName);
+    const packageId = await createChangePackage({
+      projectId: targetPid,
+      title: `参考模块：${expandedModName}`,
+      triggerType: 'architecture',
+      sourceVersionId: sourceVersion.id,
+      rationale: `来源于模块基准 ${sourceVersion.version_name || `BOM v${sourceVersion.version_no}`}；仅创建变更包草稿，不直接写入目标项目 BOM。`,
+      lines: sourceItems.map(item => {
+        const sourceLine = lines.find(line => line.source_bom_id === item.id || (line.part_name === item.part_name && line.part_model === item.part_model && line.module_name === expandedModName));
+        return { action: 'add', afterPartId: item.part_id, moduleName: expandedModName, quantityAfter: item.quantity, costAfter: item.part_cost ?? item.cost ?? 0, dependencyRole: 'required', evidence: { sourceVersionId: sourceVersion.id, sourceLineId: sourceLine?.id || 0 } };
+      }),
+    });
+    message.success(`已创建变更包草稿 #${packageId}`);
+    setTargetPid(null);
+    window.dispatchEvent(new CustomEvent('costhub-open-project', { detail: { pid: targetPid, tab: 'analysis' } }));
   };
 
   const expTotal = expandedItems.reduce((s: number, i: any) => s + ((i.part_cost ?? i.cost) || 0) * (i.quantity || 1), 0);
@@ -239,6 +169,8 @@ export default function ModuleLibrary() {
       };
     })
     .filter(Boolean);
+  const selectedModuleRows = useMemo(() => filteredGroups.flatMap((group: any) => group.projects.filter((project: any) => selectedModuleKeys.includes(`${project.project_id}:${project.module_id}`))), [filteredGroups, selectedModuleKeys]);
+  const selectedModuleTotal = selectedModuleRows.reduce((sum: number, project: any) => sum + Number(project.cost || 0), 0);
   const bySubCat: Record<string, number> = {};
   expandedItems.forEach(i => { const k = i.sub_category || i.main_category || '其他'; bySubCat[k] = (bySubCat[k] || 0) + ((i.part_cost ?? i.cost) || 0) * (i.quantity || 1); });
   const barData = Object.entries(bySubCat).map(([k, v]) => ({ name: k, value: Math.round(v * 100) / 100 })).sort((a, b) => b.value - a.value);
@@ -279,31 +211,26 @@ export default function ModuleLibrary() {
     { title: '子类', dataIndex: 'sub_category', width: 90, ellipsis: true },
     { title: '名称', dataIndex: 'part_name', width: 170, ellipsis: true },
     { title: '型号', dataIndex: 'part_model', width: 140, ellipsis: true },
-    { title: '单价', dataIndex: 'part_cost', width: 90, align: 'right' as const, render: (v: number, r: any) => (v ?? r.cost ?? 0)?.toFixed(4) },
+    { title: '单价', dataIndex: 'part_cost', width: 90, align: 'right' as const, render: (v: number) => (v ?? 0)?.toFixed(4) },
     { title: '数量', dataIndex: 'quantity', width: 55, align: 'center' as const },
     { title: '小计', key: 'sub', width: 95, align: 'right' as const, render: (_: any, r: any) => <b>{((r.part_cost ?? r.cost ?? 0) * (r.quantity ?? 0)).toFixed(4)}</b> },
     { title: '备注', dataIndex: 'remark', width: 100, ellipsis: true },
     {
-      title: '', width: 55,
-      render: (_: any, r: any) => (
-        <Space size={0}>
-          <Tooltip title="编辑"><Button type="link" size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); setEditItem(r); form.setFieldsValue(r); setItemModal(true); }} /></Tooltip>
-          <Popconfirm title="删除？" onConfirm={async () => { await deleteBOMItem(r.id); if (expandedPid) await recordProjectCostSnapshot(expandedPid, 'module_item_deleted', `删除模块器件：${r.part_name || ''}`); if (expandedPid && expandedModName) setExpandedItems(await getLibraryModuleItems(expandedPid, expandedModName)); loadAll(); }}><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Popconfirm>
-        </Space>
-      ),
+      title: '入口', width: 110,
+      render: () => <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openProjectBOM(expandedPid!)}>打开项目 BOM</Button>,
     },
   ];
 
   return (
     <div>
-      <div className="page-title"><InboxOutlined /> 模块库</div>
+      <div className="page-title"><InboxOutlined /> 模块基准</div>
 
       {/* Module cards - all modules grouped by name */}
       <div className="content-card" style={{ marginBottom: 14, padding: '14px 18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
           <Space wrap>
             <AppstoreOutlined style={{ color: '#CF0A2C', fontSize: 16 }} />
-            <b style={{ fontSize: 14 }}>全部模块（跨项目）</b>
+            <b style={{ fontSize: 14 }}>模块基准（由项目 BOM 派生）</b>
             <Select
               size="small"
               allowClear
@@ -330,65 +257,32 @@ export default function ModuleLibrary() {
               showSearch
               placeholder="项目"
               value={projectFilter || undefined}
-              onChange={v => { setProjectFilter(v || null); setCheckedModIds(new Set()); }}
+              onChange={v => { setProjectFilter(v || null); setSelectedModuleKeys([]); }}
               style={{ width: 180 }}
               optionFilterProp="label"
               options={projects.map((p: any) => ({ label: `${p.code} · ${p.name}`, value: p.id }))}
             />
-            {/* 全选 / 取消全选（作用于当前筛选结果） */}
-            <Button
-              size="small"
-              icon={<CheckSquareOutlined />}
-              onClick={() => {
-                const allIds = filteredGroups.flatMap((g: any) => g.projects.map((p: any) => p.module_id));
-                if (allIds.length === 0) { message.info('当前筛选下没有模块'); return; }
-                // 全部已选则取消，否则全选
-                const allSelected = allIds.length > 0 && allIds.every(id => checkedModIds.has(id));
-                if (allSelected) setCheckedModIds(new Set());
-                else setCheckedModIds(new Set(allIds));
-              }}
-            >
-              {(() => {
-                const allIds = filteredGroups.flatMap((g: any) => g.projects.map((p: any) => p.module_id));
-                const allSelected = allIds.length > 0 && allIds.every(id => checkedModIds.has(id));
-                return allSelected ? '取消全选' : `全选 (${allIds.length})`;
-              })()}
-            </Button>
-            {/* 批量删除选中模块 + 选中合计（用户 2026-08-18：选中模块要有累加数字，方便知道加起来多少钱） */}
-            {checkedModIds.size > 0 && (
-              <>
-              <span style={{ fontSize: 12.5, color: '#CF0A2C', fontWeight: 600, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-                已选 {checkedModIds.size} 个模块 · 合计 ¥{filteredGroups.flatMap((g: any) => g.projects.filter((p: any) => checkedModIds.has(p.module_id))).reduce((s: number, p: any) => s + (Number(p.cost) || 0), 0).toFixed(0)}
-              </span>
-              <Popconfirm
-                title={`删除选中的 ${checkedModIds.size} 个模块？`}
-                onConfirm={async () => {
-                  for (const inst of filteredGroups.flatMap((g: any) => g.projects.filter((p: any) => checkedModIds.has(p.module_id)))) {
-                    await deleteLibraryModule(inst.project_id, inst.module_name || inst.name);
-                  }
-                  message.success(`已删除 ${checkedModIds.size} 个模块`);
-                  setCheckedModIds(new Set());
-                  loadAll();
-                }}
-              >
-                <Button size="small" danger icon={<DeleteOutlined />}>删除选中 ({checkedModIds.size})</Button>
-              </Popconfirm>
-              </>
-            )}
           </Space>
+          {projectFilter && (
+            <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8, background: selectedModuleRows.length ? 'rgba(207,10,44,0.06)' : '#F8FAFC', color: selectedModuleRows.length ? '#9F1239' : '#64748B', fontSize: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <b>模块多选汇总</b><span>已选 {selectedModuleRows.length} 个模块</span><strong style={{ fontSize: 15 }}>¥{selectedModuleTotal.toFixed(4)}</strong><span style={{ color: '#94A3B8' }}>勾选下方模块卡片即可加入合计</span>
+              {selectedModuleRows.length > 0 && <Button type="link" size="small" onClick={() => setSelectedModuleKeys([])}>清空选择</Button>}
+            </div>
+          )}
           <Space>
             {/* 分类排序：自定义分类显示顺序 */}
             <Button size="small" icon={<SortAscendingOutlined />} onClick={() => setCatOrderModal(true)}>分类排序</Button>
           </Space>
-          <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => {
-            setEditMod(null); setSelProjectForNewMod(null); form.resetFields(); form.setFieldsValue({ module_category: categoryFilter || '未分类' }); setModModal(true);
-          }}>新建模块</Button>
+          <Tag color="blue">项目 BOM 派生，只读对标</Tag>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 10 }}>
           {filteredGroups.map(group => {
             const costs = group.projects.map((p: any) => p.cost);
             const minC = Math.min(...costs), maxC = Math.max(...costs);
             const active = activeModName === group.name;
+            const project = group.projects[0];
+            const moduleKey = projectFilter && project ? `${project.project_id}:${project.module_id}` : '';
+            const selected = Boolean(moduleKey && selectedModuleKeys.includes(moduleKey));
             return (
               <div key={group.name}
                 onClick={() => selectModGroup(group)}
@@ -403,6 +297,7 @@ export default function ModuleLibrary() {
                 onMouseEnter={e => { if (!active) { e.currentTarget.style.borderColor = '#CF0A2C'; e.currentTarget.style.transform = 'translateY(-2px)'; } }}
                 onMouseLeave={e => { if (!active) { e.currentTarget.style.borderColor = '#E8ECF1'; e.currentTarget.style.transform = 'none'; } }}
               >
+                {projectFilter && project && <Checkbox aria-label={`选择模块 ${group.name}`} checked={selected} onClick={e => e.stopPropagation()} onChange={e => setSelectedModuleKeys(prev => e.target.checked ? [...prev, moduleKey] : prev.filter(key => key !== moduleKey))} style={{ position: 'absolute', top: 8, left: 8 }} />}
                 <Tooltip title="设置分类">
                   <Button
                     type="text"
@@ -423,22 +318,6 @@ export default function ModuleLibrary() {
                     }}
                   />
                 </Tooltip>
-                {/* 勾选（用于批量删除）——点击勾选该分组下所有模块 */}
-                <Checkbox
-                  checked={group.projects.every((p: any) => checkedModIds.has(p.module_id)) && group.projects.length > 0}
-                  indeterminate={group.projects.some((p: any) => checkedModIds.has(p.module_id)) && !group.projects.every((p: any) => checkedModIds.has(p.module_id))}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={() => {
-                    const allChecked = group.projects.every((p: any) => checkedModIds.has(p.module_id));
-                    const next = new Set(checkedModIds);
-                    group.projects.forEach((p: any) => {
-                      if (allChecked) next.delete(p.module_id);
-                      else next.add(p.module_id);
-                    });
-                    setCheckedModIds(next);
-                  }}
-                  style={{ position: 'absolute', top: 8, left: 8 }}
-                />
                 <div style={{ fontWeight: 600, fontSize: 14, color: active ? '#CF0A2C' : '#1E293B', marginBottom: 6, paddingLeft: 18 }}>
                   {group.name}
                   {group._projCode && <Tag color="blue" style={{ marginLeft: 6, fontSize: 10 }}>{group._projCode}</Tag>}
@@ -500,15 +379,7 @@ export default function ModuleLibrary() {
                       style={{ color: expandedPid === r.project_id ? '#CF0A2C' : undefined }}>
                       查看
                     </Button>
-                    <Button type="link" size="small" icon={<EditOutlined />}
-                      onClick={() => {
-                        const mod = allMods.find(m => m.id === r.module_id);
-                        setEditMod({ ...mod, module_name: r.module_name || r.name, project_id: r.project_id });
-                        setSelProjectForNewMod(r.project_id);
-                        form.setFieldsValue({ name: mod?.name || activeGroup.name, module_category: mod?.module_category || '未分类', description: mod?.description || '' });
-                        setModModal(true);
-                      }}
-                    />
+                    <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openProjectBOM(r.project_id)}>打开 BOM</Button>
                   </Space>
                 ),
               },
@@ -621,14 +492,11 @@ export default function ModuleLibrary() {
                     {projects.find(p => p.id === expandedPid)?.code} {projects.find(p => p.id === expandedPid)?.name}
                   </span>
                 </Space>
-                <Space>
-                  <Select placeholder="复制到项目..." value={targetPid || undefined} onChange={v => setTargetPid(v)} style={{ width: 200 }} size="small"
+                <Space wrap>
+                  <Select placeholder="目标项目" value={targetPid || undefined} onChange={v => setTargetPid(v)} style={{ width: 200 }} size="small"
                     options={projects.filter(p => p.id !== expandedPid).map(p => ({ label: `[${p.code}] ${p.name}`, value: p.id }))} />
-                  <Button size="small" icon={<CopyOutlined />} onClick={copyModuleToProject}>复制</Button>
-                  <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { setEditItem(null); form.resetFields(); form.setFieldsValue({ main_category: '硬件类', sub_category: '', quantity: 1, cost: 0 }); setItemModal(true); }}>添加器件</Button>
-                  <Popconfirm title="删除模块？" onConfirm={async () => { if (expandedPid && expandedModName) { await deleteLibraryModule(expandedPid, expandedModName); await recordProjectCostSnapshot(expandedPid, 'module_deleted', `删除模块：${activeGroup.name}`); } setExpandedPid(null); setExpandedModName(null); setExpandedItems([]); loadAll(); }}>
-                    <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
-                  </Popconfirm>
+                  <Button size="small" type="primary" icon={<FileAddOutlined />} onClick={() => void createReferenceChangePackage()}>创建参考变更包</Button>
+                  <Button size="small" icon={<EyeOutlined />} onClick={() => openProjectBOM(expandedPid)}>打开项目 BOM</Button>
                 </Space>
               </div>
               <DataTable tableId="mod_items_detail" dataSource={expandedItems} columns={itemCols} rowKey="id" size="small" pagination={false} scroll={{ x: 850 }}
@@ -718,45 +586,6 @@ export default function ModuleLibrary() {
         </div>
       </Modal>
 
-      {/* Module create/edit modal */}
-      <Modal title={editMod?.id ? '编辑模块' : '新建模块'} open={modModal} onOk={handleSaveMod} onCancel={() => { setModModal(false); setEditMod(null); }} width={460}>
-        <Form form={form} layout="vertical">
-          <Form.Item label="所属项目" required={!editMod?.id}>
-            <Select placeholder="选择项目" value={selProjectForNewMod} onChange={v => setSelProjectForNewMod(v)}
-              disabled={!!editMod?.id}
-              options={projects.map(p => ({ label: `[${p.code}] ${p.name}`, value: p.id }))} />
-          </Form.Item>
-          <Form.Item label="模块名称" name="name" rules={[{ required: true }]}><Input placeholder="如: LCM模块" /></Form.Item>
-          <Form.Item label="模块分类" name="module_category" initialValue="未分类">
-            <AutoComplete
-              placeholder="选择或输入分类"
-              options={moduleCategories.map(c => ({ label: c, value: c }))}
-            />
-          </Form.Item>
-          <Form.Item label="描述" name="description"><Input.TextArea rows={2} /></Form.Item>
-        </Form>
-      </Modal>
-
-      {/* Item edit modal */}
-      <Modal title={editItem?.id ? '编辑器件' : '添加器件'} open={itemModal} onOk={handleSaveItem} onCancel={() => { setItemModal(false); setEditItem(null); }} width={600} destroyOnClose>
-        <Form form={form} layout="vertical" initialValues={{ main_category: '硬件类', sub_category: '', quantity: 1, cost: 0 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0 12px' }}>
-            <Form.Item label="大类" name="main_category" rules={[{ required: true }]}>
-              <Select options={mainCats.map(c => ({ label: c, value: c }))} onChange={(v) => { const subs = dynamicSubCats[v] || SUB_CATEGORIES[v] || []; form.setFieldValue('sub_category', subs[0] || ''); }} />
-            </Form.Item>
-            <Form.Item label="子类" name="sub_category"><Select options={(dynamicSubCats[form.getFieldValue('main_category')] || SUB_CATEGORIES[form.getFieldValue('main_category')] || []).map(c => ({ label: c, value: c }))} showSearch /></Form.Item>
-            <Form.Item label="数量" name="quantity"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' }}>
-            <Form.Item label="器件名称" name="part_name" rules={[{ required: true }]}><Input /></Form.Item>
-            <Form.Item label="型号" name="part_model"><Input /></Form.Item>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 12px' }}>
-            <Form.Item label="单价" name="cost"><InputNumber min={0} precision={4} style={{ width: '100%' }} prefix="¥" /></Form.Item>
-            <Form.Item label="备注" name="remark"><Input /></Form.Item>
-          </div>
-        </Form>
-      </Modal>
     </div>
   );
 }

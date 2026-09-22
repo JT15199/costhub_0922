@@ -2,7 +2,7 @@
 // 手工修改请改对应域文件；新增函数请更新 _tools/split-db.mjs 的 DOMAINS 映射
 
 import { getDb, logDataChange } from './core';
-import { savePart } from './parts';
+import { sumBomCostStrict } from '../ai/contracts';
 
 
 
@@ -23,18 +23,20 @@ export async function getProject(id: number) { const r = await (await getDb()).s
 export async function saveProject(data: any) {
   const d = await getDb();
   if (data.id) {
-    await d.execute(`UPDATE projects SET code=?,name=?,project_type=?,tier=?,status=?,category=?,screen_size=?,resolution=?,refresh_rate=?,panel_type=?,specs=?,platform_fee_rate=?,profit_rate=?,image=? WHERE id=?`,
-      [data.code, data.name, data.project_type || '在研', data.tier, data.status, data.category || '未分类', data.screen_size || '', data.resolution || '', data.refresh_rate || '', data.panel_type || '', data.specs || '', data.platform_fee_rate || 0, data.profit_rate || 0, data.image || '', data.id]);
+    await d.execute(`UPDATE projects SET code=?,name=?,project_type=?,stage=?,tier=?,status=?,category=?,screen_size=?,resolution=?,refresh_rate=?,panel_type=?,specs=?,target_price=?,financial_target_cost=?,charter_assumptions=?,reference_project_id=?,platform_fee_rate=?,profit_rate=?,image=? WHERE id=?`,
+      [data.code, data.name, data.project_type || '在研', data.stage || 'Charter', data.tier, data.status, data.category || '未分类', data.screen_size || '', data.resolution || '', data.refresh_rate || '', data.panel_type || '', data.specs || '', data.target_price || 0, data.financial_target_cost || 0, data.charter_assumptions || '', data.reference_project_id || 0, data.platform_fee_rate || 0, data.profit_rate || 0, data.image || '', data.id]);
     return data.id;
   } else {
-    const r = await d.execute(`INSERT INTO projects (code,name,project_type,tier,status,category,screen_size,resolution,refresh_rate,panel_type,specs,platform_fee_rate,profit_rate,image) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [data.code, data.name, data.project_type || '在研', data.tier, data.status, data.category || '未分类', data.screen_size || '', data.resolution || '', data.refresh_rate || '', data.panel_type || '', data.specs || '', data.platform_fee_rate || 0, data.profit_rate || 0, data.image || '']);
+    const r = await d.execute(`INSERT INTO projects (code,name,project_type,stage,tier,status,category,screen_size,resolution,refresh_rate,panel_type,specs,target_price,financial_target_cost,charter_assumptions,reference_project_id,platform_fee_rate,profit_rate,image) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [data.code, data.name, data.project_type || '在研', data.stage || 'Charter', data.tier, data.status, data.category || '未分类', data.screen_size || '', data.resolution || '', data.refresh_rate || '', data.panel_type || '', data.specs || '', data.target_price || 0, data.financial_target_cost || 0, data.charter_assumptions || '', data.reference_project_id || 0, data.platform_fee_rate || 0, data.profit_rate || 0, data.image || '']);
     return r.lastInsertId;
   }
 }
 
 
 export async function deleteProject(id: number) { await (await getDb()).execute('UPDATE projects SET is_deleted = 1 WHERE id = ?', [id]); }
+
+export async function setProjectReference(projectId: number, referenceProjectId: number) { await (await getDb()).execute('UPDATE projects SET reference_project_id=? WHERE id=?', [referenceProjectId || 0, projectId]); }
 
 
 
@@ -82,13 +84,13 @@ export async function ensureDefaultCategories() {
 export async function copyProject(id: number, newCode: string, newName: string) {
   const d = await getDb(); const src = await d.select<any[]>('SELECT * FROM projects WHERE id = ? AND COALESCE(is_deleted, 0) = 0', [id]);
   if (!src[0]) return 0;
-  const r = await d.execute(`INSERT INTO projects (code,name,project_type,tier,status,screen_size,resolution,refresh_rate,panel_type,specs,platform_fee_rate,profit_rate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [newCode, newName, '在研', src[0].tier, '进行中', src[0].screen_size, src[0].resolution, src[0].refresh_rate, src[0].panel_type, src[0].specs || '', src[0].platform_fee_rate, src[0].profit_rate]);
+  const r = await d.execute(`INSERT INTO projects (code,name,project_type,stage,tier,status,screen_size,resolution,refresh_rate,panel_type,specs,target_price,financial_target_cost,charter_assumptions,reference_project_id,platform_fee_rate,profit_rate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [newCode, newName, '在研', 'Charter', src[0].tier, '进行中', src[0].screen_size, src[0].resolution, src[0].refresh_rate, src[0].panel_type, src[0].specs || '', src[0].target_price || 0, src[0].financial_target_cost || 0, src[0].charter_assumptions || '', 0, src[0].platform_fee_rate, src[0].profit_rate]);
   const boms = await d.select<any[]>('SELECT * FROM project_boms WHERE project_id = ? AND COALESCE(is_deleted, 0) = 0', [id]);
   for (const b of boms) {
     // 复制完整快照列（名称/型号/单价/分类/标记），保证复制项目与源项目显示一致
-    await d.execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, part_name, part_model, part_cost, main_category, sub_category, is_module_item, ref_project_id, is_reference, reference_remark, custom_data) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [r.lastInsertId, b.part_id, b.module_name, b.quantity, b.remark || '', b.part_name || '', b.part_model || '', b.part_cost || 0, b.main_category || '', b.sub_category || '', b.is_module_item || 0, b.ref_project_id || 0, b.is_reference || 0, b.reference_remark || '', b.custom_data || '{}']);
+    await d.execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, part_name, part_model, part_cost, price_state, main_category, sub_category, is_module_item, ref_project_id, is_reference, reference_remark, custom_data) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [r.lastInsertId, b.part_id, b.module_name, b.quantity, b.remark || '', b.part_name || '', b.part_model || '', b.part_cost ?? 0, b.price_state || (b.part_cost == null ? 'unknown' : 'confirmed'), b.main_category || '', b.sub_category || '', b.is_module_item || 0, b.ref_project_id || 0, b.is_reference || 0, b.reference_remark || '', b.custom_data || '{}']);
   }
   const customColumns = await d.select<any[]>('SELECT field_key, title, data_type, sort_order FROM project_bom_custom_columns WHERE project_id = ?', [id]);
   for (const column of customColumns) {
@@ -107,10 +109,10 @@ export async function copyProject(id: number, newCode: string, newName: string) 
 
 // ==================== Project BOMs ====================
 export async function getProjectBOMs(projectId: number) {
-  return (await getDb()).select<any[]>(`SELECT pb.id, pb.project_id, pb.part_id, pb.module_name, pb.quantity, pb.remark, pb.ref_project_id, pb.cost, pb.is_reference, pb.reference_remark, pb.is_deleted, pb.is_module_item, COALESCE(pb.custom_data, '{}') as custom_data,
+  return (await getDb()).select<any[]>(`SELECT pb.id, pb.project_id, pb.part_id, pb.module_name, pb.quantity, pb.remark, pb.ref_project_id, pb.cost, pb.cost_layer, pb.is_reference, pb.reference_remark, pb.is_deleted, pb.is_module_item, pb.price_state, pb.part_specs, COALESCE(pb.custom_data, '{}') as custom_data,
     COALESCE(NULLIF(pb.part_name, ''), p.name) as part_name,
     COALESCE(NULLIF(pb.part_model, ''), p.model) as part_model,
-    CASE WHEN pb.part_cost > 0 THEN pb.part_cost ELSE p.cost END as part_cost,
+    pb.part_cost as part_cost,
     COALESCE(NULLIF(pb.main_category, ''), p.main_category) as main_category,
     COALESCE(NULLIF(pb.sub_category, ''), p.sub_category) as sub_category,
     p.category
@@ -120,25 +122,29 @@ export async function getProjectBOMs(projectId: number) {
 }
 
 
-export async function recordProjectCostSnapshot(projectId: number, snapshotType = 'bom_change', changeReason = '') {
+export async function recordProjectCostSnapshot(projectId: number, snapshotType = 'bom_change', changeReason = '', stage = '') {
   const d = await getDb();
+  await d.execute('BEGIN');
+  try {
   const project = await d.select<any[]>('SELECT * FROM projects WHERE id = ? AND COALESCE(is_deleted, 0) = 0', [projectId]).then(rows => rows[0]);
-  if (!project) return 0;
+  if (!project) { await d.execute('COMMIT'); return 0; }
 
-  // Get current BOM data with part details（单价用 BOM 行快照列，与页面显示一致）
+  // Get current BOM data with part details（单价只用 BOM 行快照，不回读 parts 实时价）
   // LEFT JOIN：虚拟器件（part_id=0）无 parts 对应行，也必须计入成本
   const rows = await d.select<any[]>(
     `SELECT pb.id, pb.module_name, pb.quantity, COALESCE(NULLIF(pb.part_name, ''), p.name) as part_name, COALESCE(NULLIF(pb.part_model, ''), p.model) as part_model,
-            CASE WHEN pb.part_cost > 0 THEN pb.part_cost ELSE p.cost END as cost
+            pb.part_cost as cost, pb.price_state
      FROM project_boms pb
      LEFT JOIN parts p ON pb.part_id = p.id
      WHERE pb.project_id = ? AND COALESCE(pb.is_deleted, 0) = 0`,
     [projectId]
   );
 
-  // 计算口径：中间计算一律用原始值（该是多少就是多少），只有最终展示/落库才舍入
-  const bomCost = rows.reduce((sum, row) => sum + (Number(row.cost) || 0) * (Number(row.quantity) || 0), 0);
-  const totalCost = bomCost * (1 + ((Number(project.platform_fee_rate) || 0) + (Number(project.profit_rate) || 0)) / 100);
+  // unknown 不等于 0：可确认金额继续计算，但快照明确标记为不完整。
+  const costing = sumBomCostStrict(rows.map(row => ({ ...row, part_cost: row.cost })));
+  const bomCost = costing.total;
+  // 标准成本只包含 BOM、包装、ODM 加工费和平台费；利润率保留在项目配置中，但不参与成本事实。
+  const totalCost = costing.missing.length ? null : bomCost * (1 + (Number(project.platform_fee_rate) || 0) / 100);
   const modules = new Set(rows.map(row => row.module_name || '未归类'));
 
   // Get previous snapshot to compare
@@ -163,37 +169,59 @@ export async function recordProjectCostSnapshot(projectId: number, snapshotType 
   }
 
   if (changeDetails === '' && prevSnap) {
-    const bomDiff = bomCost - Number(prevSnap.bom_cost || 0);
-    if (Math.abs(bomDiff) > 0.01) {
+    const bomDiff = bomCost == null || prevSnap.bom_cost == null ? null : bomCost - Number(prevSnap.bom_cost);
+    if (bomDiff != null && Math.abs(bomDiff) > 0.01) {
       changeDetails = `BOM总成本: ¥${Number(prevSnap.bom_cost || 0).toFixed(2)} → ¥${bomCost.toFixed(2)} (${bomDiff > 0 ? '+' : ''}${bomDiff.toFixed(2)})`;
     }
   }
 
   // 无实质变化跳过：成本与费率都未变且非手动记录 → 不产生空快照（避免快照泛滥噪音）
-  if (prevSnap && snapshotType !== 'manual_snapshot' && changeDetails === '') {
-    const sameBom = Math.abs(bomCost - Number(prevSnap.bom_cost || 0)) <= 0.01;
-    const sameTotal = Math.abs(totalCost - Number(prevSnap.total_cost || 0)) <= 0.01;
-    if (sameBom && sameTotal) return Number(prevSnap.id);
+  if (prevSnap && !['manual_snapshot', 'stage_freeze'].includes(snapshotType) && changeDetails === '') {
+    const sameBom = bomCost != null && prevSnap.bom_cost != null && Math.abs(bomCost - Number(prevSnap.bom_cost)) <= 0.01;
+    const sameTotal = totalCost != null && prevSnap.total_cost != null && Math.abs(totalCost - Number(prevSnap.total_cost)) <= 0.01;
+    if (sameBom && sameTotal) { await d.execute('COMMIT'); return Number(prevSnap.id); }
   }
 
   const result = await d.execute(
     `INSERT INTO project_cost_snapshots
-      (project_id, snapshot_type, change_reason, bom_cost, total_cost, platform_fee_rate, profit_rate, module_count, item_count, change_details)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      (project_id, snapshot_type, change_reason, stage, bom_cost, total_cost, platform_fee_rate, profit_rate, module_count, item_count, change_details, data_fingerprint, bom_snapshot_json, cost_status, missing_cost_count)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       projectId,
       snapshotType,
       changeReason,
-      Math.round(bomCost * 10000) / 10000,
-      Math.round(totalCost * 10000) / 10000,
+      stage,
+      bomCost == null ? null : Math.round(bomCost * 10000) / 10000,
+      totalCost == null ? null : Math.round(totalCost * 10000) / 10000,
       Number(project.platform_fee_rate) || 0,
       Number(project.profit_rate) || 0,
       modules.size,
       rows.length,
       changeDetails,
+      JSON.stringify(rows.map(row => ({ id: row.id, module_name: row.module_name, quantity: row.quantity, part_name: row.part_name, part_model: row.part_model, cost: row.cost, price_state: row.price_state }))),
+      JSON.stringify(rows),
+      costing.missing.length ? 'unknown' : 'confirmed',
+      costing.missing.length,
     ]
   );
+  await d.execute('COMMIT');
   return result.lastInsertId;
+  } catch (error) {
+    await d.execute('ROLLBACK').catch(() => { });
+    throw error;
+  }
+}
+
+export async function freezeProjectStage(projectId: number, stage: string) {
+  const allowed = ['Charter', 'CDCP', 'PDCP', 'ADCP', '量产后降本'];
+  if (!allowed.includes(stage)) throw new Error('无效项目阶段');
+  const d = await getDb();
+  const project = (await d.select<any[]>('SELECT id FROM projects WHERE id=? AND COALESCE(is_deleted,0)=0', [projectId]))[0];
+  if (!project) throw new Error('项目不存在');
+  const snapshotId = await recordProjectCostSnapshot(projectId, 'stage_freeze', `冻结阶段：${stage}`, stage);
+  await d.execute('UPDATE projects SET stage=? WHERE id=?', [stage, projectId]);
+  void import('./worklog').then(({ recordSystemWorkLog }) => recordSystemWorkLog(projectId, stage, '项目阶段冻结', `项目已冻结阶段：${stage}。`, [`project_cost_snapshots#${snapshotId}`])).catch(() => { });
+  return snapshotId;
 }
 
 
@@ -203,22 +231,10 @@ export async function getProjectCostSnapshots(projectId: number) {
 
 
 export async function getSnapshotBOMDetail(projectId: number, snapshotTime: string) {
-  // Get BOM details at the time of snapshot (or closest before)
   const d = await getDb();
-  const rows = await d.select<any[]>(
-    `SELECT pb.module_name, pb.quantity, pb.remark,
-            COALESCE(NULLIF(pb.part_name, ''), p.name) as part_name, COALESCE(NULLIF(pb.part_model, ''), p.model) as part_model,
-            COALESCE(NULLIF(pb.main_category, ''), p.main_category) as main_category, COALESCE(NULLIF(pb.sub_category, ''), p.sub_category) as sub_category,
-            CASE WHEN pb.part_cost > 0 THEN pb.part_cost ELSE p.cost END as cost
-     FROM project_boms pb
-     LEFT JOIN parts p ON pb.part_id = p.id
-     WHERE pb.project_id = ?
-       AND COALESCE(pb.is_deleted, 0) = 0
-       AND pb.created_at <= ?
-     ORDER BY pb.module_name, main_category, part_name`,
-    [projectId, snapshotTime]
-  );
-  return rows;
+  const snap = (await d.select<any[]>('SELECT bom_snapshot_json FROM project_cost_snapshots WHERE project_id=? AND created_at<=? ORDER BY created_at DESC, id DESC LIMIT 1', [projectId, snapshotTime]))[0];
+  if (!snap?.bom_snapshot_json) return [];
+  try { return JSON.parse(snap.bom_snapshot_json); } catch { return []; }
 }
 
 
@@ -238,8 +254,8 @@ export async function addBOMItem(projectId: number, partId: number, quantity = 1
   } else {
     part = await d.select<any[]>('SELECT name, model, cost, main_category, sub_category FROM parts WHERE id = ?', [partId]).then(r => r[0]);
   }
-  await d.execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, ref_project_id, part_name, part_model, part_cost, main_category, sub_category, is_module_item, custom_data) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    [projectId, partId, moduleName, quantity, remark, refProjectId, part?.name || '', part?.model || '', part?.cost || 0, part?.main_category || '', part?.sub_category || '', 0, JSON.stringify(snapshot?.customData || {})]);
+  await d.execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, ref_project_id, part_name, part_model, part_cost, price_state, main_category, sub_category, is_module_item, custom_data) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    [projectId, partId, moduleName, quantity, remark, refProjectId, part?.name || '', part?.model || '', part?.cost ?? 0, snapshot && snapshot.cost == null ? 'unknown' : 'confirmed', part?.main_category || '', part?.sub_category || '', 0, JSON.stringify(snapshot?.customData || {})]);
   if (autoSnapshot) await recordProjectCostSnapshot(projectId, 'part_added', `新增器件到${moduleName || '未归类'}`);
 }
 
@@ -251,21 +267,21 @@ export async function addBOMItem(projectId: number, partId: number, quantity = 1
  */
 export async function addVirtualBOMItem(projectId: number, data: { name: string; model?: string; cost?: number; quantity?: number; moduleName?: string; mainCategory?: string; subCategory?: string; remark?: string }) {
   await (await getDb()).execute(
-    'INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, part_name, part_model, part_cost, main_category, sub_category, is_module_item) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-    [projectId, 0, data.moduleName || '未归类', data.quantity ?? 1, data.remark || '', data.name || '虚拟器件', data.model || '', data.cost ?? 0, data.mainCategory || '硬件类', data.subCategory || '', 1]
+    'INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, part_name, part_model, part_cost, price_state, main_category, sub_category, is_module_item) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+    [projectId, 0, data.moduleName || '未归类', data.quantity ?? 1, data.remark || '', data.name || '虚拟器件', data.model || '', data.cost ?? 0, data.cost == null ? 'unknown' : 'confirmed', data.mainCategory || '硬件类', data.subCategory || '', 1]
   );
   await recordProjectCostSnapshot(projectId, 'part_added', `新增虚拟器件：${data.name || ''}（${data.moduleName || '未归类'}）`);
 }
 
 
-export async function updateBOMItem(id: number, quantity: number, moduleName: string, remark: string, autoSnapshot = true, extra?: { partName?: string; partModel?: string; cost?: number; mainCategory?: string; subCategory?: string }) {
+export async function updateBOMItem(id: number, quantity: number, moduleName: string, remark: string, autoSnapshot = true, extra?: { partName?: string; partModel?: string; cost?: number; mainCategory?: string; subCategory?: string; costLayer?: string; priceState?: string }) {
   const d = await getDb();
   const rows = await d.select<any[]>('SELECT * FROM project_boms WHERE id = ?', [id]);
   const before = rows[0];
   // extra 传入时同步更新快照列（编辑 BOM 器件成本/名称时，快照优先显示会读到旧值）
   if (extra) {
-    await d.execute('UPDATE project_boms SET quantity=?, module_name=?, remark=?, part_name=?, part_model=?, part_cost=?, main_category=?, sub_category=? WHERE id=?',
-      [quantity, moduleName, remark, extra.partName ?? '', extra.partModel ?? '', extra.cost ?? 0, extra.mainCategory ?? '', extra.subCategory ?? '', id]);
+    await d.execute('UPDATE project_boms SET quantity=?, module_name=?, remark=?, part_name=?, part_model=?, part_cost=?, price_state=?, main_category=?, sub_category=?, cost_layer=? WHERE id=?',
+      [quantity, moduleName, remark, extra.partName ?? '', extra.partModel ?? '', extra.cost ?? 0, extra.priceState || (extra.cost == null ? before?.price_state || 'unknown' : 'confirmed'), extra.mainCategory ?? '', extra.subCategory ?? '', extra.costLayer ?? before?.cost_layer ?? 'material', id]);
   } else {
     await d.execute('UPDATE project_boms SET quantity=?, module_name=?, remark=? WHERE id=?', [quantity, moduleName, remark, id]);
   }
@@ -278,11 +294,12 @@ export async function updateBOMItem(id: number, quantity: number, moduleName: st
     part_cost: extra?.cost ?? before?.part_cost ?? 0,
     main_category: extra?.mainCategory ?? before?.main_category ?? '',
     sub_category: extra?.subCategory ?? before?.sub_category ?? '',
+    cost_layer: extra?.costLayer ?? before?.cost_layer ?? 'material',
   };
   const bomFields: Array<[string, string]> = [
     ['module_name', '模块'], ['main_category', '大类'], ['sub_category', '子类'],
     ['part_name', '器件名称'], ['part_model', '型号'], ['part_cost', '单价'],
-    ['quantity', '数量'], ['remark', '备注'],
+    ['quantity', '数量'], ['cost_layer', '成本层'], ['remark', '备注'],
   ];
   for (const [fieldKey, fieldLabel] of bomFields) {
     await logDataChange({
@@ -290,24 +307,27 @@ export async function updateBOMItem(id: number, quantity: number, moduleName: st
       fieldKey, fieldLabel, oldValue: before?.[fieldKey], newValue: after[fieldKey as keyof typeof after], source: 'project_bom_inline',
     });
   }
-  // BOM 行绑定的真实器件也作为同一颗器件更新，器件库与其它模块引用随之同步。
-  if (before?.part_id && extra) {
-    const part = await d.select<any[]>('SELECT * FROM parts WHERE id = ?', [before.part_id]).then(r => r[0]);
-    if (part) {
-      await savePart({ ...part, name: after.part_name, model: after.part_model, cost: after.part_cost, main_category: after.main_category || part.main_category, sub_category: after.sub_category || part.sub_category }, false, true, 'project_bom_inline');
-    }
-  }
-  // 反向同步 module_items：项目页改 BOM 数量/模块后，模块库显示同一份数据
-  try {
-    const bom = await d.select<any[]>('SELECT part_id, module_name, part_name, part_model, part_cost, main_category, sub_category FROM project_boms WHERE id = ?', [id]).then(r => r[0]);
-    if (before?.project_id && bom?.part_id) {
-      await d.execute(`UPDATE module_items SET quantity=?, part_name=?, part_model=?, cost=?, main_category=?, sub_category=?
-        WHERE module_id IN (SELECT id FROM modules WHERE project_id=? AND name=?)
-          AND part_id=?`,
-        [quantity, bom.part_name || '', bom.part_model || '', bom.part_cost || 0, bom.main_category || '', bom.sub_category || '', before.project_id, bom.module_name, bom.part_id]);
-    }
-  } catch (e) { console.warn('updateBOMItem 同步 module_items 失败:', e); }
+  // 项目 BOM 是唯一业务明细来源；模块库直接派生，不再回写兼容表 module_items。
   if (autoSnapshot && before?.project_id) await recordProjectCostSnapshot(before.project_id, 'part_changed', `调整BOM项：${moduleName || '未归类'}`);
+}
+
+export async function getDeletedBOMItems(projectId: number) {
+  return (await getDb()).select<any[]>(`SELECT pb.id, pb.project_id, pb.part_id, pb.module_name, pb.quantity, pb.remark, pb.deleted_at, pb.deleted_by,
+    COALESCE(NULLIF(pb.part_name, ''), p.name) as part_name,
+    COALESCE(NULLIF(pb.part_model, ''), p.model) as part_model,
+    CASE WHEN pb.part_cost > 0 THEN pb.part_cost ELSE p.cost END as part_cost
+    FROM project_boms pb LEFT JOIN parts p ON pb.part_id = p.id
+    WHERE pb.project_id = ? AND COALESCE(pb.is_deleted, 0) = 1
+    ORDER BY pb.deleted_at DESC, pb.id DESC`, [projectId]);
+}
+
+export async function restoreBOMItem(id: number) {
+  const d = await getDb();
+  const row = (await d.select<any[]>('SELECT project_id FROM project_boms WHERE id=? AND COALESCE(is_deleted,0)=1', [id]))[0];
+  if (!row) return false;
+  await d.execute("UPDATE project_boms SET is_deleted=0, deleted_at='', deleted_by='' WHERE id=?", [id]);
+  await recordProjectCostSnapshot(Number(row.project_id), 'bom_restore', `恢复 BOM 项 ${id}`);
+  return true;
 }
 
 
@@ -319,17 +339,7 @@ export async function updateBOMRefProject(moduleName: string, projectId: number,
 export async function deleteBOMItem(id: number, autoSnapshot = true) {
   const d = await getDb();
   const rows = await d.select<any[]>('SELECT project_id, module_name, part_id FROM project_boms WHERE id = ?', [id]);
-  await d.execute('UPDATE project_boms SET is_deleted = 1 WHERE id = ?', [id]);
-  // 反向同步 module_items：项目页移除 BOM 行后，模块库对应器件同步删除（防止两页偏差）
-  try {
-    const bom = rows[0];
-    if (bom?.project_id && bom?.part_id && bom?.module_name) {
-      await d.execute(`DELETE FROM module_items
-        WHERE module_id IN (SELECT id FROM modules WHERE project_id=? AND name=?)
-          AND part_id=?`,
-        [bom.project_id, bom.module_name, bom.part_id]);
-    }
-  } catch (e) { console.warn('deleteBOMItem 同步 module_items 失败:', e); }
+  await d.execute("UPDATE project_boms SET is_deleted = 1, deleted_at = datetime('now','localtime'), deleted_by = 'local_user' WHERE id = ?", [id]);
   if (autoSnapshot && rows[0]?.project_id) await recordProjectCostSnapshot(rows[0].project_id, 'part_deleted', `移除器件：${rows[0].module_name || '未归类'}`);
 }
 
@@ -464,7 +474,7 @@ export async function saveModuleItem(data: any) {
   try {
     const mod = await d.select<any[]>('SELECT project_id, name FROM modules WHERE id = ?', [data.module_id]).then(r => r[0]);
     if (mod) {
-      await d.execute(`UPDATE project_boms SET part_name=?, part_model=?, part_cost=?, main_category=?, sub_category=?, quantity=?, remark=?
+      await d.execute(`UPDATE project_boms SET part_name=?, part_model=?, part_cost=?, price_state='confirmed', main_category=?, sub_category=?, quantity=?, remark=?
         WHERE project_id=? AND module_name=? AND part_id=? AND COALESCE(is_deleted,0)=0`,
         [data.part_name || '', data.part_model || '', data.cost ?? 0, data.main_category || '硬件类', data.sub_category || '', data.quantity ?? 1, data.remark || '', mod.project_id, mod.name, data.part_id]);
     }
@@ -553,12 +563,12 @@ export async function getLibraryModuleItems(projectId: number, moduleName: strin
 
 
 
-/** 模块库：编辑模块器件（更新 project_boms 快照列 + 同步 parts 器件库）——单一数据源，改这里两边都变 */
+/** 模块库：编辑模块器件（project_boms 是唯一业务明细来源） */
 export async function updateLibraryModuleItem(bomId: number, data: any) {
   const d = await getDb();
   const bom = await d.select<any[]>('SELECT * FROM project_boms WHERE id = ?', [bomId]).then(r => r[0]);
   if (!bom) return;
-  await d.execute(`UPDATE project_boms SET part_name=?, part_model=?, part_cost=?, main_category=?, sub_category=?, quantity=?, remark=? WHERE id=?`,
+  await d.execute(`UPDATE project_boms SET part_name=?, part_model=?, part_cost=?, price_state='confirmed', main_category=?, sub_category=?, quantity=?, remark=? WHERE id=?`,
     [data.part_name || '', data.part_model || '', data.cost ?? 0, data.main_category || '硬件类', data.sub_category || '', data.quantity ?? 1, data.remark || '', bomId]);
   const next = {
     part_name: data.part_name || '', part_model: data.part_model || '', part_cost: data.cost ?? 0,
@@ -572,28 +582,14 @@ export async function updateLibraryModuleItem(bomId: number, data: any) {
   for (const [fieldKey, fieldLabel] of fields) {
     await logDataChange({ entityType: 'bom', entityId: bomId, projectId: bom.project_id || 0, moduleName: bom.module_name || '', fieldKey, fieldLabel, oldValue: bom[fieldKey], newValue: next[fieldKey as keyof typeof next], source: 'module_library_edit' });
   }
-  // 同步 parts 表（器件库也更新），保证器件库/项目页/模块库三处一致
-  if (bom.part_id) {
-    const part = await d.select<any[]>('SELECT * FROM parts WHERE id = ?', [bom.part_id]).then(r => r[0]);
-    if (part) await savePart({ ...part, main_category: next.main_category, sub_category: next.sub_category, category: next.main_category, name: next.part_name, model: next.part_model, cost: next.part_cost, remark: next.remark }, false, true, 'module_library_edit');
-  }
-  // 同步 module_items（兼容层）
-  const mod = await d.select<any[]>('SELECT id FROM modules WHERE project_id = ? AND name = ?', [bom.project_id, bom.module_name]).then(r => r[0]);
-  if (mod) {
-    const dup = await d.select<any[]>('SELECT id FROM module_items WHERE module_id = ? AND part_id = ?', [mod.id, bom.part_id]).then(r => r[0]);
-    if (dup) await d.execute('UPDATE module_items SET part_name=?, part_model=?, cost=?, main_category=?, sub_category=?, quantity=?, remark=? WHERE id=?',
-      [data.part_name || '', data.part_model || '', data.cost ?? 0, data.main_category || '硬件类', data.sub_category || '', data.quantity ?? 1, data.remark || '', dup.id]);
-  }
 }
 
 
 
-/** 模块库：删除模块（软删该项目该模块的全部 BOM 行 + 同步 module_items） */
+/** 模块库：删除模块（软删该项目该模块的全部 BOM 行） */
 export async function deleteLibraryModule(projectId: number, moduleName: string) {
   const d = await getDb();
   await d.execute('UPDATE project_boms SET is_deleted=1 WHERE project_id=? AND module_name=? AND COALESCE(is_deleted,0)=0', [projectId, moduleName]);
-  const mod = await d.select<any[]>('SELECT id FROM modules WHERE project_id = ? AND name = ?', [projectId, moduleName]).then(r => r[0]);
-  if (mod) await d.execute('DELETE FROM module_items WHERE module_id = ?', [mod.id]);
 }
 
 
@@ -693,8 +689,8 @@ export async function getCostReviews(projectId: number) { return (await getDb())
 
 export async function saveCostReview(data: any) {
   const d = await getDb();
-  if (data.id) { await d.execute('UPDATE project_cost_reviews SET stage=?, reviewed_cost=?, reviewer=?, remark=? WHERE id=?', [data.stage, data.reviewed_cost, data.reviewer || '', data.remark || '', data.id]); return data.id; }
-  else { const r = await d.execute('INSERT INTO project_cost_reviews (project_id, stage, reviewed_cost, reviewer, remark) VALUES (?,?,?,?,?)', [data.project_id, data.stage, data.reviewed_cost, data.reviewer || '', data.remark || '']); return r.lastInsertId; }
+  if (data.id) { const projectId = Number(data.project_id || (await d.select<any[]>('SELECT project_id FROM project_cost_reviews WHERE id=?', [data.id]))[0]?.project_id || 0); await d.execute('UPDATE project_cost_reviews SET stage=?, reviewed_cost=?, reviewer=?, remark=? WHERE id=?', [data.stage, data.reviewed_cost, data.reviewer || '', data.remark || '', data.id]); if (projectId) void import('./worklog').then(({ recordSystemWorkLog }) => recordSystemWorkLog(projectId, data.stage || '阶段', '阶段评审更新', `更新${data.stage || '阶段'}评审，评审成本 ${Number(data.reviewed_cost || 0).toFixed(2)} 元。`, [`project_cost_reviews#${data.id}`])).catch(() => { }); return data.id; }
+  else { const r = await d.execute('INSERT INTO project_cost_reviews (project_id, stage, reviewed_cost, reviewer, remark) VALUES (?,?,?,?,?)', [data.project_id, data.stage, data.reviewed_cost, data.reviewer || '', data.remark || '']); if (data.project_id) void import('./worklog').then(({ recordSystemWorkLog }) => recordSystemWorkLog(Number(data.project_id), data.stage || '阶段', '阶段评审记录', `记录${data.stage || '阶段'}评审，评审成本 ${Number(data.reviewed_cost || 0).toFixed(2)} 元。`, [`project_cost_reviews#${r.lastInsertId}`])).catch(() => { }); return r.lastInsertId; }
 }
 
 
@@ -706,17 +702,79 @@ export async function getMeasures(projectId: number) { return (await getDb()).se
 
 export async function saveMeasure(data: any) {
   const d = await getDb();
-  if (data.id) { await d.execute('UPDATE project_measures SET main_category=?,measure=?,status=?,due_date=?,owner=?,remark=?,updated_at=datetime(\'now\',\'localtime\') WHERE id=?', [data.main_category, data.measure, data.status, data.due_date || '', data.owner || '', data.remark || '', data.id]); return data.id; }
-  else { const r = await d.execute('INSERT INTO project_measures (project_id, main_category, measure, status, due_date, owner, remark) VALUES (?,?,?,?,?,?,?)', [data.project_id, data.main_category, data.measure, data.status, data.due_date || '', data.owner || '', data.remark || '']); return r.lastInsertId; }
+  const forecast = Number(data.forecast_saving || 0);
+  const realized = Number(data.realized_saving || 0);
+  const evidence = data.realized_evidence || '';
+  if (data.id) { const projectId = Number(data.project_id || (await d.select<any[]>('SELECT project_id FROM project_measures WHERE id=?', [data.id]))[0]?.project_id || 0); await d.execute('UPDATE project_measures SET main_category=?,measure=?,status=?,due_date=?,owner=?,remark=?,forecast_saving=?,realized_saving=?,realized_evidence=?,updated_at=datetime(\'now\',\'localtime\') WHERE id=?', [data.main_category, data.measure, data.status, data.due_date || '', data.owner || '', data.remark || '', forecast, realized, evidence, data.id]); if (projectId) void import('./worklog').then(({ recordSystemWorkLog }) => recordSystemWorkLog(projectId, 'PDCP', '降本措施更新', `更新降本措施：${data.measure || '未命名措施'}（${data.status || '待执行'}），预计节省 ${forecast.toFixed(2)} 元，已实现 ${realized.toFixed(2)} 元。`, [`project_measures#${data.id}`])).catch(() => { }); return data.id; }
+  else { const r = await d.execute('INSERT INTO project_measures (project_id, main_category, measure, status, due_date, owner, remark, forecast_saving, realized_saving, realized_evidence) VALUES (?,?,?,?,?,?,?,?,?,?)', [data.project_id, data.main_category, data.measure, data.status, data.due_date || '', data.owner || '', data.remark || '', forecast, realized, evidence]); if (data.project_id) void import('./worklog').then(({ recordSystemWorkLog }) => recordSystemWorkLog(Number(data.project_id), 'PDCP', '降本措施新增', `新增降本措施：${data.measure || '未命名措施'}，预计节省 ${forecast.toFixed(2)} 元。`, [`project_measures#${r.lastInsertId}`])).catch(() => { }); return r.lastInsertId; }
 }
 
 
 export async function deleteMeasure(id: number) { await (await getDb()).execute('DELETE FROM project_measures WHERE id = ?', [id]); }
 
+export async function getProductionCostSavings(year = new Date().getFullYear()) {
+  return (await (await getDb()).select<any[]>(`SELECT s.*,
+    COALESCE(NULLIF(s.project_code, ''), p.code, '') AS project_code,
+    COALESCE(NULLIF(s.project_name, ''), p.name, '') AS project_name,
+    ROUND(COALESCE(s.unit_saving, 0) * COALESCE(s.annual_shipments, 0), 2) AS annual_benefit
+    FROM production_cost_savings s LEFT JOIN projects p ON p.id = s.project_id
+    WHERE s.saving_year = ? AND COALESCE(p.is_deleted, 0) = 0
+    ORDER BY annual_benefit DESC, s.updated_at DESC`, [year])).map(row => ({
+      ...row,
+      project_code: row.project_code || row.code || '', project_name: row.project_name || row.name || '',
+      id: Number(row.id), project_id: Number(row.project_id), saving_year: Number(row.saving_year),
+      unit_saving: Number(row.unit_saving || 0), annual_shipments: Number(row.annual_shipments || 0),
+      annual_benefit: Number(row.annual_benefit || 0),
+    }));
+}
+
+export async function saveProductionCostSaving(data: { id?: number; project_id?: number; project_code?: string; project_name?: string; project_bom_id?: number; part_id?: number; part_name?: string; part_model?: string; module_name?: string; saving_year: number; unit_saving: number; annual_shipments: number; note?: string }) {
+  const d = await getDb();
+  const projectId = Number(data.project_id || 0);
+  const projectCode = data.project_code || '';
+  const projectName = (data.project_name || '').trim();
+  const manualKey = projectName.toLowerCase();
+  let manualHash = 0; for (let i = 0; i < manualKey.length; i += 1) manualHash = ((manualHash << 5) - manualHash + manualKey.charCodeAt(i)) | 0;
+  const storedProjectId = projectId || -Math.max(1, Math.abs(manualHash));
+  const year = Number(data.saving_year || new Date().getFullYear());
+  const unitSaving = Number(data.unit_saving || 0);
+  const annualShipments = Math.round(Number(data.annual_shipments || 0));
+  const projectBomId = Number(data.project_bom_id || 0);
+  const partId = Number(data.part_id || 0);
+  const partName = data.part_name || '';
+  const partModel = data.part_model || '';
+  const moduleName = data.module_name || '';
+  if ((projectId <= 0 && !projectName) || unitSaving <= 0 || annualShipments <= 0) throw new Error('项目、量产降本和年发货量必须填写');
+  let id = Number(data.id || 0);
+  if (id) {
+    await d.execute('UPDATE production_cost_savings SET project_id=?, project_code=?, project_name=?, project_bom_id=?, part_id=?, part_name=?, part_model=?, module_name=?, saving_year=?, unit_saving=?, annual_shipments=?, note=?, updated_at=datetime(\'now\',\'localtime\') WHERE id=?', [storedProjectId, projectCode, projectName, projectBomId, partId, partName, partModel, moduleName, year, unitSaving, annualShipments, data.note || '', id]);
+  } else {
+    const existing = projectBomId > 0
+      ? (await d.select<any[]>('SELECT id FROM production_cost_savings WHERE project_id=? AND saving_year=? AND project_bom_id=? LIMIT 1', [storedProjectId, year, projectBomId]))[0]
+      : (await d.select<any[]>('SELECT id FROM production_cost_savings WHERE project_id=? AND saving_year=? AND project_bom_id=0 AND part_id=? AND part_name=? AND part_model=? LIMIT 1', [storedProjectId, year, partId, partName, partModel]))[0];
+    if (existing?.id) {
+      id = Number(existing.id);
+      await d.execute('UPDATE production_cost_savings SET project_code=?, project_name=?, project_bom_id=?, part_id=?, part_name=?, part_model=?, module_name=?, unit_saving=?, annual_shipments=?, note=?, updated_at=datetime(\'now\',\'localtime\') WHERE id=?', [projectCode, projectName, projectBomId, partId, partName, partModel, moduleName, unitSaving, annualShipments, data.note || '', id]);
+    } else {
+      const result = await d.execute('INSERT INTO production_cost_savings (project_id, project_code, project_name, project_bom_id, part_id, part_name, part_model, module_name, saving_year, unit_saving, annual_shipments, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [storedProjectId, projectCode, projectName, projectBomId, partId, partName, partModel, moduleName, year, unitSaving, annualShipments, data.note || '']);
+      id = Number(result.lastInsertId || 0);
+    }
+  }
+  await import('./worklog').then(({ saveWorkLog }) => saveWorkLog({
+    project_id: storedProjectId, work_project: projectName, stage: '量产后降本', title: '关键成本进展',
+    content: `${moduleName ? `${moduleName} / ` : ''}${partName || '项目器件'}${partModel ? `（${partModel}）` : ''}：单台降本 ¥${unitSaving.toFixed(2)}，年度发货量 ${annualShipments.toLocaleString()} 台，预计年度成本收益 ¥${(unitSaving * annualShipments).toFixed(2)}。${data.note ? ` 原因：${data.note}` : ''}`,
+    category: '关键成本进展', tags: '量产降本,关键成本进展', record_type: 'cost_progress', is_todo: 0, done: 1,
+    evidence: [`production_cost_savings#${id}`],
+  })).catch(() => { });
+  return id;
+}
+
+export async function deleteProductionCostSaving(id: number) { await (await getDb()).execute('DELETE FROM production_cost_savings WHERE id=?', [id]); }
+
 
 
 // ==================== Project Targets ====================
-export async function getTargets(projectId: number) { return (await getDb()).select<any[]>('SELECT * FROM project_targets WHERE project_id = ? ORDER BY domain', [projectId]); }
+export async function getTargets(projectId: number) { return (await getDb()).select<any[]>("SELECT * FROM project_targets WHERE project_id = ? AND COALESCE(status,'draft') <> 'superseded' ORDER BY domain", [projectId]); }
 
 
 export async function saveTarget(data: any) {
@@ -794,6 +852,8 @@ export async function getProjectSuppliers(projectId: number) {
 
 
 export async function saveProjectSupplier(data: any) {
+  data = { ...data, supplier_name: String(data.supplier_name || '').trim() };
+  if (!data.supplier_name) throw new Error('供应商名称不能为空');
   const d = await getDb();
   if (data.id) {
     await d.execute(
@@ -875,4 +935,9 @@ export async function saveQuoteReviewLog(quoteInput: string, verdictSummary: str
 export async function getQuoteReviewLogs(limit = 10): Promise<any[]> {
   await ensureAnalysisTables();
   return (await getDb()).select<any[]>('SELECT * FROM quote_review_logs ORDER BY id DESC LIMIT ?', [limit]);
+}
+
+export async function getProductionSavingYears(): Promise<number[]> {
+  const rows = await (await getDb()).select<{ year: number }[]>(`SELECT DISTINCT saving_year AS year FROM production_cost_savings WHERE saving_year IS NOT NULL ORDER BY saving_year DESC`);
+  return rows.map(row => Number(row.year)).filter(Number.isInteger);
 }

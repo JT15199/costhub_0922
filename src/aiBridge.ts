@@ -1,46 +1,12 @@
 // 本地-云端 AI 桥（工具亮点）：本地模型读全库 → 脱敏意图 → 云端行业洞察 → 本地模型结合本地数据出最终建议
 // 安全设计：云端 prompt 是固定模板，只有 物料名/品类/问题 三个字段位（成本/供应商/项目代号在模板里没有位置）；
 //          发送前正则审计兜底，命中敏感模式即拦截；全程 logLocalAICall 留痕可审计
-import { invoke } from '@tauri-apps/api/core';
 import { getSetting } from './db/settings';
 import { logLocalAICall } from './ollama';
+import { localCompletion } from './localBackend';
 import { saveBridgeLog, getRecentBridgeLog, getBridgeLogsByMaterial, materialKey } from './db/advisor';
-
-// ==================== 敏感审计（纯函数，可测） ====================
-export const SENSITIVE_PATTERNS: { re: RegExp; desc: string }[] = [
-  { re: /[¥￥]\s*\d+(?:\.\d+)?/, desc: '金额（¥/￥）' },
-  { re: /\b\d+(?:\.\d+)?\s*(?:元|块钱)\b/, desc: '金额（元）' },
-  { re: /\b\d+(?:\.\d+)?\s*(?:-|~|至|到)\s*\d+(?:\.\d+)?(?!(?:\s*(?:月|年|周|天|日|小时)))/, desc: '价格区间' },
-  { re: /(?:成本|单价|采购价|报价|价格)\s*[:：]?\s*\d/, desc: '成本类数字' },
-  { re: /(?:供应商|份额|占比|项目代号|项目名)\s*[:：]?\s*\S/, desc: '供应商/项目信息' },
-  { re: /[\u4e00-\u9fa5]{2,6}(?:科技|电子|半导体|光电|精密|股份|集团|实业|能源|光学|有限(?:公司)?|公司)/, desc: '公司/厂家名称' },
-];
-export interface AuditResult { safe: boolean; matches: { pattern: string; sample: string }[]; }
-
-// 严格审计（建议提示词用）：在 auditSensitive 基础上增加 器件型号/规格 检测——
-// 型号可反查料号与供应商，属于敏感信息，不得出现在可外传的提示词中
-export function auditPromptStrict(text: string): AuditResult {
-  const base = auditSensitive(text);
-  if (!base.safe) return base;
-  const extra = [
-    { re: /\b[A-Z]{1,6}[0-9][A-Z0-9\-]{2,}\b/, desc: '器件型号' },
-    { re: /\d+\s*(?:寸|英寸|mm|MHz|GHz|Hz|nm)\b/, desc: '规格参数' },
-  ];
-  for (const p of extra) {
-    const m = text.match(p.re);
-    if (m) { base.safe = false; base.matches.push({ pattern: p.desc, sample: m[0].slice(0, 40) }); }
-  }
-  return base;
-}
-
-export function auditSensitive(text: string): AuditResult {
-  const matches: { pattern: string; sample: string }[] = [];
-  for (const p of SENSITIVE_PATTERNS) {
-    const m = text.match(p.re);
-    if (m) matches.push({ pattern: p.desc, sample: m[0].slice(0, 40) });
-  }
-  return { safe: matches.length === 0, matches };
-}
+import { auditPromptStrict } from './ai/security';
+export { SENSITIVE_PATTERNS, auditPromptStrict, auditSensitive, validateCloudQueryArgs, validatePublicModelQueryArgs } from './ai/security';
 
 // ==================== 脱敏模板（云端只收到白名单字段） ====================
 export function sanitizeForCloud(intent: { material_name: string; category: string; question: string }): string {
@@ -56,16 +22,7 @@ export function sanitizeForCloud(intent: { material_name: string; category: stri
 async function localChat(systemPrompt: string, userPrompt: string, reqType: string, material?: string): Promise<string> {
   const model = await getSetting('local_ai_model', '');
   if (!model) throw new Error('未配置本地模型');
-  const base = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
-  const resp = await invoke<{ status: number; body: string; success: boolean }>('http_post', {
-    request: {
-      url: base + '/api/chat',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], stream: false, options: { temperature: 0.2 } }),
-    },
-  });
-  if (!resp.success) throw new Error('HTTP ' + resp.status);
-  const content: string = (JSON.parse(resp.body)?.message?.content) || '';
+  const content = await localCompletion(systemPrompt, userPrompt, 0.2);
   await logLocalAICall({
     request_type: reqType,
     material_name: material,
@@ -90,27 +47,6 @@ function parseJsonObj(text: string): any {
   ];
   for (const fn of attempts) { try { return fn(); } catch { /* 下一级 */ } }
   return null;
-}
-
-// ==================== 云端工具调用闸门（对话中本地模型自主调用） ====================
-// 本地模型生成的工具参数是自由文本（非模板字段），必须代码级校验后才能发往云端
-export function validateCloudQueryArgs(args: any): { ok: boolean; reason?: string; clean?: { material: string; category: string; question: string } } {
-  if (!args || typeof args !== 'object') return { ok: false, reason: '工具参数格式错误' };
-  const material = String(args.material || args.material_name || '').trim().slice(0, 100);
-  const category = String(args.category || '').trim().slice(0, 50);
-  const question = String(args.question || '').trim().slice(0, 200);
-  if (!material) return { ok: false, reason: '缺少物料名称（请使用物料通用名）' };
-  if (!question) return { ok: false, reason: '缺少查询问题' };
-  // 严格审计：型号/金额/供应商/项目代号/规格 全拦
-  const audit = auditPromptStrict('物料名称：' + material + '\n品类：' + category + '\n查询问题：' + question);
-  // 项目/产品短码（P1/M270 等字母+数字短组合，可反查内部命名）
-  if (/\b[A-Z]{1,3}\d{1,2}\b/.test(material + ' ' + question)) {
-    return { ok: false, reason: '参数疑似含项目/产品短码（如 P1/M270）——请使用物料通用名，不含任何编号' };
-  }
-  if (!audit.safe) {
-    return { ok: false, reason: '参数含敏感信息（' + audit.matches.map(m => m.pattern + ':' + m.sample).join('、') + '）——请只用物料通用名，不含型号/金额/供应商/项目信息' };
-  }
-  return { ok: true, clean: { material, category, question } };
 }
 
 // ==================== 三步链路 ====================

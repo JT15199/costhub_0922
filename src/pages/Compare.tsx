@@ -7,6 +7,7 @@ import echarts from '../echartsSetup';
 import { getProjects, getProjectBOMs, getCompetitors, getCompetitorBOMs, getFeatures, saveFeature, deleteFeature, getScores, saveScore } from '../db';
 import { chartTooltip, chartAxisStyle, chartGrid, chartTextMuted, chartSplitLine, barGradient } from '../chartTheme';
 import CompetitivenessRadar from '../components/CompetitivenessRadar';
+import { bomExtendedCostStrict } from '../ai/contracts';
 
 export default function Compare() {
   const [projects, setProjects] = useState<any[]>([]);
@@ -58,8 +59,8 @@ export default function Compare() {
   };
 
   // BOM comparison
-  const aByCat: Record<string, number> = {}; aBoms.forEach(b => { const c = b.main_category || '其他'; aByCat[c] = (aByCat[c] || 0) + (b.part_cost || 0) * b.quantity; });
-  const bByCat: Record<string, number> = {}; bBoms.forEach(b => { const c = b.main_category || '其他'; bByCat[c] = (bByCat[c] || 0) + (b.part_cost || 0) * b.quantity; });
+  const aByCat: Record<string, number> = {}; aBoms.forEach(b => { const value = bomExtendedCostStrict(b); if (value !== null) { const c = b.main_category || '其他'; aByCat[c] = (aByCat[c] || 0) + value; } });
+  const bByCat: Record<string, number> = {}; bBoms.forEach(b => { const value = bomExtendedCostStrict(b); if (value !== null) { const c = b.main_category || '其他'; bByCat[c] = (bByCat[c] || 0) + value; } });
   const allCats = [...new Set([...Object.keys(aByCat), ...Object.keys(bByCat)])].sort();
   const aTotal = Object.values(aByCat).reduce((s, v) => s + v, 0);
   const bTotal = Object.values(bByCat).reduce((s, v) => s + v, 0);

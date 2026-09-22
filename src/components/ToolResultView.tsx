@@ -3,11 +3,15 @@
 import { useEffect, useState } from 'react';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
-import { Table, Tag, Popconfirm } from 'antd';
+import { Alert, Empty, Table, Tag, Popconfirm, Spin } from 'antd';
 import { getProjects, getProjectBOMs, getTargets, getCompetitors, getCompetitorBOMs, getSellingPoints, getSellingPointMaps, getLatestTrendSnapshot, getSupplierPriceProfiles, getTenderOverview, getTenderMatrix } from '../db';
 import { computeSellingPointRows, computeModuleValueRows, type ModuleValueRow } from '../sellingPointAnalyzer';
 import { computeTargetStatuses } from '../targetInsight';
 import ModuleValueMatrix from './ModuleValueMatrix';
+import EvidenceDrawer from './ai/EvidenceDrawer';
+import type { AiToolResult } from '../ai/contracts';
+import { bomExtendedCostStrict, sumBomCostStrict } from '../ai/contracts';
+import { openMaterialInsightDraft } from '../materialInsight';
 
 const COLORS = ['#3B82F6', '#8B5CF6', '#F97316', '#34C759', '#0891B2', '#AF52DE', '#FF9500', '#5856D6'];
 const mono = { fontVariantNumeric: 'tabular-nums' } as const;
@@ -28,6 +32,66 @@ interface ViewData {
   chartOption?: any;
 }
 
+function fromStructuredResult(toolId: string, result: AiToolResult<unknown>): ViewData | null {
+  if (!result.ok || !result.data) return null;
+  const data: any = result.data;
+  const moneyText = (v: unknown) => v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? '待补证据' : `¥${Number(v).toFixed(2)}`;
+  const money = (v: number) => <span style={mono}>{moneyText(v)}</span>;
+  if (toolId === 'query_projects') {
+    return { type: 'table', title: '项目概览', columns: [
+      { title: '项目', dataIndex: 'code' }, { title: '名称', dataIndex: 'name' }, { title: 'BOM成本', dataIndex: 'bomCost', align: 'right', render: money },
+      { title: 'BOM项', dataIndex: 'bomItemCount', align: 'right' }, { title: '状态', dataIndex: 'status' },
+    ], rows: (data as any[]).map(row => ({ ...row })) };
+  }
+  if (toolId === 'query_project_bom') {
+    return { type: 'table', title: `${data.project?.code || ''} BOM明细 · 合计 ${moneyText(data.total)}`, columns: [
+      { title: '模块', dataIndex: 'module' }, { title: '名称', dataIndex: 'name' }, { title: '型号', dataIndex: 'model' },
+      { title: '数量', dataIndex: 'quantity', align: 'right' }, { title: '单价', dataIndex: 'unitCost', align: 'right', render: money },
+      { title: '小计', dataIndex: 'extendedCost', align: 'right', render: (v: number) => <b>{money(v)}</b> },
+    ], rows: data.rows || [] };
+  }
+  if (toolId === 'query_target_status') {
+    return { type: 'table', title: '目标成本达成', columns: [
+      { title: '项目', dataIndex: 'code' }, { title: '领域', dataIndex: 'domain' }, { title: '目标', dataIndex: 'target', align: 'right', render: money },
+      { title: '实际', dataIndex: 'actual', align: 'right', render: money }, { title: '达成率', dataIndex: 'achievementRate', align: 'right', render: (v: number) => `${v}%` },
+      { title: '状态', dataIndex: 'missed', render: (v: boolean) => <Tag color={v ? 'red' : 'green'}>{v ? '超支' : '达成'}</Tag> },
+    ], rows: data as any[] };
+  }
+  if (toolId === 'query_tender_analysis') {
+    const rows = (data.rows || []).map((row: any) => ({ ...row, offersText: (row.offers || []).map((o: any) => `${o.supplier} ${moneyText(o.lineTotal)} [${o.relation}]`).join('；'), lowText: row.comparableLow ? `${row.comparableLow.supplier} ${moneyText(row.comparableLow.lineTotal)}` : '待确认' }));
+    return { type: 'table', title: `${data.project?.code || ''} 招标比价`, columns: [
+      { title: '物料', dataIndex: 'material' }, { title: '模块', dataIndex: 'module' }, { title: '供应商报价', dataIndex: 'offersText' },
+      { title: '可比最低', dataIndex: 'lowText' }, { title: '可谈机会', dataIndex: 'opportunity', align: 'right', render: money },
+    ], rows };
+  }
+  if (toolId === 'query_cost_snapshots') {
+    return { type: 'table', title: '成本历史', columns: [
+      { title: '项目', dataIndex: 'projectCode' }, { title: '时间', dataIndex: 'observedAt' }, { title: 'BOM成本', dataIndex: 'bomCost', align: 'right', render: money },
+      { title: '变化', dataIndex: 'deltaFromNewer', align: 'right', render: money }, { title: '原因', dataIndex: 'changeReason' },
+    ], rows: data as any[] };
+  }
+  if (toolId === 'estimate_similar_projects') {
+    return { type: 'table', title: `${data.target?.code || ''} 类似项目预估 · ${data.range ? `${moneyText(data.range.min)}～${moneyText(data.range.max)}` : '样本不足'}`, columns: [
+      { title: '参考项目', dataIndex: 'code' }, { title: '相似度', dataIndex: 'similarity', render: (v: number) => `${v}%` },
+      { title: '匹配规格', dataIndex: 'matchedFields', render: (v: string[]) => (v || []).join('、') }, { title: 'BOM成本', dataIndex: 'bomCost', align: 'right', render: money },
+      { title: '与目标差', dataIndex: 'costDelta', align: 'right', render: money },
+    ], rows: data.rows || [] };
+  }
+  if (toolId === 'rank_quote_negotiations') {
+    return { type: 'table', title: `${data.project?.code || ''} 议价排序 · 可争取 ${moneyText(data.theoreticalSavings)}`, columns: [
+      { title: '物料', dataIndex: 'material' }, { title: '模块', dataIndex: 'module' }, { title: '可比报价数', dataIndex: 'comparableCount' },
+      { title: '最低报价', dataIndex: 'low', render: (v: any) => money(v?.lineTotal) }, { title: '可谈机会', dataIndex: 'opportunity', align: 'right', render: money },
+    ], rows: data.rows || [] };
+  }
+  if (toolId === 'explain_quote_change') {
+    return { type: 'table', title: '报价轮次变化归因', columns: [
+      { title: '变化类型', dataIndex: 'type' }, { title: '物料', dataIndex: 'name' }, { title: '数量变化', dataIndex: 'quantityDelta' },
+      { title: '单价变化', dataIndex: 'unitPriceDelta', render: money }, { title: '金额影响', dataIndex: 'impact', align: 'right', render: money },
+    ], rows: data.changes || [] };
+  }
+  return null;
+}
+
 async function loadData(toolId: string, args: any): Promise<ViewData | null> {
   try {
     if (toolId === 'query_project_cost' || toolId === 'query_project_bom') {
@@ -36,8 +100,14 @@ async function loadData(toolId: string, args: any): Promise<ViewData | null> {
       if (!p) return null;
       const boms = (await getProjectBOMs(p.id)).filter((b: any) => !b.is_deleted);
       if (toolId === 'query_project_cost') {
-        const cost = (b: any) => (Number(b.part_cost ?? b.cost) || 0) * (Number(b.quantity) || 1);
-        const total = boms.reduce((s, b) => s + cost(b), 0);
+        const costState = sumBomCostStrict(boms);
+        if (costState.missing.length) return {
+          type: 'table', title: p.code + ' 成本结构 · 待补证据',
+          columns: [{ title: '模块', dataIndex: 'mod' }, { title: '名称', dataIndex: 'name' }, { title: '状态', dataIndex: 'state' }],
+          rows: boms.map(b => ({ mod: b.module_name || '未分模块', name: b.part_name || '', state: bomExtendedCostStrict(b) === null ? '待补证据' : '已确认' })),
+        } as ViewData;
+        const cost = (b: any) => bomExtendedCostStrict(b) ?? 0;
+        const total = costState.total;
         const modMap = new Map<string, number>();
         boms.forEach(b => { const m = b.module_name || '未分模块'; modMap.set(m, (modMap.get(m) || 0) + cost(b)); });
         const sorted = [...modMap.entries()].sort((a, b) => b[1] - a[1]);
@@ -51,15 +121,15 @@ async function loadData(toolId: string, args: any): Promise<ViewData | null> {
           rows: sorted.map(([mod, value]) => ({ mod, cost: value, pct: Math.round((value / total) * 100) + '%' })),
         } as ViewData;
       }
-      const cost2 = (b: any) => (Number(b.part_cost ?? b.cost) || 0) * (Number(b.quantity) || 1);
+      const cost2 = (b: any) => bomExtendedCostStrict(b);
       return {
         type: 'table', title: p.code + ' BOM 明细 · ' + boms.length + ' 项',
         columns: [
           { title: '模块', dataIndex: 'mod' }, { title: '名称', dataIndex: 'name' }, { title: '型号', dataIndex: 'model' },
-          { title: '数量', dataIndex: 'qty', align: 'right' }, { title: '单价', dataIndex: 'price', align: 'right', render: (v: number) => <span style={mono}>¥{(v || 0).toFixed(0)}</span> },
-          { title: '小计', dataIndex: 'sub', align: 'right', render: (v: number) => <b style={mono}>¥{(v || 0).toFixed(0)}</b> },
+          { title: '数量', dataIndex: 'qty', align: 'right' }, { title: '单价', dataIndex: 'price', align: 'right', render: (v: number | null) => <span style={mono}>{v == null ? '待补证据' : '¥' + v.toFixed(0)}</span> },
+          { title: '小计', dataIndex: 'sub', align: 'right', render: (v: number | null) => <b style={mono}>{v == null ? '待补证据' : '¥' + v.toFixed(0)}</b> },
         ],
-        rows: boms.map(b => ({ mod: b.module_name || '未分模块', name: b.part_name || '', model: b.part_model || '', qty: b.quantity || 1, price: Number(b.part_cost ?? b.cost) || 0, sub: cost2(b) })),
+        rows: boms.map(b => ({ mod: b.module_name || '未分模块', name: b.part_name || '', model: b.part_model || '', qty: b.quantity ?? '待补证据', price: bomExtendedCostStrict(b) === null ? null : Number(b.part_cost ?? b.cost), sub: cost2(b) })),
       };
     }
     if (toolId === 'query_target_status') {
@@ -99,7 +169,7 @@ async function loadData(toolId: string, args: any): Promise<ViewData | null> {
       const maps = await getSellingPointMaps(p.id);
       const boms = (await getProjectBOMs(p.id)).filter((b: any) => !b.is_deleted);
       const moduleCosts: Record<string, number> = {};
-      boms.forEach(b => { const m = b.module_name || '未归类'; moduleCosts[m] = (moduleCosts[m] || 0) + (Number(b.part_cost ?? b.cost) || 0) * (Number(b.quantity) || 1); });
+      boms.forEach(b => { const value = bomExtendedCostStrict(b); if (value !== null) { const m = b.module_name || '未归类'; moduleCosts[m] = (moduleCosts[m] || 0) + value; } });
       const rows = computeSellingPointRows({ sps: sps.map((s: any) => ({ id: s.id, name: s.name, positive: s.positive, negative: s.negative })), modules: maps.modules, moduleCosts });
       const modRows = computeModuleValueRows(rows, moduleCosts);
       return { type: 'matrix', title: p.code + ' 模块价值矩阵', matrixRows: modRows, modRows };
@@ -201,7 +271,8 @@ async function loadData(toolId: string, args: any): Promise<ViewData | null> {
         const boms = (await getProjectBOMs(p.id)).filter((b: any) => !b.is_deleted);
         for (const b of boms) {
           const key = dimension === 'module' ? (b.module_name || '未分模块') : (b[dimension] || '未分类');
-          const value = (Number(b.part_cost ?? b.cost) || 0) * (Number(b.quantity) || 1);
+          const value = bomExtendedCostStrict(b);
+          if (value === null) continue;
           values.set(key, (values.get(key) || 0) + value);
         }
         rowsByProject.push({ code: p.code, values });
@@ -259,14 +330,20 @@ async function loadData(toolId: string, args: any): Promise<ViewData | null> {
   } catch { return null; }
 }
 
-export default function ToolResultView({ toolId, args }: { toolId: string; args: any }) {
+export default function ToolResultView({ toolId, args, result }: { toolId: string; args: any; result?: AiToolResult<unknown> }) {
   const [data, setData] = useState<ViewData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
+  const argsKey = JSON.stringify(args || {});
   useEffect(() => {
     let alive = true;
-    loadData(toolId, args).then(d => { if (alive) setData(d); });
+    setLoading(true); setError('');
+    const structured = result ? fromStructuredResult(toolId, result) : null;
+    if (structured) { setData(structured); setLoading(false); }
+    else loadData(toolId, JSON.parse(argsKey)).then(d => { if (alive) setData(d); }).catch((reason: any) => { if (alive) setError(String(reason?.message || reason || '结果加载失败')); }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [toolId, JSON.stringify(args || {}), reload]);
+  }, [toolId, argsKey, result, reload]);
   async function doReset(partId: number, name: string) {
     try {
       const { resetPartCanonical } = await import('../canonicalize');
@@ -278,11 +355,15 @@ export default function ToolResultView({ toolId, args }: { toolId: string; args:
       }
     } catch { }
   }
-  if (!data) return null;
+  if (loading) return <div style={{ padding: 12, textAlign: 'center' }}><Spin size="small" /></div>;
+  if (error) return <Alert type="error" showIcon message="结果加载失败" description={error} />;
+  if (!data) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可展示的结构化结果" />;
+  const visualEmpty = ['table', 'competitor'].includes(data.type) ? !(data.rows || []).length : data.type === 'pie' ? !(data.pie || []).length : data.type === 'bar' ? !(data.cats || []).length : data.type === 'chart' ? !data.chartOption : false;
   return (
     <div style={{ background: '#FBFAF6', border: '1px solid #E6E4DC', borderRadius: 8, padding: '8px 10px', marginTop: 6 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         {data.title && <div style={{ fontSize: 11, fontWeight: 700, color: '#181713' }}>{data.title}</div>}
+        {result && <EvidenceDrawer evidence={result.evidence || []} />}
         {['query_project_cost', 'query_project_bom', 'query_project_module_value'].includes(toolId) && args?.project_code && (
           <a style={{ fontSize: 10.5, color: '#0A84FF', marginLeft: 'auto', cursor: 'pointer', flexShrink: 0 }} onClick={async () => {
             try { const ps = await getProjects('', '', ''); const p = ps.find((x: any) => x.code === args.project_code); if (p) {
@@ -291,8 +372,17 @@ export default function ToolResultView({ toolId, args }: { toolId: string; args:
             } } catch { }
           }}>去项目页 →</a>
         )}
+        {['query_material_insight', 'insight_material_trend'].includes(toolId) && args?.material_name && (
+          <a style={{ fontSize: 10.5, color: '#0A84FF', marginLeft: 'auto', cursor: 'pointer', flexShrink: 0 }} onClick={() => openMaterialInsightDraft({ material: String(args.material_name), mode: 'auto' })}>在物料洞察工作台处理 →</a>
+        )}
       </div>
-      {data.type === 'pie' && (
+      {result && (result.warnings.length > 0 || result.freshness) && (
+        <div style={{ fontSize: 10.5, color: '#7C6F58', marginBottom: 6 }}>
+          {result.warnings.length > 0 && <span>⚠ {result.warnings.join('；')} · </span>}
+          数据截至 {result.freshness}
+        </div>
+      )}
+      {visualEmpty ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无足够数据，未用 0 元填充" /> : data.type === 'pie' && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <div style={{ width: 150, flexShrink: 0 }}>
             <ReactECharts echarts={echarts} option={{
@@ -306,7 +396,7 @@ export default function ToolResultView({ toolId, args }: { toolId: string; args:
           </div>
         </div>
       )}
-      {data.type === 'bar' && (
+      {!visualEmpty && data.type === 'bar' && (
         <ReactECharts echarts={echarts} option={{
           tooltip: { trigger: 'axis' },
           grid: { left: 44, right: 12, top: 16, bottom: 26 },
@@ -315,10 +405,10 @@ export default function ToolResultView({ toolId, args }: { toolId: string; args:
           series: [{ type: 'bar', data: data.vals, barWidth: 22, itemStyle: { color: (p: any) => (data.barColors || [])[p.dataIndex] || '#B0895A', borderRadius: 3 } }],
         }} style={{ height: 150 }} />
       )}
-      {data.type === 'chart' && data.chartOption && (
+      {!visualEmpty && data.type === 'chart' && data.chartOption && (
         <ReactECharts echarts={echarts} option={data.chartOption} style={{ height: 270 }} />
       )}
-      {(data.type === 'table' || data.type === 'competitor') && (
+      {!visualEmpty && (data.type === 'table' || data.type === 'competitor') && (
         <Table size="small" pagination={false} rowKey={(_, i) => String(i)} dataSource={data.rows} columns={data.columns} scroll={{ x: 320 }} />
       )}
       {data.type === 'matrix' && data.matrixRows && <ModuleValueMatrix rows={data.matrixRows} />}

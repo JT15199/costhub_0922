@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Select, InputNumber, Button, Table, Tag, message } from 'antd';
 import { getProjects, getProjectBOMs, getSellingPoints, getSellingPointMaps, getTargets, saveTarget, getTargetFeatures, saveTargetFeatures } from '../db';
 import { buildTargetAllocation, computeModuleCosts } from '../targetAllocation';
+import { bomExtendedCostStrict } from '../ai/contracts';
 
 const COLORS = ['#3B82F6', '#8B5CF6', '#F97316', '#0891B2', '#AF52DE', '#34C759', '#FF9500', '#5856D6', '#B0895A'];
 const mono = { fontVariantNumeric: 'tabular-nums' } as const;
@@ -29,6 +30,7 @@ export default function TargetAllocationPanel({ projectId }: { projectId: number
     setLoading(true);
     try {
       const boms = (await getProjectBOMs(refPid)).filter((b: any) => !b.is_deleted);
+      if (boms.some(b => bomExtendedCostStrict(b) === null)) { message.warning('参考项目存在成本或数量证据缺口，不能生成目标分配'); return; }
       const moduleCosts = computeModuleCosts(boms.map((b: any) => ({ ...b, module_name: b.main_category || '其他' })));
       const sps = await getSellingPoints(refPid);
       const maps = await getSellingPointMaps(refPid);

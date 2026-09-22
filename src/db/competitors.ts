@@ -39,14 +39,14 @@ export async function getCompetitorBOMs(competitorId: number) {
 
 
 export async function addCompetitorBOMItem(competitorId: number, partName: string, partModel = '', estimatedCost = 0, quantity = 1, moduleName = '', ourPartName = '', ourPartModel = '', ourCost = 0, ourQuantity = 0) {
-  await (await getDb()).execute('INSERT INTO competitor_boms (competitor_id, part_name, part_model, estimated_cost, quantity, module_name, our_part_name, our_part_model, our_cost, our_quantity) VALUES (?,?,?,?,?,?,?,?,?,?)',
-    [competitorId, partName, partModel, estimatedCost, quantity, moduleName, ourPartName, ourPartModel, ourCost, ourQuantity]);
+  await (await getDb()).execute('INSERT INTO competitor_boms (competitor_id, part_name, part_model, estimated_cost, quantity, price_state, quantity_state, module_name, our_part_name, our_part_model, our_cost, our_quantity) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+    [competitorId, partName, partModel, estimatedCost, quantity, Number(estimatedCost) > 0 ? 'confirmed' : 'unknown', Number.isFinite(Number(quantity)) && Number(quantity) >= 0 ? 'confirmed' : 'invalid', moduleName, ourPartName, ourPartModel, ourCost, ourQuantity]);
 }
 
 
 export async function updateCompetitorBOMItem(id: number, partName: string, partModel: string, estimatedCost: number, quantity: number, moduleName: string) {
-  await (await getDb()).execute('UPDATE competitor_boms SET part_name=?, part_model=?, estimated_cost=?, quantity=?, module_name=? WHERE id=?',
-    [partName, partModel, estimatedCost, quantity, moduleName, id]);
+  await (await getDb()).execute('UPDATE competitor_boms SET part_name=?, part_model=?, estimated_cost=?, quantity=?, price_state=?, quantity_state=?, module_name=? WHERE id=?',
+    [partName, partModel, estimatedCost, quantity, Number(estimatedCost) > 0 ? 'confirmed' : 'unknown', Number.isFinite(Number(quantity)) && Number(quantity) >= 0 ? 'confirmed' : 'invalid', moduleName, id]);
 }
 
 
@@ -94,9 +94,10 @@ export async function getScores(refType: string, refId: number) {
 }
 
 
-export async function saveScore(refType: string, refId: number, featureId: number, score: number) {
+export async function saveScore(refType: string, refId: number, featureId: number, score: number | null) {
   const d = await getDb();
   const existing = await d.select<any[]>('SELECT id FROM product_scores WHERE ref_type = ? AND ref_id = ? AND feature_id = ?', [refType, refId, featureId]);
+  if (score === null) { if (existing[0]) await d.execute('DELETE FROM product_scores WHERE id=?', [existing[0].id]); return; }
   if (existing.length > 0) {
     await d.execute('UPDATE product_scores SET score = ? WHERE id = ?', [score, existing[0].id]);
   } else {
@@ -146,5 +147,65 @@ export async function setModuleFeatureLinks(moduleName: string, featureIds: numb
   await d.execute('DELETE FROM module_feature_links WHERE module_name = ?', [moduleName]);
   for (const fid of featureIds) {
     await d.execute('INSERT INTO module_feature_links (module_name, feature_id) VALUES (?,?)', [moduleName, fid]);
+  }
+}
+
+// 成本长城配置按项目保存：全局 radar 五维只作为新项目的默认模板。
+export async function getProjectCompetitiveDimensions(projectId: number) {
+  const d = await getDb();
+  let rows = await d.select<any[]>(`SELECT d.id, d.feature_id, d.name, d.sort_order, d.enabled
+    FROM project_competitive_dimensions d
+    WHERE d.project_id = ? ORDER BY d.sort_order, d.id`, [projectId]);
+  if (rows.length === 0) {
+    const defaults = await d.select<any[]>(`SELECT id as feature_id, name
+      FROM product_features WHERE type = 'radar' AND COALESCE(project_id, 0) = 0 ORDER BY id`);
+    for (const feature of defaults) {
+      await d.execute(`INSERT OR IGNORE INTO project_competitive_dimensions
+        (project_id, feature_id, name, sort_order, enabled) VALUES (?,?,?,?,1)`,
+        [projectId, feature.feature_id, feature.name, feature.feature_id]);
+    }
+    rows = await d.select<any[]>(`SELECT id, feature_id, name, sort_order, enabled
+      FROM project_competitive_dimensions WHERE project_id = ? ORDER BY sort_order, id`, [projectId]);
+  }
+  return rows;
+}
+
+export async function updateProjectCompetitiveDimension(projectId: number, featureId: number, name: string, enabled = 1) {
+  const label = name.trim();
+  if (!label) throw new Error('维度名称不能为空');
+  await (await getDb()).execute(`UPDATE project_competitive_dimensions
+    SET name = ?, enabled = ? WHERE project_id = ? AND feature_id = ?`, [label, enabled ? 1 : 0, projectId, featureId]);
+}
+
+export async function createProjectCompetitiveDimension(projectId: number, name: string) {
+  const label = name.trim();
+  if (!label) throw new Error('维度名称不能为空');
+  const d = await getDb();
+  const next = await d.select<any[]>(`SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_sort
+    FROM project_competitive_dimensions WHERE project_id = ?`, [projectId]);
+  const sortOrder = Number(next[0]?.next_sort || 1);
+  const feature = await d.execute(`INSERT INTO product_features (name, weight, type, project_id)
+    VALUES (?, 1.0, 'radar_project', ?)`, [label, projectId]);
+  await d.execute(`INSERT INTO project_competitive_dimensions
+    (project_id, feature_id, name, sort_order, enabled) VALUES (?,?,?,?,1)`,
+    [projectId, feature.lastInsertId, label, sortOrder]);
+  return feature.lastInsertId;
+}
+
+// 项目级模块映射不改写旧的全局配置，空数组表示明确清空该模块。
+export async function getProjectModuleFeatureLinks(projectId: number) {
+  const rows = await (await getDb()).select<any[]>(`SELECT module_name, feature_id
+    FROM project_module_feature_links WHERE project_id = ?`, [projectId]);
+  const map: Record<string, number[]> = {};
+  rows.forEach((row: any) => { (map[row.module_name] = map[row.module_name] || []).push(row.feature_id); });
+  return map;
+}
+
+export async function setProjectModuleFeatureLinks(projectId: number, moduleName: string, featureIds: number[]) {
+  const d = await getDb();
+  await d.execute('DELETE FROM project_module_feature_links WHERE project_id = ? AND module_name = ?', [projectId, moduleName]);
+  for (const featureId of featureIds) {
+    await d.execute(`INSERT OR IGNORE INTO project_module_feature_links
+      (project_id, module_name, feature_id) VALUES (?,?,?)`, [projectId, moduleName, featureId]);
   }
 }

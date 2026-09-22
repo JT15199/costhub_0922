@@ -388,3 +388,120 @@
 - 详细方案见 `AI提升专项规划.md`。实施顺序固定为：工具契约与风险收口 → 结构化结果和证据链 → 核心业务 Skill → 建议闭环 → 云端审批加强 → 效果评测。
 - 本地模型继续只通过白名单工具访问 SQLite，禁止自由 SQL；金额、差异和图表由代码计算，模型只负责理解、归纳和建议。
 - 云端默认只允许经审查的公开知识查询；原始 BOM、供应商、项目、型号、金额和报价文件永不外发。后续 Luna 首次只实施阶段 0 和五个只读工具适配，不得一次性重写 AI 子系统。
+
+## 三·补31、洞察本地兜底 + 审批重构 + 供应商地图品类（2026-09-21 用户实测：洞察还是失败要彻底解决 / 审批布局混乱且重复审批 / 供应商地图点开要看供应项目）
+
+- **洞察永不因云端不可用而失败**：`agentSearchLoop`（trendService）拆成 `agentSearchLoopCloud` + 外层兜底——云端任何非用户拒绝的失败（未配置供应商、额度不足 402、Key 失效 401、网关拒绝、搜索 API 缺失、解析失败）都转入 `localKnowledgeInsight`（本地模型基于公开知识分析，`src/localAnalysis.ts` 的 `collectLocalText`：流式 + `json:false` + `num_predict:16384` + 180s 无输出惰性超时 + 支持取消）。本地结论必须诚实标注：`summary` 附「[来源] 云端不可用（原因）…未联网、时效性有限」，幅度数字一律置空（不许编造价位），`source='local-knowledge'`。**唯一不兜底的例外**：用户自己拒绝/取消云端发送（`isUserStop`）——那是明确的用户决定，不能偷偷换通道。`createStructuredInsight` 同样有本地兜底。
+- **供应商冷却（少打扰）**：`src/ai/providerHealth.ts` 按错误分级冷却——额度(402)/鉴权(401) 30 分钟、网络 2 分钟、其他 1 分钟；`callLLMChat`/`callLLMWithFallback` 跳过冷却中的供应商，原生搜索在冷却期直接返回 null 不再申请审批；调用成功即清除记录。避免"反复弹审批 → 还是失败"。
+- **审批：拦截不再静默**：`prepareCloudConfirmPayload` 命中敏感规则时**不再 throw**（旧逻辑 throw→`requestCloudConfirm` return false→根本不生成卡，用户看不到命中什么），而是带着 `riskItems/riskLevel/riskVerdict/suggestedQuery/gatewayAcceptable` 入队生成可读卡片。硬命中（金额/成本、供应商公司名、项目代号与内部字段、BOM/料号/客户/订单）网关层没有出口，只能改名；软命中（型号/规格数字、数字区间）用户可强制批准。
+- **审批：用户最高权限怎么落地**：`approvePending(id,{force})` 对软命中放行；物料名含数字时普通检索通道被网关拒绝，卡片提供「改用公开型号通道」（`switchPendingToPublicModel` → C1_PUBLIC_MODEL + category='公开型号'，这是型号数字唯一被允许的通道）与「采用建议通用名」（`applySuggestedQuery`）。`isGatewayAcceptable()` 提前算出网关是否会接受，**不给出"点了批准也发不出去"的按钮**。
+- **审批：不重复审批**：Rust `ai_approval_grants` 幂等补列 `grant_class`；`create_cloud_approval_grant` 按分级 clamp——`theme`（公开检索主题 C1/C1_PUBLIC_MODEL）最长 7 天，`payload`（含 C1_PUBLIC_CONTEXT/C2 整份正文哈希票）维持 30 分钟。前端「记住此主题（7 天不再问）」走 theme 票；**C1_PUBLIC_CONTEXT/C2 永远不能长效复用**（正文每次不同，忽略逐字节哈希＝空白票漏洞）。
+- **审批：卡片四分区 + 内置模板折叠**：`CloudApprovalCards.tsx` 按 ①这条请求要做什么 ②将要发出去的内容 ③本地判定 ④你可以怎么做 分区；`src/ai/promptTemplates.ts` 用内置模板（BUILTIN_SKILLS/CLOUD_SYSTEM_PROMPT/c2SafeSystemPrompt，含 cloudSafePublicText 公开化版本）逐字定位，命中的内置提示词折叠成 `<details>`，只展开"需要核对的新增内容"（`splitPreviewPayload` 支持 messages 与原生搜索 input 两种形状）。inline 卡补齐 material/category/question/onReviseSearch/onSkipLongTerm（与列表卡能力对齐）。
+- **供应商地图**：点击地图圆点或卡片 → 供应商弹窗默认「供应项目情况」（`SupplierProjectPanel` + `getSupplierProjectCoverage`：器件供货按项目聚合器件数/供货金额/项目 BOM/占比，另含整机承接与招标报价批次；金额沿用快照优先 `part_cost>0 ? part_cost : parts.cost`，份额按 `share_ratio` 百分比、未填视为 100%）。
+- **供应商品类**：字典存 settings `supplier_categories_v1`（默认显示器/鼠标/手写笔/键盘/平板/PC/耳机/充电器/包装，合并项目品类与已用值），供应商↔品类多值存新表 `supplier_category_links`（运行时幂等建表，同时把首项回填 `supplier_profiles.category` 保持旧展示兼容）；资料表单用 `Select mode="tags"`（可直接新增），地图上方 chips 按品类筛选（与器件大类筛选相互独立）。
+
+## 三·补32、构建流程铁律补充（2026-09-21）
+
+- 构建前确认 `costhub.exe` 未运行（被占用会导致替换失败）；标准流程 `npm run build`（tsc -b + vite build）→ `npm run tauri:build`，两者都要拿真实退出码。
+- 全量 vitest 与 Rust release 构建**不要同时跑**：并发会拖慢导入导致 `costPackage.test.ts` 之类用例偶发失败（单跑即过）。排除偶发前先单跑该文件确认。
+- **第三方/模型响应解析铁律（2026-09-21 实测"洞察成功但什么都没收集到"）**：解析外部响应（搜索/LLM 引用）必须用「通用深度遍历 + 显式识别嵌套结构」（`src/ai/nativeSearchSources.ts` 的 `collectNativeSources`），**禁止按固定键名白名单走查**——DeepSeek/OpenAI 的引用是 `{type:'url_citation', url_citation:{url,title}}` 嵌套，白名单取不到 → 来源数 0。同理：**"没有可点击来源"只能是证据强度降级，不允许把已经拿到的分析整份丢弃**（`createStructuredInsight` 无链接但有联网归纳时继续出结论，标 `evidence_strength='仅模型归纳'`、不伪造 URL、追加证据风险）。
+
+## 三·补33、源文件编码事故与铁律（2026-09-21）
+
+- **事故**：用 `Get-Content -Raw` 读 + `Set-Content -Encoding UTF8` 写回 `src/trendService.ts`（做一次跨文件字符串替换）时，**harness 的 shell 是 Windows PowerShell 5.1**，它按 ANSI(GBK) 读取无 BOM 的 UTF-8 源文件 → 全文件中文被双重编码破坏（962 处中文字符丢失、部分引号被吞）。后续用"损坏函数模拟 + bundle/会话快照反查"逐步还原，代价极大。
+- **铁律**：**永远不要用 shell 文本命令（Get-Content/Set-Content/Out-File/-replace 赋值）改写源码文件**。要用 `edit`/`write` 工具；确需脚本处理时，必须 `[IO.File]::ReadAllText/WriteAllText($path, [Text.UTF8Encoding]::new($false))` 显式指定 UTF-8，且 .ps1 脚本本身保持纯 ASCII（PS 5.1 按 ANSI 读脚本，脚本里的中文字面量会解析失败）。
+- **恢复手段（记录备查）**：①`dist/assets/<chunk>.js` 构建产物保存了所有字符串字面量（模板字面量内容含缩进与 `${}` 插值，可反查）；②`~/.dsh/sessions/<workspace>/<session>/session.v3.jsonl.zstd` 是会话快照（多帧 zstd，Node 25 `zlib.zstdDecompressSync` 逐帧解压），含历史 `read` 原文，可按"损坏函数 Sim() 反演"精确回填；③损坏函数 = `UTF8.GetString(GBK.GetBytes(GBK.GetString(UTF8.GetBytes(text))))`（可复现、可校验：修复后整文件 Sim 应等于损坏版本）；④**`git show HEAD:<file>` 是静态模板（提示词/常量）的权威比对源**——恢复后必须逐字比对这类模板，别凭记忆重写。
+
+## 三·补34、洞察链路：云端只检索、本地做研判（2026-09-21 用户明确）
+
+- **分工**：`agentSearchLoop` 负责"取回公开事实"（DeepSeek 原生联网搜索，或第三方搜索 + 云端多轮检索），产出的来源与归纳只是**证据**；`createStructuredInsight` 负责**研判 + 按 Skill 格式产出**（Skill 方法论 + 该 Skill 的 outputDimensions + 严格 JSON），**默认交给本地模型**（`collectLocalText`，温度 0.2），本地不可用（未启动/未选模型/推理失败）才落回云端模型并在 console 说明原因——不中断功能、不假装是本机结论。
+- **透明标注**：结论 summary 尾部追加 `[研判] 本机模型（xxx）研判` / `[研判] 云端模型（xxx）研判`；无链接来源时另标"证据强度已降级"。用户要能一眼看出是谁做的研判。
+- **安全边界（测试会拦）**：外发（云端）正文**只能含已脱敏的公开来源**；"云端检索归纳"这类聚合文本只允许进**本地**提示词（localSourceContext），**绝不能**塞进云端 sourceContext——`materialInsightApproval` 的"不外发本地项目成本"用例就是拦这个的（本轮真实拦下过一次）。
+- **维度映射铁律**：`normalizeStructuredResult` 必须保留模型返回的 `dimension_type` 去匹配 Skill 的维度名；**任何把它写成固定值（如 `'系统提示'`）的改动都会让页面全部退化成"公开信息不足"兜底文案**（2026-09-21 实际事故）。
+
+## 三·补35、洞察链路质量闸门与检索关键词（2026-09-21 用户实测：洞察还是没有获得有效的信息）
+
+- **检索关键词必须由已批准字段重建，且是关键词不是句子**：`src/ai/searchQuery.ts::buildPublicSearchQuery(material, question)` 是**唯一**来源，`cloudConfirm`（审批卡 + 载荷哈希）与 `trendService.executeSearchRounds`（实际请求）必须调它，否则网关载荷绑定会拦；它必须是**纯函数**（不含当前时间），否则审批与执行之间哈希会漂移。旧实现发的是 `${material} ${question}`——question 是常量疑问句，等于把一整句话当搜索关键词，召回质量崩坏（实测召回过赌博站与招股书 PDF）。
+- **来源必须过质量闸门**：`src/ai/sourceQuality.ts::gateSources(sources, materialName)`——①硬剔赌博/色情/站群域名与标题；②按"物料特征词"（去掉通用品类词后的部分，如 `27寸/LCD/OC` 而不是"面板"）命中数排序；③**一条都没命中时保留少量来源并标记 `weak`，绝不返回空**（返回空会让上层走"未获取可点击公开来源"的硬降级，用户明确反感"什么都没收集到"）；④弱相关时必须把"这些来源没有直接提及该物料"写进给模型的提示词，否则模型会把泛新闻当成本物料行情。结论里用 `describeSourceQuality` 如实说明剔除了几条、是否全部弱相关。
+- **一次审批 = 一个固定查询**：网关对搜索请求做载荷哈希绑定，多轮"让模型换关键词再搜"在物理上不可能生效——不要按 `skill.maxSearchRounds` 反复搜同一句（旧实现还因此在最后一轮把"没有新增来源"误判成"没有来源"而**丢弃已拿到的来源**）。正确流程：**一轮关键词搜索 → 质量闸门 → 一次整合分析**。
+- **原生搜索零引用不算成功**：`tryDeepSeekNativeInsight` 返回 200 但没有任何可点击引用时，如果配置了第三方搜索就继续走真检索；只有没得选才保留"仅模型归纳"的降级结论。
+- **本地研判必须拿到本机内部事实**：`src/ai/insightLocalContext.ts::buildInsightLocalContext(projectRows)` 产出项目/模块/用量/单价/金额（聚合按全量、明细截断），通过 `createStructuredInsight(..., { localContext })` **只喂本地分支**。没有它，"看自己/看竞争/成本敞口"这类维度只能写"本次未提供自身 BOM、用量、库存或采购价"——这是用户说"没有有效信息"的另一半原因。
+- **提示词里的 JSON 示例必须用半角引号**：曾出现 `“trend_direction”:”上涨”` 这种中文引号示例，模型照抄 → JSON 解析失败 → 整条结论报废。改提示词时顺手检查 `**加粗` 是否闭合。
+
+## 三·补36、敏感性筛查必须是真实判断（2026-09-21 用户质疑：写死走本地、没有真实判断——**质疑成立**）
+
+- **禁止用字面量来源标签短路判定**：`piRuntime` 曾固定传 `sourceTypes: ['private_workspace']`，`evaluatePrivacy` 在"来源策略"第一步就返回，**正则与分类器从未执行**，而 UI 却渲染成"未发现规则命中"（不实陈述）。现在用 `deriveContextSourceTypes(messages)` 按**真实消息**推导：只有确实带工具结果/工作状态注入时才 `private_workspace`；纯系统提示 + 用户提问会真正走内容级正则 + 分类器。
+- **正则闸门总是执行**，命中项如实记入 `regexMatches`（即使分类已由来源策略决定）——UI 三态展示：命中（列出命中项）/ 已执行未命中 / 未运行（并说明为什么没运行）。
+- **分类器要有内容级依据**：`contentPrivacyClassifier` + `detectLocalBusinessSignals`（金额、成本数字、项目短码、内部字段、公司名后缀、本地路径、私钥、API Key、Bearer、手机号、邮箱）返回可解释的 reasonCode；命中即 `sensitive`，干净则 `unknown`（**仍然 fail-closed：只有 `public` 才可能上云**）。禁止再写 `() => ({ classification: 'unknown' })` 这类恒值 classifier。
+- **乐观默认即误导**：审批卡不得用 `riskLevel || 'clear'` / `gatewayAcceptable !== false` 把"审查从未运行"渲染成"未命中"；缺结果时显示 `unreviewed · 没有可用的本地审查结果`。`GatewayTracePanel` 不得把同一个 `privacy_evaluation` 事件渲染成两个独立节点，也不得硬编码"本轮实际选择的路由"这类假依据。
+
+## 三·补37、上下文压缩：机制移植 DSH（2026-09-21 用户：压缩好像没有作用，原理要跟 DSH 一致）
+
+- **机制**（`src/ai/compactionCheckpoint.ts`，移植自 `dsh-compaction-basic`）：压缩指令作为**最后一条 user 消息**追加在原文之后（不另起 system，保持前缀一致）；强制输出**固定 8 章节 Markdown 检查点**（主要请求与意图/关键技术概念/文件与代码/错误与修复/待办工作/当前工作/下一步/关键上下文），空章节写 (none)、一节都不许删；摘要用 `<compacted-summary>` 包裹并加"这是已确立的背景"前言；原文已有旧检查点时必须**合并**（保留仍成立的事实、丢弃过期的）；**fail-closed**——摘要为空/只有标题/被截断就拒绝提交。
+- **压缩调用参数**：`json:false`（要 Markdown 不要 JSON）、`num_predict:16384` 不截断、**惰性看门狗**（180s 完全无输出才放弃，不要 240s 硬掐断慢模型）。旧的"7 字段严格 JSON + json:true + num_predict≤768"在 CPU 机器上频繁超时，失败即退化成剪枝。
+- **压缩目标必须真的变小**：目标定在 **yellow 水位以下并留 20% 余量**，并有**最小收益判据**（省不到 10% 就放弃并如实报错）。旧目标 `0.6×inputHard` 压完仍停在触发带内，实测 `tokensBefore 5805 → tokensAfter 5882`（越压越大）。仅校验 `tokensAfter > inputHard` 是不够的。
+- **不要用 `result.state &&` 当提交条件**：首次压缩前 state 为 undefined，会把黄灯剪枝与失败兜底剪枝**整份丢掉**，而 UI 已经报了"已压缩 X→Y"。提交条件只看"消息是否真的变了"。
+- **窗口要够得着水位**：`effectiveContext` 不再直接取模型**宣称**上下文（qwen3 40960 / gemma3 131072 会让水位落在 1.7 万/6.7 万 token，自动压缩永不触发，一旦真超出 Ollama 会从最前面静默截断），统一 `LOCAL_CONTEXT_CAP = 32768` 封顶。
+- **手动压缩要有反馈**：streaming 时点"压缩上下文"必须提示（不能静默 return），压缩后**同时刷新界面可见的历史与上下文预算数字**，失败文案写"未压缩，已保留原始历史"而不是"已转为保守剪枝"。
+- **兼容模式同一套机制**：`thinkEngine.compactThinkMessages` 用同一份检查点提示词，摘要失败保留原历史；禁止回到按字符数折叠、把工具证据替换成一句固定话术的旧做法。
+
+## 三·补38、执行中补充指令与轨迹可收缩（2026-09-21 用户：执行中发不出补充指令 / 工具调用过程要能收缩）
+
+- **三条注入通道，不允许静默丢弃**：pi 原生模式 `agent.steer` / `agent.followUp`；兼容模式 `runThinkLoop` 的 `steerQueue`（每轮开始前 drain 成一条 user 消息，带"用户补充指令最高优先级"提示）；云端直连/规范化直连（`runCloudDirect`/`runCanonicalDirect`）**没有注入通道**，必须明确告知"请先停止生成再发送"。`send` 的 `if (streaming)` 分支在无 `piAgentRef` 时的静默 `return` 是用户报"发不出去"的直接原因。
+- **运行类型要用 state 参与渲染**：`runKind`（idle/pi/think/direct）决定排队按钮是否可用与提示文案，必须用 `useState`——在 render 里读 ref 会拿到过期值并触发 `react-hooks/refs` error；`Date.now()/Math.random()` 这类非纯调用放到**模块作用域**（写在组件体内即使只在事件处理器里执行也会被 `react-hooks/purity` 判为渲染期调用）。
+- **轨迹折叠**：一条消息一个折叠组（默认"流式中且是最后一条"或"步数<3"才展开），**用户手动切换后手动选择永远优先**；每张工具卡再单独折叠（参数 JSON / 完整输出 / 可视化收进内层，懒挂载）。不要用 `open={streaming && …}` 这种计算值——run 开始/结束会强制改写用户的展开状态。
+- **弹层定位铁律**：**不要在 `.ant-tooltip` 等弹层根节点上写 `transform` 关键帧**。rc-trigger 定位时会测量自身视觉缩放并把偏移量**除以** scale（`offsetX: nextOffsetX / scaleX`），动画结束后缩放回到 1，那份补偿就变成**永久位移**（右侧面板偏移上千像素 → 错位数十像素）。要更快出现就对 `.ant-tooltip-inner` 动 opacity。
+- **antd Dropdown 默认 `trigger=['hover']`**：想让按钮"点击打开"必须显式 `trigger={['click']}`；按钮没有 onClick 时点击不会有任何反应（历史会话按钮的实际 bug）。
+- **静默 no-op 是 bug**：`if (streaming) return;` 这类守卫必须给用户可见反馈（tooltip 说明 / toast / `Modal.confirm`），否则用户只会认为"点了没反应"（新对话、切会话、压缩上下文三处都踩过）。
+
+## 三·补39、检索查询词铁律：网关严格相等，不许拼接（2026-09-21 真实事故，用户："还是显示公开信息不足"）
+
+- **Rust 网关 `validate_public_query_binding`（src-tauri/src/lib.rs:2678，C1 作用域）做的是严格相等**：
+  `normalize_public_query(body 里的 query/q) == normalize_public_query("{material} {question}")`（折叠空白 + 转小写）。
+  **在查询词后面追加任何内容都会被拦**，报 `云端请求已拦截：查询词超出已批准的公开主题范围`（日志落在 `outbound_request_logs`，`status_code=0`）。
+- **要提升召回质量，改"问题"而不是改查询词**：问题（question）同样是已批准字段、会显示在审批卡上，所以关键词必须放进 question
+  （`src/ai/searchQuery.ts` 的 `PUBLIC_PRICE_QUERY_QUESTION`），查询词用 `buildPublicSearchQuery()`（= `material + ' ' + question`，只做空白归一）。
+- **三道防线（缺一不可）**：①`executeSearchRounds` 发请求前用 `gatewayExpectedQuery()` 自检，不一致就当场报错、不浪费审批；
+  ②测试里**逐字镜像 Rust 的 normalize + 严格相等**（`insightPipeline.test.ts`），并对 `materialInsightApproval` 里**真实外发请求体**跑这套镜像；
+  ③`isDeterministicCloudBlock()` 识别拦截类失败——**不重试**（确定性失败重试只是再失败一次），且**必须把原因报给用户**，
+  绝不允许像旧实现那样用 `Promise.allSettled` 把错误吞成空数组（"被拦了"和"真没结果"在上层看起来一模一样，用户只能反复重试）。
+- 审查不通过（如物料名里带金额/型号）也必须抛 `CloudApprovalValidationError` 明确报原因，**不许静默降级成本地知识分析**。
+
+## 三·补40、"批准后继续"必须有派发方（2026-09-21 用户："让我反复确认云端行情查询提交，这个是个大bug"）
+
+- **事件只有监听方 = 死代码**：`costhub-insight-request` 以前只有 AiPanel/App 监听、**没有任何地方派发** → 点批准后什么都不发生，
+  用户只能重新提问 → 又看一次审批 = "反复确认"。现在 `cloudConfirm.issueGrant()` 签发授权后派发它，并带
+  `{material, category, requirementKind, pendingId}`；AiPanel 优先用事件里的物料直接 `runCloudDirect`（不经过模型重跑）。
+- **不要用自然语言文案做机器判断**：AiPanel 判断"只是入队未发送"曾匹配固定串"等待云端发送确认"，而 aiTools 的文案早已改成
+  "已生成真实待审批请求…" → 永久失配（`pendingRetryRef` 永远为空）。改用共享标记 `APPROVAL_PENDING_MARKER` +
+  `textMeansApprovalPending()` / `stripApprovalMarker()`：判断只看标记，标记不展示给用户和模型。
+- 新增/修改任何"需要用户批准才能继续"的工具时，返回文本里必须带上该标记，否则批准后不会自动续跑。
+
+## 三·补41、维度名容错匹配（2026-09-21，同一"公开信息不足"症状的第二条独立成因）
+
+- **维度名是模型自由输出，禁止只用完全相等匹配**：`dims.find(x => x.dimension_type === key)` 这种写法会让本地 9B 的
+  「供给面」「1. 成本因子」「成本因子（Cost）」「金融与政策因子：」全部对不上 → 模型写好的内容被兜底文案吞掉。
+  统一用 `src/ai/skillDimensions.ts`：`normalizeDimensionKey`（全角→半角/去空白/去序号/去括号/去标点）+ `findDimension`
+  四级降级（全等 → 互相包含[≥2字] → 公共前缀≥2字且唯一 → 按位置兜底）。
+- `normalizeStructuredResult` **不得因为匹配不上就丢内容**：匹配不到时写"模型未返回该维度的内容（如实标注，未编造）"，
+  模型多给的维度也保留入库；`Decomposition` 的三处渲染（swot/pest/五力与维度列表）同用容错匹配，历史快照也能正常显示。
+- **提示词禁止教模型交白卷**：不允许写"搜不到就写'公开信息不足'"。必须三级优先：①用来源事实回答（标序号+时间）
+  ②给"间接推断，依据是…" ③确实没有时写"公开信息不足：【缺什么】；建议：【下一步查什么】"。
+
+## 三·补42、云端审查自动放行（2026-09-21 用户明确："像铜这种有什么敏感的么？可以直接自己通过"）
+
+- `cloud_auto_approve_clean` **默认开启**：`isCleanAutoApproveEnabled()` 返回 `!== '0'`（设置里显式关掉即恢复"每次确认"）。
+- **放行不等于放松审查**（不可关闭的三层仍然照跑）：①本地 `reviewQuery`/`validateCloudQueryArgs` 硬软规则
+  ②Rust 网关的字段/域名/载荷绑定 ③审批历史记 `auto_approved` + 依据。
+- **仍然强制出卡**：命中硬规则、C2 抽象分析、非公开投影的整份正文、审查结果缺失（`riskLevel === 'unreviewed'`，乐观默认已移除）。
+- 改这条默认值时必须同步更新 `cloudConfirm.test.ts` / `materialInsightApproval.test.ts` 的设置 mock——这两个文件的
+  `getSetting` mock 要**按 key 返回真实策略值**，否则 mock 常量会把策略行为掩盖掉（本轮就把 4 个用例的语义暴露出来了）。
+
+## 三·补43、证据引用要宽容解析（2026-09-21 子代理实测：本地模型卡在"格式无效"上打转到没有结论）
+
+- `readSessionEvidence`（aiPanelChat.ts）原来只认 `message:<id>` / `event:<id>` / `state:<index>` 三种严格写法，
+  9B 模型写 `证据1` / `msg:12` / `消息 12` / 裸数字 `12` 就判无效 → 它换一种写法再试、再被判无效，整轮预算烧光也没结论。
+- 现在：`parseEvidenceReference()` 宽容解析（`msg:`/`消息`/`事件`/`状态`/`#12`/裸数字→按 message），
+  真解析不出来时返回**该会话里真实可照抄的引用示例**（不是一句"格式无效"），并在错误里明确"不要再试新写法，直接用已有信息作答"；
+  `read_evidence` 工具描述同步写明"两次被拒就停止重试"。加工具判断"模型是否在格式上反复试错"时，参照这条。
+- 同一类问题的通用原则：**凡是给模型回错误信息的地方，都要顺带给"正确示例 + 停止重试的指令"**，否则弱模型会无限重试。

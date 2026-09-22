@@ -19,3 +19,6 @@ export * from './db/voice';
 export * from './db/selling';
 export * from './db/dataImport';
 export * from './db/tender';
+export * from './db/ai';
+export * from './db/artifacts';
+export * from './db/architecture';

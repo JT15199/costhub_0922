@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Select, Button, Space, Row, Col, message, Card, Statistic, Tag } from 'antd';
+import { Select, Button, Space, Row, Col, message, Card, Statistic, Tag, Alert } from 'antd';
 import { DownloadOutlined, FileOutlined, SearchOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
@@ -8,6 +8,7 @@ import { getProjects, getProject, getProjectBOMs } from '../db';
 import { CATEGORY_COLORS, getCategoryColor } from '../constants';
 import DataTable from '../components/DataTable';
 import { chartTooltip, chartAxisStyle, chartGrid, chartPieSeries, chartBarSeries, chartTextMuted, barGradient } from '../chartTheme';
+import { bomExtendedCostStrict, sumBomCostStrict } from '../ai/contracts';
 
 export default function Reports() {
   const [projects, setProjects] = useState<any[]>([]);
@@ -37,11 +38,13 @@ export default function Reports() {
 
   // 与供应商 Excel 计价口径一致：行小计先舍入 2 位再累加
   // 计算口径：中间计算一律用原始值，显示层用 toFixed(2) 舍入
-  const total = boms.reduce((s, b) => s + (b.part_cost || 0) * b.quantity, 0);
-  const total2 = boms2.reduce((s, b) => s + (b.part_cost || 0) * b.quantity, 0);
+  const costState = sumBomCostStrict(boms);
+  const costState2 = sumBomCostStrict(boms2);
+  const total = costState.missing.length ? null : costState.total;
+  const total2 = costState2.missing.length ? null : costState2.total;
 
   const byCat: Record<string, number> = {};
-  boms.forEach(b => { byCat[b.main_category] = (byCat[b.main_category] || 0) + (b.part_cost || 0) * b.quantity; });
+  boms.forEach(b => { const value = bomExtendedCostStrict(b); if (value !== null) byCat[b.main_category] = (byCat[b.main_category] || 0) + value; });
 
   const pieOption = {
     tooltip: chartTooltip('item'),
@@ -68,7 +71,7 @@ export default function Reports() {
     yAxis: { type: 'value', name: '成本 (¥)', ...chartAxisStyle() },
     series: [
       { name: project?.code || 'A', type: 'bar', barGap: '10%', data: Object.keys(byCat).map(k => byCat[k] || 0), itemStyle: { color: '#0A84FF', borderRadius: [8, 8, 0, 0] } },
-      { name: project2?.code || 'B', type: 'bar', data: Object.keys(byCat).map(k => (boms2.filter(b => b.main_category === k).reduce((s, b) => s + (b.part_cost || 0) * b.quantity, 0))), itemStyle: { color: '#5E5CE6', borderRadius: [8, 8, 0, 0] } },
+      { name: project2?.code || 'B', type: 'bar', data: Object.keys(byCat).map(k => (boms2.filter(b => b.main_category === k).reduce((s, b) => s + (bomExtendedCostStrict(b) ?? 0), 0))), itemStyle: { color: '#5E5CE6', borderRadius: [8, 8, 0, 0] } },
     ],
     grid: chartGrid({ bottom: 40 }),
   };
@@ -76,7 +79,7 @@ export default function Reports() {
   const exportSingle = () => {
     const ws = XLSX.utils.json_to_sheet(boms.map(b => ({
       大类: b.main_category, 类型: b.category, 名称: b.part_name, 型号: b.part_model,
-      单价: b.part_cost, 数量: b.quantity, 小计: (b.part_cost || 0) * b.quantity, 备注: b.remark,
+      单价: b.price_state === 'confirmed' ? b.part_cost : '待补证据', 数量: b.quantity, 小计: bomExtendedCostStrict(b) ?? '待补证据', 备注: b.remark,
     })));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'BOM明细');
@@ -89,9 +92,9 @@ export default function Reports() {
     { title: '类型', dataIndex: 'category', width: 90 },
     { title: '名称', dataIndex: 'part_name' },
     { title: '型号', dataIndex: 'part_model' },
-    { title: '单价(¥)', dataIndex: 'part_cost', width: 100, align: 'right' as const, render: (v: number) => v?.toFixed(4) },
+    { title: '单价(¥)', dataIndex: 'part_cost', width: 100, align: 'right' as const, render: (v: number, r: any) => r.price_state !== 'confirmed' ? '待补证据' : v?.toFixed(4) },
     { title: '数量', dataIndex: 'quantity', width: 60, align: 'center' as const },
-    { title: '小计(¥)', key: 'sub', width: 100, align: 'right' as const, render: (_: any, r: any) => <b>{((r.part_cost || 0) * r.quantity).toFixed(4)}</b> },
+    { title: '小计(¥)', key: 'sub', width: 100, align: 'right' as const, render: (_: any, r: any) => { const value = bomExtendedCostStrict(r); return <b>{value === null ? '待补证据' : value.toFixed(4)}</b>; } },
   ];
 
   return (
@@ -122,9 +125,10 @@ export default function Reports() {
                 : `规格: ${project.specs || '—'}`}
             </p>
             <Row gutter={16} style={{ marginTop: 16 }}>
-              <Col span={8}><Card size="small"><Statistic title="BOM总成本" value={total} precision={2} prefix="¥" valueStyle={{ color: '#CF0A2C' }} /></Card></Col>
+              <Col span={8}><Card size="small"><Statistic title="BOM总成本" value={total ?? '待补证据'} precision={2} prefix={total == null ? undefined : '¥'} valueStyle={{ color: '#CF0A2C' }} /></Card></Col>
               <Col span={8}><Card size="small"><Statistic title="器件数" value={boms.length} /></Card></Col>
             </Row>
+            {costState.missing.length > 0 && <Alert type="warning" showIcon message={`有 ${costState.missing.length} 行成本或数量证据缺口，报告总成本不予计算`} style={{ marginTop: 12 }} />}
           </div>
 
           <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -144,10 +148,11 @@ export default function Reports() {
           <div className="content-card" style={{ marginBottom: 16 }}>
             <h2 style={{ color: '#CF0A2C' }}>项目对比: {project.code} vs {project2.code}</h2>
             <Row gutter={16} style={{ marginTop: 16 }}>
-              <Col span={8}><Card size="small"><Statistic title={`${project.code} BOM成本`} value={total} precision={2} prefix="¥" /></Card></Col>
-              <Col span={8}><Card size="small"><Statistic title={`${project2.code} BOM成本`} value={total2} precision={2} prefix="¥" /></Card></Col>
-              <Col span={8}><Card size="small"><Statistic title="差异" value={total - total2} precision={2} prefix="¥" valueStyle={{ color: total > total2 ? '#CF0A2C' : '#10B981' }} /></Card></Col>
+              <Col span={8}><Card size="small"><Statistic title={`${project.code} BOM成本`} value={total ?? '待补证据'} precision={2} prefix={total == null ? undefined : '¥'} /></Card></Col>
+              <Col span={8}><Card size="small"><Statistic title={`${project2.code} BOM成本`} value={total2 ?? '待补证据'} precision={2} prefix={total2 == null ? undefined : '¥'} /></Card></Col>
+              <Col span={8}><Card size="small"><Statistic title="差异" value={total == null || total2 == null ? '待补证据' : total - total2} precision={2} prefix={total == null || total2 == null ? undefined : '¥'} valueStyle={{ color: total != null && total2 != null && total > total2 ? '#CF0A2C' : '#10B981' }} /></Card></Col>
             </Row>
+            {(costState.missing.length > 0 || costState2.missing.length > 0) && <Alert type="warning" showIcon message="对比项目存在成本或数量证据缺口，差异不予计算" style={{ marginTop: 12 }} />}
           </div>
           <div className="content-card">
             <div className="card-header"><h3>成本对比</h3></div>

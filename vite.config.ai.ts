@@ -29,6 +29,6 @@ export default defineConfig({
   },
   // 共享现有依赖
   optimizeDeps: {
-    include: ['react', 'react-dom', 'antd', 'xlsx', '@tauri-apps/api', '@tauri-apps/plugin-sql'],
+    include: ['react', 'react-dom', 'antd', 'xlsx', '@tauri-apps/api'],
   },
 });

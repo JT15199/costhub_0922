@@ -1,0 +1,13 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+const source = path.resolve('src-tauri/target/release/costhub.exe');
+const dir = path.resolve(process.env.COSTHUB_PORTABLE_DIR || 'artifacts/agent-upgrade/20260910-portable/CostHub-Portable');
+if (!fs.existsSync(source)) throw new Error(`missing release executable: ${source}`);
+fs.mkdirSync(dir, { recursive: true });
+const target = path.join(dir, 'CostHub.exe');
+fs.copyFileSync(source, target);
+const hash = crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex');
+const manifest = { product: 'CostHub', version: '2.3.19', executable: 'CostHub.exe', sha256: hash, formalDatabaseIncluded: false, embeddedSkills: true, requires: ['Windows WebView2', 'Ollama only for local model tasks'], generatedAt: new Date().toISOString() };
+fs.writeFileSync(path.join(dir, 'portable-manifest.json'), JSON.stringify(manifest, null, 2));
+console.log(JSON.stringify({ dir, target, sha256: hash }, null, 2));

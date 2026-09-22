@@ -1,6 +1,6 @@
 // Agent 循环（P1，2026-08-16）：计划-执行-总结
 // 流程：本地模型读工具清单 → 输出 JSON 计划（工具调用序列）→ 系统逐步执行（轨迹回调）→ 结果汇总交模型生成最终回答
-// 安全：工具全部只读（见 aiTools.ts）；计划解析失败自动降级为普通对话提示；调用方负责 logLocalAICall 留痕
+// 安全：工具风险由 aiTools Manifest 声明；写工具由共同执行入口拦截确认；计划解析失败自动降级为普通对话提示
 
 import { listTools, executeTool, type AiTool } from './aiTools';
 
@@ -76,7 +76,9 @@ export function parseAgentPlan(text: string): AgentPlan | null {
 export function buildToolsPrompt(tools: AiTool[]): string {
   const t = tools.map(tool => {
     const params = tool.params.length === 0 ? '无' : tool.params.map(p => p.key + (p.required ? '*' : '') + '（' + p.desc + '）').join('，');
-    return '- ' + tool.id + '：' + tool.desc + '｜参数：' + params;
+    const manifest = tool.manifest;
+    const risk = manifest ? '｜类型：' + manifest.kind + '｜风险：' + manifest.risk + (manifest.requiresConfirmation ? '｜需用户确认' : '') : '｜风险：未声明（不可执行）';
+    return '- ' + tool.id + '：' + tool.desc + '｜参数：' + params + risk;
   }).join('\n');
   return '可用工具清单：\n' + t;
 }

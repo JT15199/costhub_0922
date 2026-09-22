@@ -1,0 +1,5 @@
+地图数据来源：Supeset/China-GeoData
+文件：geojson/china_province_full.geojson
+内容：35 个省级区域，含西藏自治区、台湾省、香港特别行政区、澳门特别行政区
+许可证：MIT License
+来源：https://github.com/Supeset/China-GeoData

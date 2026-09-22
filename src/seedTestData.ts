@@ -1,4 +1,4 @@
-import Database from '@tauri-apps/plugin-sql';
+import Database from './db/sql';
 import { invoke } from '@tauri-apps/api/core';
 
 // 显示器真实成本估算数据（基于市场调研）

@@ -1,0 +1,67 @@
+
+ RUN  v4.1.10 D:/AI coding folder/costhub
+
+stdout | docs/check-llama-reacceptance.test.ts > second acceptance: actual adapter and oversized rows > reports an invalid calculator expression as a failed tool
+invalid calculation: { ok: true, text: '表达式无法解析：数字格式不合法' }
+
+stdout | docs/check-llama-reacceptance.test.ts > second acceptance: actual adapter and oversized rows > writes a nonempty XLSX through the production adapter and completes the sample
+sample actual adapter: {
+  binaryWriteBytes: [ 0 ],
+  result: undefined,
+  error: 'Error: worksheet not found: 报价样例'
+}
+
+stdout | docs/check-llama-reacceptance.test.ts > second acceptance: actual adapter and oversized rows > bounds the visible preview when one spreadsheet row is very long
+single-row preview: { characters: 60505, tokens: 90191, inputHard: 21954 }
+
+ ❯ docs/check-llama-reacceptance.test.ts (3 tests | 3 failed) 83ms
+     × reports an invalid calculator expression as a failed tool 6ms
+     × writes a nonempty XLSX through the production adapter and completes the sample 18ms
+     × bounds the visible preview when one spreadsheet row is very long 58ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  docs/check-llama-reacceptance.test.ts > second acceptance: actual adapter and oversized rows > reports an invalid calculator expression as a failed tool
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ docs/check-llama-reacceptance.test.ts:24:23
+     22|     const result = await executeTool('calc', { expression: '1+(' });
+     23|     console.log('invalid calculation:', result);
+     24|     expect(result.ok).toBe(false);
+       |                       ^
+     25|   });
+     26|   it('writes a nonempty XLSX through the production adapter and comple…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  docs/check-llama-reacceptance.test.ts > second acceptance: actual adapter and oversized rows > writes a nonempty XLSX through the production adapter and completes the sample
+AssertionError: expected 0 to be greater than 0
+ ❯ docs/check-llama-reacceptance.test.ts:31:31
+     29|     try { result = await runLocalProductionSampleAcceptance(execution(…
+     30|     console.log('sample actual adapter:', { binaryWriteBytes: storage.…
+     31|     expect(storage.writes[0]).toBeGreaterThan(0);
+       |                               ^
+     32|     expect(error).toBeUndefined();
+     33|     expect(result.ok).toBe(true);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  docs/check-llama-reacceptance.test.ts > second acceptance: actual adapter and oversized rows > bounds the visible preview when one spreadsheet row is very long
+AssertionError: expected 90191 to be less than or equal to 21954
+ ❯ docs/check-llama-reacceptance.test.ts:43:34
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  3 failed | 4 passed (7)
+   Start at  22:15:34
+   Duration  2.72s (transform 651ms, setup 0ms, import 4.45s, tests 444ms, environment 0ms)
+

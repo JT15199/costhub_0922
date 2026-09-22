@@ -34,6 +34,7 @@ src-tauri/icons/
 monitor_cost.db
 # CostHub runtime artifacts
 src-tauri/target/release/costhub.db*
+artifacts/agent-upgrade/
 *.db.pre_*
 *.db.bak
 *.db-journal
@@ -47,3 +48,19 @@ demo-echarts.min.js
 user_voice_sample.xlsx
 # Edge 浏览器调试缓存（design-mockup）
 design-mockup/.edge-prof/
+# Locally installed llama.cpp runtime (not source-controlled)
+tools/llama.cpp/
+tools/llama-*.zip
+
+# ===== 上传 GitHub 前追加（2026-09-21）：只排除「构建/测试产物」与「本机私有数据」，源码/文档/配置一律照传 =====
+# 构建产物与便携打包目录（数 GB 的 exe 与运行时文件）
+.build-portable/
+release/
+# 验收/测试产物目录（含被测 exe 副本、WebView 用户目录、数据库副本）
+artifacts/
+# Python 缓存
+__pycache__/
+*.pyc
+# 本机数据库备份与历史（含真实项目/BOM/供应商/成本，属于私有业务数据，绝不外传）
+data/backups/
+data/database-history/

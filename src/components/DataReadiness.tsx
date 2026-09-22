@@ -2,11 +2,7 @@
 // 扫描本地数据（模型/项目BOM/器件报价/原声/目标/竞品/规格），逐项 有/缺/半 + 现状 + 影响 + 建议
 // 设计：v2 视觉（骨色底+墨色+信号色，无 AI 味）；「让 AI 引导我」→ 预填提问给右侧 AI 协作窗
 import { useEffect, useState } from 'react';
-import { Button } from 'antd';
-import { RobotOutlined } from '@ant-design/icons';
 import { getDataReadiness, type ReadinessItem } from '../dataReadiness';
-
-const ASK_PROMPT = '先看看我的数据就绪度：我缺哪些数据？没有这些数据，我现在能做到什么、做不到什么？分别建议怎么补。';
 
 const LEVEL_META: Record<string, { label: string; dot: string; color: string; bg: string }> = {
   ok: { label: '有', dot: '#1F7A4C', color: '#1F7A4C', bg: 'rgba(31,122,76,0.07)' },
@@ -14,7 +10,7 @@ const LEVEL_META: Record<string, { label: string; dot: string; color: string; bg
   missing: { label: '缺', dot: '#C0392B', color: '#C0392B', bg: 'rgba(192,57,43,0.07)' },
 };
 
-export default function DataReadiness({ onAskAi }: { onAskAi?: () => void }) {
+export default function DataReadiness() {
   const [items, setItems] = useState<ReadinessItem[] | null>(null);
 
   useEffect(() => {
@@ -22,12 +18,6 @@ export default function DataReadiness({ onAskAi }: { onAskAi?: () => void }) {
     getDataReadiness().then(l => { if (alive) setItems(l); }).catch(() => { if (alive) setItems([]); });
     return () => { alive = false; };
   }, []);
-
-  const askAi = () => {
-    try { localStorage.setItem('costhub-ai-prompt-pending', JSON.stringify({ prompt: ASK_PROMPT, auto: true })); } catch { }
-    if (onAskAi) onAskAi();
-    else window.dispatchEvent(new CustomEvent('costhub-open-ai-prompt'));
-  };
 
   const okN = items?.filter(i => i.level === 'ok').length ?? 0;
   const missingN = items?.filter(i => i.level === 'missing').length ?? 0;
@@ -38,9 +28,6 @@ export default function DataReadiness({ onAskAi }: { onAskAi?: () => void }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <span style={{ fontSize: 13, fontWeight: 700, color: '#181713' }}>数据就绪度</span>
         <span style={{ fontSize: 11, color: '#9A978B' }}>缺什么 · 能做到什么样 · 建议怎么补</span>
-        <Button size="small" type="primary" icon={<RobotOutlined />} style={{ marginLeft: 'auto', borderRadius: 6, fontSize: 11.5, height: 26 }} onClick={askAi}>
-          让 AI 引导我
-        </Button>
       </div>
 
       {items === null ? (

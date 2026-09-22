@@ -79,7 +79,7 @@ export async function savePart(data: any, autoSnapshot = true, syncReferences = 
     // 需要跨页面保持一致时（项目 BOM 双击编辑/器件库行内编辑），同步所有引用的快照。
     // 默认关闭，避免历史报价导入流程意外改写既有项目快照。
     if (syncReferences) {
-      await d.execute(`UPDATE project_boms SET part_name=?, part_model=?, part_cost=?, main_category=?, sub_category=?
+      await d.execute(`UPDATE project_boms SET part_name=?, part_model=?, part_cost=?, price_state='confirmed', main_category=?, sub_category=?
         WHERE part_id=? AND COALESCE(is_deleted,0)=0`,
         [nextPart.name, nextPart.model, nextPart.cost, nextPart.main_category, nextPart.sub_category, data.id]);
       await d.execute(`UPDATE module_items SET part_name=?, part_model=?, cost=?, main_category=?, sub_category=? WHERE part_id=?`,
@@ -114,6 +114,40 @@ export async function deletePart(id: number) {
 
 export async function getPriceHistory(partId: number) { return (await getDb()).select<any[]>('SELECT * FROM part_price_history WHERE part_id = ? ORDER BY changed_at DESC', [partId]); }
 
+export async function getPartPriceEvidence(partIds: number[] = []) {
+  const ids = [...new Set(partIds.map(Number).filter(Boolean))];
+  if (!ids.length) return {};
+  const d = await getDb();
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = await d.select<any[]>(`SELECT part_id, price, changed_at, source FROM (
+    SELECT part_id, price, updated_at AS changed_at, '器件供应商' AS source FROM part_suppliers WHERE part_id IN (${placeholders}) AND COALESCE(is_active,1)=1 AND price>0
+    UNION ALL SELECT pb.part_id, CASE WHEN pb.part_cost>0 THEN pb.part_cost ELSE p.cost END AS price, pb.created_at AS changed_at, '项目BOM' AS source FROM project_boms pb LEFT JOIN parts p ON p.id=pb.part_id WHERE pb.part_id IN (${placeholders}) AND COALESCE(pb.is_deleted,0)=0 AND (pb.part_cost>0 OR COALESCE(p.cost,0)>0)
+    UNION ALL SELECT part_id, new_price AS price, changed_at, '供应商历史' AS source FROM part_supplier_price_history WHERE part_id IN (${placeholders}) AND new_price>0
+  ) ORDER BY changed_at DESC, price DESC`, [...ids, ...ids, ...ids]);
+  const result: Record<number, any> = {};
+  rows.forEach(row => {
+    const id = Number(row.part_id); const price = Number(row.price) || 0;
+    const item = result[id] || { low: price, high: price, latest: price, latestAt: row.changed_at || '', sources: new Set<string>() };
+    item.low = Math.min(item.low, price); item.high = Math.max(item.high, price); item.sources.add(row.source || '未知来源');
+    result[id] = item;
+  });
+  try {
+    const baselineRows = await d.select<any[]>(`SELECT scope_key, value, status, confirmed_at FROM cost_baseline_decisions WHERE baseline_type='material' AND status='confirmed' AND scope_key IN (${ids.map(() => '?').join(',')})`, ids.map(id => `part:${id}`));
+    baselineRows.forEach(row => { const id = Number(String(row.scope_key).replace('part:', '')); const item = result[id] || { low: 0, high: 0, latest: 0, latestAt: '', sourceCount: 0 }; item.baseline = Number(row.value); result[id] = item; });
+  } catch { }
+  Object.values(result).forEach(item => { item.sourceCount = item.sources.size; delete item.sources; });
+  return result;
+}
+
+export async function confirmPartPriceBaseline(partId: number, value: number, rationale = '用户确认物料价格基线') {
+  const d = await getDb();
+  const scopeKey = `part:${Number(partId)}`;
+  const existing = (await d.select<any[]>('SELECT id FROM cost_baseline_decisions WHERE baseline_type=\'material\' AND scope_key=? AND status IN (\'candidate\',\'confirmed\') ORDER BY id DESC LIMIT 1', [scopeKey]))[0];
+  if (existing) await d.execute("UPDATE cost_baseline_decisions SET value=?, status='confirmed', rationale=?, confirmed_at=datetime('now','localtime') WHERE id=?", [Number(value) || 0, rationale, existing.id]);
+  else await d.execute("INSERT INTO cost_baseline_decisions (project_id, baseline_type, category, scope_key, source_type, value, status, rationale, confirmed_at) VALUES (0,'material',?,?,? ,?,'confirmed',?,datetime('now','localtime'))", ['物料', scopeKey, 'price_evidence', Number(value) || 0, rationale]);
+  return existing?.id || 0;
+}
+
 
 export async function getCategories() { return (await (await getDb()).select<{ category: string }[]>('SELECT DISTINCT category FROM parts ORDER BY category')).map(x => x.category); }
 
@@ -147,6 +181,8 @@ export async function getPartSuppliers(partId: number) {
 
 
 export async function addPartSupplier(data: any) {
+  data = { ...data, supplier_name: String(data.supplier_name || '').trim() };
+  if (!data.supplier_name) throw new Error('供应商名称不能为空');
   const d = await getDb();
   const r = await d.execute(
     'INSERT INTO part_suppliers (part_id, supplier_name, price, share_ratio, is_active, remark) VALUES (?,?,?,?,?,?)',
@@ -162,6 +198,8 @@ export async function addPartSupplier(data: any) {
 
 
 export async function updatePartSupplier(data: any) {
+  data = { ...data, supplier_name: String(data.supplier_name || '').trim() };
+  if (!data.supplier_name) throw new Error('供应商名称不能为空');
   const d = await getDb();
   const old = await d.select<any[]>('SELECT * FROM part_suppliers WHERE id = ?', [data.id]);
   const price = data.price || 0;

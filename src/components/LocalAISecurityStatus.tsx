@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, message, Tag } from 'antd';
-import { LockOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Alert, Button, message, Tag, Tooltip } from 'antd';
+import { LockOutlined, QuestionCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { invoke } from '@tauri-apps/api/core';
+import { getLocalBackend, type LocalBackend } from '../localBackend';
 
 interface IsolationStatus {
   ollama_found: boolean;
@@ -14,9 +15,11 @@ export default function LocalAISecurityStatus() {
   const [status, setStatus] = useState<IsolationStatus | null>(null);
   const [events, setEvents] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [backend, setBackend] = useState<LocalBackend>('ollama');
 
   const refresh = async () => {
     try {
+      const currentBackend = await getLocalBackend(); setBackend(currentBackend);
       const [nextStatus, nextEvents] = await Promise.all([
         invoke<IsolationStatus>('ollama_net_status'),
         invoke<string[]>('list_security_events'),
@@ -34,30 +37,29 @@ export default function LocalAISecurityStatus() {
     try {
       await invoke('ollama_net_enable_block');
       await refresh();
-      message.success('Ollama 外网已锁定；本地 AI 现在可以安全读取成本数据');
+      message.success('Ollama 进程外网已锁定；本机命令执行的权限独立管理');
     } catch (e: any) { message.error(String(e?.message || e)); }
     finally { setLoading(false); }
   };
 
-  const isolated = !!status?.blocked;
+  const loopbackVerified = true;
+  const processIsolationVerified = backend === 'ollama' && !!status?.blocked;
+  const fullyVerified = loopbackVerified && processIsolationVerified;
+  const detail = (
+    <div style={{ lineHeight: 1.7 }}>
+      <div>应用 HTTP 通道由 Rust 强制只允许本机回环；这只证明 CostHub 的访问边界。模型进程是否禁止外联是另一项系统级检查，llama.cpp 需要由 IT 按实际 server 路径和进程策略验证。</div>
+      <div>安全拦截记录：<b>{events.length}</b> 条{events[0] ? `（最近：${events[0]}）` : ''}</div>
+      {backend === 'llama.cpp' ? <div>当前为 llama.cpp：仅本机访问已通过；模型进程外联隔离：未由应用验证，不能据此宣称公司数据安全。</div> : !status?.ollama_found ? <div>未检测到 Ollama，请安装后刷新。</div> : processIsolationVerified
+        ? <div>已验证规则 <code>CostHub_Block_Ollama_Outbound</code>，模型路径：{status.ollama_path}</div>
+        : <div style={{ color: '#B91C1C' }}>外联隔离未通过前，Rust 拒绝向 Ollama 发送成本提示词。</div>}
+    </div>
+  );
   return (
     <Alert
-      type={isolated ? 'success' : 'error'}
+      type={fullyVerified ? 'success' : 'warning'}
       showIcon
-      message={<span>本地 AI 双重隔离 {isolated ? <Tag color="green">已通过</Tag> : <Tag color="red">未通过</Tag>}</span>}
-      description={(
-        <div style={{ lineHeight: 1.7 }}>
-          <div>第一层：普通 HTTP 只允许本机回环；云端只能走“域名白名单 + 敏感字段审查 + 条件审批”专用网关。第二层：Ollama 进程必须由 Windows 防火墙禁止出站。</div>
-          <div>安全拦截记录：<b>{events.length}</b> 条{events[0] ? `（最近：${events[0]}）` : ''}</div>
-          {!status?.ollama_found ? <div>未检测到 Ollama，请安装后刷新。</div> : isolated
-            ? <div>已验证规则 <code>CostHub_Block_Ollama_Outbound</code>，模型路径：{status.ollama_path}</div>
-            : <div style={{ color: '#B91C1C' }}>在隔离通过前，系统只允许检测模型，拒绝向 Ollama 发送任何成本提示词。</div>}
-          <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
-            {!isolated && status?.ollama_found && <Button danger type="primary" icon={<LockOutlined />} loading={loading} onClick={enable}>一键锁定 Ollama 外网</Button>}
-            <Button icon={<ReloadOutlined />} onClick={refresh}>刷新验证</Button>
-          </div>
-        </div>
-      )}
+      message={<span>模型网络边界 <Tag color="green">仅本机访问：已通过</Tag> <Tag color={processIsolationVerified ? 'green' : 'gold'}>模型进程外联隔离：{backend === 'llama.cpp' ? '待 IT 验证' : processIsolationVerified ? '已通过' : '未通过'}</Tag> <Tooltip title={detail} overlayStyle={{ maxWidth: 520 }}><QuestionCircleOutlined className="settings-info-tip" tabIndex={0} aria-label="查看隔离说明" /></Tooltip></span>}
+      action={<span style={{ display: 'inline-flex', gap: 8 }}>{backend === 'ollama' && !processIsolationVerified && status?.ollama_found && <Button danger type="primary" icon={<LockOutlined />} loading={loading} onClick={enable}>一键锁定 Ollama 外网</Button>}<Button icon={<ReloadOutlined />} onClick={refresh}>刷新验证</Button></span>}
       style={{ marginBottom: 16 }}
     />
   );

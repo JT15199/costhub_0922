@@ -1,5 +1,5 @@
 // AI 报告/Excel 生成（v2.3.19，2026-08-18 用户：AI 能生成 PPT 报告/HTML 报告/处理 Excel）
-// 纯函数：HTML 报告 / PPTX 演示 / Excel 工作簿 → base64（前端 invoke save_export_file 存到 exe 同目录 exports/）
+// 纯函数：HTML 报告 / PPTX 演示 / Excel 工作簿 → base64（前端交给 Rust 写入 AI 工作文件夹）
 import * as XLSX from 'xlsx';
 import pptxgen from 'pptxgenjs';
 

@@ -1,5 +1,5 @@
 // AI 技能库（v2.3.19，2026-08-19 借鉴 DSH Skills：分析套路固化为可复用模板，按任务注入精炼步骤）
-// 设计：send 时按用户提问检测匹配技能 → 追加「当前任务技能」说明（比固定全量提示更聚焦，27B 模型按模板执行）
+// 设计：send 时按用户提问检测匹配技能 → 追加「当前任务技能」说明（比固定全量提示更聚焦，适配不同本地模型）
 export interface AiSkill { id: string; name: string; triggers: string[]; guide: string; }
 
 export const AI_SKILLS: AiSkill[] = [
@@ -25,7 +25,7 @@ export const AI_SKILLS: AiSkill[] = [
   },
   {
     id: 'report', name: '报告生成', triggers: ['报告', '演示', 'ppt', 'pptx', '导出.*excel'],
-    guide: '分析完成后组织 3-6 节（heading+points）→ generate_report（HTML/PPTX）；表格数据 → write_excel。报告保存在导出目录 exports/。',
+    guide: '分析完成后组织 3-6 节（heading+points）→ generate_report（HTML/PPTX）；表格数据 → write_excel。报告保存在 AI 工作文件夹。',
   },
   {
     id: 'data-viz', name: '数据分析与图表', triggers: ['图表', '图标', '画图', '可视化', '柱状图', '饼图', '帕累托', '趋势图', '成本结构图'],

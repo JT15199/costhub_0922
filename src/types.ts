@@ -4,15 +4,15 @@ export interface Part {
   remark: string; created_at?: string; updated_at?: string;
 }
 export interface Project {
-  id?: number; code: string; name: string; project_type: string;
+  id?: number; code: string; name: string; project_type: string; stage?: string;
   tier: string; status: string; screen_size: string; resolution: string;
   refresh_rate: string; panel_type: string; platform_fee_rate: number;
-  profit_rate: number; image?: string; created_at?: string;
+  profit_rate: number; target_price?: number; financial_target_cost?: number; charter_assumptions?: string; reference_project_id?: number; image?: string; created_at?: string;
 }
 export interface ProjectBOM {
   id?: number; project_id: number; part_id: number; module_name: string;
   quantity: number; remark: string; part_name?: string; part_model?: string;
-  part_cost?: number; main_category?: string; sub_category?: string; category?: string;
+  part_cost?: number; price_state?: 'confirmed' | 'unknown' | 'invalid' | string; main_category?: string; sub_category?: string; category?: string;
 }
 export interface Module { id?: number; project_id: number; name: string; module_category?: string; description: string; created_at?: string; }
 export interface ModuleItem {
@@ -40,18 +40,23 @@ export interface CostReview {
   id?: number; project_id: number; stage: string; reviewed_cost: number;
   reviewer: string; reviewed_at?: string; remark: string;
 }
-export interface ProjectCostSnapshot {
-  id?: number; project_id: number; snapshot_type: string; change_reason: string;
-  bom_cost: number; total_cost: number; platform_fee_rate: number; profit_rate: number;
-  module_count: number; item_count: number; created_at?: string;
-}
+  export interface ProjectCostSnapshot {
+    id?: number; project_id: number; snapshot_type: string; change_reason: string;
+    bom_cost: number | null; total_cost: number | null; platform_fee_rate: number; profit_rate: number;
+    module_count: number; item_count: number; stage?: string; created_at?: string;
+  }
 export interface Measure {
   id?: number; project_id: number; main_category: string; measure: string;
-  status: string; due_date: string; owner: string; remark: string;
+  status: string; due_date: string; owner: string; remark: string; forecast_saving?: number; realized_saving?: number; realized_evidence?: string;
+}
+export interface ProductionCostSaving {
+  id?: number; project_id: number; project_code?: string; project_name?: string; saving_year: number;
+  project_bom_id?: number; part_id?: number; part_name?: string; part_model?: string; module_name?: string;
+  unit_saving: number; annual_shipments: number; annual_benefit?: number; note?: string;
 }
 export interface DashboardStats {
   total_parts: number; total_projects: number; active_projects: number;
-  total_competitors: number; avg_bom_cost: number;
+  total_competitors: number; avg_bom_cost: number | null; incomplete_projects?: number;
   category_distribution: { category: string; count: number }[];
   recent_parts: Part[];
 }
@@ -73,6 +78,10 @@ export interface ProjectSupplier {
   is_active?: number;
   project_id?: number;
   quoted_price?: number;
+}
+export interface SupplierSite {
+  id?: number; supplier_name: string; site_name: string; address?: string; province?: string; city?: string;
+  longitude?: number; latitude?: number; contact?: string; phone?: string; is_primary?: number; remark?: string;
 }
 
 // API Provider

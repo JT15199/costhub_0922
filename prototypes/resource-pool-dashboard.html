@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CostHub · 资源池看板概念稿</title>
+  <style>
+    :root {
+      --ink: #17243b;
+      --muted: #74829b;
+      --line: #dbe4ef;
+      --panel: rgba(255, 255, 255, .82);
+      --blue: #2864e8;
+      --blue-2: #65a5ff;
+      --cyan: #16b7b0;
+      --orange: #f1a33b;
+      --red: #e36d63;
+      --shadow: 0 22px 60px rgba(38, 74, 123, .12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Aptos", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at 9% 0%, rgba(113, 190, 255, .36), transparent 30%),
+        radial-gradient(circle at 95% 22%, rgba(151, 227, 220, .34), transparent 32%),
+        linear-gradient(135deg, #edf5fb 0%, #e8f0f8 48%, #f4f8fb 100%);
+      min-height: 100vh;
+    }
+    button { font: inherit; }
+    .shell { max-width: 1480px; margin: 0 auto; padding: 34px 38px 52px; }
+    .topbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; margin-bottom: 26px; }
+    .eyebrow { color: var(--blue); font-size: 12px; font-weight: 800; letter-spacing: .16em; }
+    h1 { margin: 6px 0 4px; font-size: clamp(30px, 4vw, 50px); letter-spacing: -.05em; line-height: 1; }
+    .subtitle { color: var(--muted); font-size: 15px; }
+    .scope { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+    .scope select { border: 1px solid var(--line); background: rgba(255,255,255,.78); border-radius: 12px; padding: 9px 14px; color: var(--ink); }
+    .panel { background: var(--panel); border: 1px solid rgba(255,255,255,.9); border-radius: 22px; box-shadow: var(--shadow); backdrop-filter: blur(18px); }
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+    .kpi { min-height: 112px; padding: 20px 22px; position: relative; overflow: hidden; }
+    .kpi::after { content: ""; position: absolute; width: 110px; height: 110px; right: -45px; top: -48px; border-radius: 50%; background: var(--tint); }
+    .kpi-label { color: var(--muted); font-size: 13px; position: relative; z-index: 1; }
+    .kpi-value { margin-top: 9px; font-size: 31px; font-weight: 800; letter-spacing: -.05em; position: relative; z-index: 1; }
+    .kpi-note { color: var(--muted); font-size: 12px; margin-top: 3px; position: relative; z-index: 1; }
+    .main-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(350px, .75fr); gap: 16px; align-items: stretch; }
+    .map-panel { min-height: 550px; padding: 22px 24px 18px; position: relative; overflow: hidden; }
+    .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+    .panel-title { font-size: 18px; font-weight: 800; letter-spacing: -.03em; }
+    .panel-copy { color: var(--muted); font-size: 12px; margin-top: 5px; }
+    .legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 11px; justify-content: flex-end; }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .map-wrap { height: 456px; position: relative; margin-top: 6px; }
+    .map-wrap::before { content: ""; position: absolute; inset: 22px 4% 18px; border-radius: 50%; background: radial-gradient(ellipse at center, rgba(98, 184, 242, .18), transparent 68%); }
+    svg { width: 100%; height: 100%; display: block; position: relative; z-index: 1; }
+    .province-shape { fill: #d8dde3; stroke: #aeb7c1; stroke-width: .75; vector-effect: non-scaling-stroke; cursor: pointer; transition: fill .18s ease-out, stroke .18s ease-out; }
+    .province-shape:hover, .province-shape:focus { fill: #cbd2da; stroke: #7d8b99; outline: none; }
+    .province-shape.selected { fill: #b9c4ce; stroke: #2864e8; stroke-width: 1.4; }
+    .province-label { fill: #7b8792; font-size: 10px; pointer-events: none; paint-order: stroke; stroke: rgba(255,255,255,.75); stroke-width: 3px; }
+    .marker { cursor: pointer; outline: none; }
+    .marker .halo { fill: rgba(40,100,232,.16); transform-box: fill-box; transform-origin: center; transition: transform .18s ease-out, fill .18s ease-out; }
+    .marker .core { fill: var(--blue); stroke: white; stroke-width: 3; transition: transform .18s ease-out; }
+    .marker text { fill: var(--ink); font-size: 12px; font-weight: 700; paint-order: stroke; stroke: rgba(241,248,252,.9); stroke-width: 4px; stroke-linejoin: round; }
+    .marker small { fill: var(--muted); font-size: 10px; font-weight: 500; }
+    .marker:hover .halo, .marker:focus .halo, .marker.selected .halo { transform: scale(1.35); fill: rgba(40,100,232,.25); }
+    .marker:hover .core, .marker:focus .core, .marker.selected .core { transform: scale(1.2); fill: var(--cyan); }
+    .map-caption { position: absolute; left: 28px; bottom: 12px; color: var(--muted); font-size: 11px; z-index: 2; }
+    .map-controls { position: absolute; right: 18px; bottom: 24px; display: flex; flex-direction: column; gap: 5px; z-index: 3; }
+    .map-control { width: 32px; height: 32px; border: 1px solid var(--line); background: rgba(255,255,255,.9); color: var(--ink); border-radius: 8px; font-size: 18px; line-height: 1; cursor: pointer; box-shadow: 0 4px 12px rgba(38,74,123,.08); }
+    .map-control:hover, .map-control:focus-visible { border-color: var(--blue); outline: 3px solid rgba(40,100,232,.16); }
+    .map-status { position: absolute; left: 28px; top: 20px; color: var(--muted); font-size: 11px; z-index: 2; }
+    .detail-panel { padding: 22px; display: flex; flex-direction: column; min-height: 550px; }
+    .supplier-head { display: flex; align-items: center; gap: 12px; margin: 26px 0 18px; }
+    .avatar { width: 48px; height: 48px; border-radius: 15px; display: grid; place-items: center; color: white; font-weight: 800; font-size: 18px; background: linear-gradient(135deg, #2864e8, #16b7b0); box-shadow: 0 10px 20px rgba(40,100,232,.22); }
+    .supplier-name { font-size: 20px; font-weight: 800; }
+    .supplier-meta { margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .pill { border-radius: 99px; padding: 5px 9px; font-size: 11px; font-weight: 700; }
+    .pill.good { color: #0b8e83; background: #dcf7f1; }
+    .pill.warn { color: #b8751d; background: #fff0d5; }
+    .detail-stat { display: grid; grid-template-columns: 1fr 1fr; padding: 14px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); gap: 14px; }
+    .detail-stat strong { display: block; font-size: 24px; margin-bottom: 2px; }
+    .detail-stat span { color: var(--muted); font-size: 12px; }
+    .section-label { margin: 22px 0 12px; font-size: 12px; color: var(--muted); font-weight: 800; letter-spacing: .08em; }
+    .product-list { display: flex; flex-direction: column; gap: 13px; }
+    .product-row { display: grid; grid-template-columns: 1fr 92px; gap: 12px; align-items: center; }
+    .product-name { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 650; }
+    .product-name span:last-child { color: var(--ink); font-variant-numeric: tabular-nums; }
+    .bar { height: 7px; background: #e9eff5; border-radius: 99px; margin-top: 7px; overflow: hidden; }
+    .bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--blue), var(--cyan)); }
+    .product-price { color: var(--muted); font-size: 12px; text-align: right; }
+    .detail-actions { margin-top: auto; display: flex; gap: 9px; padding-top: 18px; }
+    .btn { border: 1px solid var(--line); background: white; color: var(--ink); border-radius: 11px; padding: 10px 13px; cursor: pointer; font-size: 12px; font-weight: 700; }
+    .btn.primary { color: white; background: var(--blue); border-color: var(--blue); box-shadow: 0 8px 18px rgba(40,100,232,.18); }
+    .btn:hover, .btn:focus-visible { border-color: var(--blue); outline: 3px solid rgba(40,100,232,.16); }
+    .bottom-grid { display: grid; grid-template-columns: 1.12fr .88fr; gap: 16px; margin-top: 16px; }
+    .matrix-panel, .region-panel { padding: 22px 24px; }
+    .matrix { margin-top: 16px; display: grid; grid-template-columns: minmax(180px, 1.3fr) repeat(4, minmax(72px, 1fr)); border-top: 1px solid var(--line); border-left: 1px solid var(--line); overflow: hidden; border-radius: 10px; }
+    .matrix > div { min-height: 46px; padding: 12px 10px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 12px; display: flex; align-items: center; }
+    .matrix .head { color: var(--muted); font-weight: 700; background: rgba(241,246,250,.85); justify-content: center; }
+    .matrix .name { font-weight: 700; }
+    .cell { justify-content: center; font-variant-numeric: tabular-nums; font-weight: 700; }
+    .cell.high { background: #d8f4ee; color: #087d74; }
+    .cell.mid { background: #e8f0ff; color: #2d63c9; }
+    .cell.low { background: #f1f4f7; color: #a0adbb; }
+    .region-row { display: grid; grid-template-columns: 64px 1fr 46px; gap: 10px; align-items: center; margin-top: 19px; font-size: 12px; }
+    .region-bar { height: 10px; border-radius: 99px; background: #edf2f6; overflow: hidden; }
+    .region-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #65a5ff, #2864e8); }
+    .region-value { text-align: right; font-weight: 800; }
+    .footnote { color: var(--muted); font-size: 11px; line-height: 1.7; margin-top: 19px; }
+    @media (max-width: 980px) { .shell { padding: 24px 18px 38px; } .main-grid, .bottom-grid { grid-template-columns: 1fr; } .detail-panel { min-height: auto; } .kpis { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 560px) { .topbar { display: block; } .scope { margin-top: 16px; } .kpis { grid-template-columns: 1fr 1fr; gap: 8px; } .kpi { padding: 15px; min-height: 98px; } .kpi-value { font-size: 24px; } .map-panel { padding: 17px 14px; } .detail-panel, .matrix-panel, .region-panel { padding: 18px 16px; } .legend { justify-content: flex-start; margin-top: 13px; } .map-wrap { height: 360px; } .matrix { grid-template-columns: 130px repeat(4, minmax(58px, 1fr)); } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .001ms !important; animation-duration: .001ms !important; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">COSTHUB · RESOURCE POOL</div>
+        <h1>资源池看板</h1>
+        <div class="subtitle">供应商在哪里、做什么产品、承担多少份额，一屏看清。</div>
+      </div>
+      <div class="scope"><span>当前范围</span><select aria-label="当前资源池范围"><option>全部资源池</option><option>显示器项目组</option><option>手写笔项目组</option></select></div>
+    </header>
+
+    <section class="kpis" aria-label="资源池概览">
+      <div class="panel kpi" style="--tint: rgba(40,100,232,.13)"><div class="kpi-label">供应商总数</div><div class="kpi-value">12 <small>家</small></div><div class="kpi-note">华东 5 · 华南 4 · 华北 2 · 西南 1</div></div>
+      <div class="panel kpi" style="--tint: rgba(22,183,176,.14)"><div class="kpi-label">产品覆盖</div><div class="kpi-value">38 <small>项</small></div><div class="kpi-note">已建立 57 条供应关系</div></div>
+      <div class="panel kpi" style="--tint: rgba(241,163,59,.16)"><div class="kpi-label">单一来源产品</div><div class="kpi-value">9 <small>项</small></div><div class="kpi-note">占产品池 23.7% · 建议补充备选</div></div>
+      <div class="panel kpi" style="--tint: rgba(227,109,99,.14)"><div class="kpi-label">份额集中度</div><div class="kpi-value">61.4<small>%</small></div><div class="kpi-note">Top 3 供应商承担的产品份额</div></div>
+    </section>
+
+    <section class="main-grid">
+      <article class="panel map-panel">
+        <div class="panel-head">
+          <div><div class="panel-title">供应商地域分布</div><div class="panel-copy">点击地图圆点，查看供应商覆盖的产品和份额</div></div>
+          <div class="legend"><span><i class="dot" style="background:#2864e8"></i>供应商</span><span><i class="dot" style="background:#16b7b0"></i>当前选中</span><span>圆点大小 = 产品数</span></div>
+        </div>
+        <div class="map-wrap">
+          <svg id="map-svg" viewBox="0 0 700 430" role="img" aria-label="中国省级供应商分布图">
+            <g id="map-layer">
+              <g id="province-layer"></g>
+              <g id="province-label-layer"></g>
+              <g id="marker-layer">
+                <g class="marker selected" tabindex="0" data-supplier="华东精工" data-lon="121.4737" data-lat="31.2304"><circle class="halo" r="18"/><circle class="core" r="7"/><text x="13" y="-5">上海</text><text x="13" y="10" class="small">华东精工</text></g>
+                <g class="marker" tabindex="0" data-supplier="苏州智造" data-lon="120.5853" data-lat="31.2990"><circle class="halo" r="14"/><circle class="core" r="5.5"/><text x="12" y="-4">苏州</text></g>
+                <g class="marker" tabindex="0" data-supplier="深圳电源" data-lon="114.0579" data-lat="22.5431"><circle class="halo" r="19"/><circle class="core" r="8"/><text x="13" y="-5">深圳</text><text x="13" y="10" class="small">深圳电源</text></g>
+                <g class="marker" tabindex="0" data-supplier="京东方配套" data-lon="116.4074" data-lat="39.9042"><circle class="halo" r="13"/><circle class="core" r="5"/><text x="12" y="-4">北京</text></g>
+                <g class="marker" tabindex="0" data-supplier="武汉结构" data-lon="114.3055" data-lat="30.5928"><circle class="halo" r="12"/><circle class="core" r="4.5"/><text x="12" y="-4">武汉</text></g>
+                <g class="marker" tabindex="0" data-supplier="成都电子" data-lon="104.0665" data-lat="30.5728"><circle class="halo" r="14"/><circle class="core" r="5.5"/><text x="12" y="-4">成都</text></g>
+                <g class="marker" tabindex="0" data-supplier="宁波精密" data-lon="121.5440" data-lat="29.8683"><circle class="halo" r="11"/><circle class="core" r="4"/><text x="12" y="-4">宁波</text></g>
+              </g>
+            </g>
+            <text x="72" y="402" fill="#7b8792" font-size="11">地域用于定位供应商，精确份额以右侧画像及下方矩阵为准</text>
+          </svg>
+          <div class="map-controls" aria-label="地图缩放控制"><button class="map-control" id="zoom-in" aria-label="放大地图">+</button><button class="map-control" id="zoom-out" aria-label="缩小地图">−</button><button class="map-control" id="zoom-reset" aria-label="重置地图视图">↺</button></div>
+          <div class="map-status" id="map-status">地图加载中…</div>
+          <div class="map-caption">资源池地域视图 · 支持按供应商 / 产品 / 区域筛选</div>
+        </div>
+      </article>
+
+      <aside class="panel detail-panel" aria-live="polite">
+        <div class="panel-head"><div><div class="panel-title">供应商画像</div><div class="panel-copy">当前选中供应商</div></div><span class="pill good" id="supplier-status">稳定供货</span></div>
+        <div class="supplier-head"><div class="avatar" id="supplier-avatar">东</div><div><div class="supplier-name" id="supplier-name">华东精工</div><div class="supplier-meta" id="supplier-meta">上海 · 电子器件 / 结构件</div></div></div>
+        <div class="detail-stat"><div><strong id="supplier-products">8</strong><span>覆盖产品</span></div><div><strong id="supplier-share">32%</strong><span>资源池产品份额</span></div></div>
+        <div class="section-label">PRODUCT MIX · 产品份额</div>
+        <div class="product-list" id="product-list">
+          <div class="product-row"><div><div class="product-name"><span>27 英寸 QHD 面板</span><span>42%</span></div><div class="bar"><i style="width: 42%"></i></div></div><div class="product-price">¥612 / 件</div></div>
+          <div class="product-row"><div><div class="product-name"><span>电源适配器</span><span>18%</span></div><div class="bar"><i style="width: 18%"></i></div></div><div class="product-price">¥72 / 件</div></div>
+          <div class="product-row"><div><div class="product-name"><span>支架结构件</span><span>15%</span></div><div class="bar"><i style="width: 15%"></i></div></div><div class="product-price">¥69 / 件</div></div>
+          <div class="product-row"><div><div class="product-name"><span>主控板</span><span>11%</span></div><div class="bar"><i style="width: 11%"></i></div></div><div class="product-price">¥158 / 件</div></div>
+        </div>
+        <div class="detail-actions"><button class="btn primary" id="open-detail">查看供应商明细</button><button class="btn" id="filter-supplier">按此供应商筛选</button></div>
+      </aside>
+    </section>
+
+    <section class="bottom-grid">
+      <article class="panel matrix-panel">
+        <div class="panel-head"><div><div class="panel-title">供应商 × 产品份额</div><div class="panel-copy">颜色越深代表当前资源池中承担的产品份额越高</div></div><button class="btn" id="sort-matrix">按份额排序</button></div>
+        <div class="matrix" id="matrix">
+          <div class="head">供应商</div><div class="head">显示器</div><div class="head">电源</div><div class="head">结构件</div><div class="head">线材</div>
+          <div class="name">华东精工</div><div class="cell high">42%</div><div class="cell mid">18%</div><div class="cell mid">15%</div><div class="cell low">—</div>
+          <div class="name">深圳电源</div><div class="cell low">—</div><div class="cell high">36%</div><div class="cell low">—</div><div class="cell mid">22%</div>
+          <div class="name">京东方配套</div><div class="cell high">31%</div><div class="cell low">—</div><div class="cell low">—</div><div class="cell low">—</div>
+          <div class="name">苏州智造</div><div class="cell mid">17%</div><div class="cell low">—</div><div class="cell high">38%</div><div class="cell mid">16%</div>
+        </div>
+      </article>
+      <article class="panel region-panel">
+        <div class="panel-title">区域资源密度</div><div class="panel-copy">按供应商数量与覆盖产品数综合观察</div>
+        <div class="region-row"><span>华东</span><div class="region-bar"><i style="width: 82%"></i></div><span class="region-value">5 家</span></div>
+        <div class="region-row"><span>华南</span><div class="region-bar"><i style="width: 65%"></i></div><span class="region-value">4 家</span></div>
+        <div class="region-row"><span>华北</span><div class="region-bar"><i style="width: 34%"></i></div><span class="region-value">2 家</span></div>
+        <div class="region-row"><span>西南</span><div class="region-bar"><i style="width: 18%"></i></div><span class="region-value">1 家</span></div>
+        <div class="footnote">建议用地图做“找供应商”的入口，用矩阵和份额条做“比供应商”的主视图；点击供应商后，再进入完整报价、价格历史和项目关联。</div>
+      </article>
+    </section>
+  </main>
+  <script>
+    const mapSvg = document.getElementById('map-svg');
+    const mapLayer = document.getElementById('map-layer');
+    const provinceLayer = document.getElementById('province-layer');
+    const provinceLabelLayer = document.getElementById('province-label-layer');
+    const mapStatus = document.getElementById('map-status');
+    const mapBounds = { minLon: 73.45, maxLon: 135.2, minLat: 3.2, maxLat: 53.7 };
+    let mapScale = 1;
+    let mapPanX = 0;
+    let mapPanY = 0;
+    let dragStart = null;
+    const svgNs = 'http://www.w3.org/2000/svg';
+    const importantProvinceLabels = new Set(['西藏自治区', '台湾省', '海南省', '香港特别行政区', '澳门特别行政区']);
+    function project(lon, lat) {
+      return [40 + ((Number(lon) - mapBounds.minLon) / (mapBounds.maxLon - mapBounds.minLon)) * 620, 22 + ((mapBounds.maxLat - Number(lat)) / (mapBounds.maxLat - mapBounds.minLat)) * 366];
+    }
+    function ringPath(ring) {
+      return ring.map((point, index) => { const [x, y] = project(point[0], point[1]); return `${index ? 'L' : 'M'}${x.toFixed(2)} ${y.toFixed(2)}`; }).join(' ') + ' Z';
+    }
+    function geometryPath(geometry) {
+      if (!geometry) return '';
+      if (geometry.type === 'Polygon') return geometry.coordinates.map(ringPath).join(' ');
+      if (geometry.type === 'MultiPolygon') return geometry.coordinates.flatMap(polygon => polygon.map(ringPath)).join(' ');
+      return '';
+    }
+    function featurePoint(feature) {
+      const center = feature.properties?.center || feature.properties?.centroid;
+      if (Array.isArray(center) && center.length >= 2) return center;
+      const first = feature.geometry?.type === 'Polygon' ? feature.geometry.coordinates?.[0]?.[0] : feature.geometry?.coordinates?.[0]?.[0]?.[0];
+      return first || [104, 35];
+    }
+    function positionMarkers() {
+      document.querySelectorAll('.marker').forEach(marker => {
+        const [x, y] = project(marker.dataset.lon, marker.dataset.lat);
+        marker.setAttribute('transform', `translate(${x.toFixed(2)} ${y.toFixed(2)})`);
+      });
+    }
+    function renderProvinceMap(geojson) {
+      provinceLayer.innerHTML = '';
+      provinceLabelLayer.innerHTML = '';
+      geojson.features.forEach(feature => {
+        const path = document.createElementNS(svgNs, 'path');
+        const name = feature.properties?.fullname || feature.properties?.name || '未命名区域';
+        path.setAttribute('class', 'province-shape');
+        path.setAttribute('d', geometryPath(feature.geometry));
+        path.setAttribute('tabindex', '0');
+        path.setAttribute('aria-label', name);
+        path.setAttribute('role', 'img');
+        const title = document.createElementNS(svgNs, 'title');
+        title.textContent = name;
+        path.appendChild(title);
+        path.addEventListener('click', () => {
+          document.querySelectorAll('.province-shape').forEach(item => item.classList.remove('selected'));
+          path.classList.add('selected');
+          mapStatus.textContent = `已选择：${name}`;
+        });
+        path.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); path.click(); } });
+        provinceLayer.appendChild(path);
+        if (importantProvinceLabels.has(name)) {
+          const [x, y] = project(...featurePoint(feature));
+          const label = document.createElementNS(svgNs, 'text');
+          label.setAttribute('class', 'province-label');
+          label.setAttribute('x', x.toFixed(2));
+          label.setAttribute('y', y.toFixed(2));
+          label.textContent = name.replace('特别行政区', '').replace('自治区', '');
+          provinceLabelLayer.appendChild(label);
+        }
+      });
+      positionMarkers();
+      mapStatus.textContent = `已加载 ${geojson.features.length} 个省级区域 · 含西藏、台湾、港澳`;
+    }
+    function updateMapTransform() {
+      mapLayer.setAttribute('transform', `translate(${350 + mapPanX} ${215 + mapPanY}) scale(${mapScale}) translate(-350 -215)`);
+    }
+    function zoomBy(factor) { mapScale = Math.max(.8, Math.min(3.6, mapScale * factor)); updateMapTransform(); }
+    document.getElementById('zoom-in').addEventListener('click', () => zoomBy(1.2));
+    document.getElementById('zoom-out').addEventListener('click', () => zoomBy(.84));
+    document.getElementById('zoom-reset').addEventListener('click', () => { mapScale = 1; mapPanX = 0; mapPanY = 0; updateMapTransform(); });
+    mapSvg.addEventListener('wheel', event => { event.preventDefault(); zoomBy(event.deltaY < 0 ? 1.12 : .89); }, { passive: false });
+    mapSvg.addEventListener('pointerdown', event => {
+      if (event.target.closest('.marker') || event.target.closest('.province-shape')) return;
+      dragStart = { x: event.clientX, y: event.clientY, panX: mapPanX, panY: mapPanY };
+      mapSvg.setPointerCapture(event.pointerId);
+    });
+    mapSvg.addEventListener('pointermove', event => {
+      if (!dragStart) return;
+      mapPanX = dragStart.panX + event.clientX - dragStart.x;
+      mapPanY = dragStart.panY + event.clientY - dragStart.y;
+      updateMapTransform();
+    });
+    mapSvg.addEventListener('pointerup', () => { dragStart = null; });
+    fetch('data/china_province_full.geojson').then(response => response.json()).then(renderProvinceMap).catch(() => { mapStatus.textContent = '地图资源加载失败，请检查本地资源文件'; });
+
+    const data = {
+      '华东精工': { avatar: '东', meta: '上海 · 电子器件 / 结构件', products: 8, share: '32%', status: '稳定供货', productsList: [['27 英寸 QHD 面板','42%','¥612 / 件'],['电源适配器','18%','¥72 / 件'],['支架结构件','15%','¥69 / 件'],['主控板','11%','¥158 / 件']] },
+      '深圳电源': { avatar: '深', meta: '深圳 · 电源 / 线材', products: 6, share: '24%', status: '重点供应商', productsList: [['180W 电源适配器','36%','¥72 / 件'],['HDMI 2.1 线材','22%','¥22 / 件'],['65W 电源板','18%','¥48 / 件'],['Type-C 线材','12%','¥16 / 件']] },
+      '京东方配套': { avatar: '京', meta: '北京 · 显示面板', products: 3, share: '16%', status: '单一来源', productsList: [['27 英寸 QHD 面板','31%','¥610 / 件'],['32 英寸 4K 面板','28%','¥1,020 / 件'],['23.8 英寸 FHD 面板','22%','¥392 / 件'],['面板驱动板','12%','¥96 / 件']] },
+      '苏州智造': { avatar: '苏', meta: '苏州 · 结构件 / 线材', products: 7, share: '19%', status: '稳定供货', productsList: [['支架结构件','38%','¥68 / 件'],['后壳结构件','27%','¥54 / 件'],['DP 线材','16%','¥19 / 件'],['底座组件','12%','¥31 / 件']] },
+      '武汉结构': { avatar: '武', meta: '武汉 · 结构件', products: 4, share: '9%', status: '可观察', productsList: [['支架结构件','26%','¥71 / 件'],['后壳结构件','21%','¥55 / 件'],['底座组件','15%','¥32 / 件'],['铰链组件','13%','¥18 / 件']] },
+      '成都电子': { avatar: '成', meta: '成都 · 主控 / 电源', products: 5, share: '11%', status: '可观察', productsList: [['主控板','24%','¥156 / 件'],['电源板','19%','¥49 / 件'],['USB Hub','14%','¥38 / 件'],['音频模块','10%','¥18 / 件']] },
+      '宁波精密': { avatar: '宁', meta: '宁波 · 精密结构件', products: 3, share: '7%', status: '可观察', productsList: [['支架结构件','22%','¥70 / 件'],['底座组件','18%','¥31 / 件'],['铰链组件','12%','¥17 / 件'],['装饰件','9%','¥12 / 件']] },
+    };
+    const name = document.getElementById('supplier-name');
+    const avatar = document.getElementById('supplier-avatar');
+    const meta = document.getElementById('supplier-meta');
+    const products = document.getElementById('supplier-products');
+    const share = document.getElementById('supplier-share');
+    const status = document.getElementById('supplier-status');
+    const list = document.getElementById('product-list');
+    function selectSupplier(key) {
+      const item = data[key] || data['华东精工'];
+      document.querySelectorAll('.marker').forEach(el => el.classList.toggle('selected', el.dataset.supplier === key));
+      name.textContent = key; avatar.textContent = item.avatar; meta.textContent = item.meta; products.textContent = item.products; share.textContent = item.share; status.textContent = item.status;
+      status.className = 'pill ' + (item.status === '单一来源' ? 'warn' : 'good');
+      list.innerHTML = item.productsList.map(([label, value, price]) => `<div class="product-row"><div><div class="product-name"><span>${label}</span><span>${value}</span></div><div class="bar"><i style="width:${value}"></i></div></div><div class="product-price">${price}</div></div>`).join('');
+    }
+    document.querySelectorAll('.marker').forEach(el => { el.addEventListener('click', () => selectSupplier(el.dataset.supplier)); el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectSupplier(el.dataset.supplier); } }); });
+    document.getElementById('filter-supplier').addEventListener('click', () => alert('概念交互：正式版将把供应商筛选条件同步到下方明细。'));
+    document.getElementById('open-detail').addEventListener('click', () => alert('概念交互：正式版将打开供应商详情，查看价格历史、项目关联和联系人信息。'));
+    document.getElementById('sort-matrix').addEventListener('click', () => alert('概念交互：正式版将按产品份额从高到低排序矩阵。'));
+  </script>
+</body>
+</html>

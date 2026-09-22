@@ -12,7 +12,7 @@ const DOMAINS = {
   core: ['db','dbUrl','schemaReady','dataLocked','rawDb','AUTH_KEY','AUTH_PLAIN_KEY','AUTH_CHANGED_KEY','AUTH_USERNAME_KEY','DEFAULT_PASSWORD','DEFAULT_USERNAME','sha256','getRawDb','getDbUrl','isAuthQuery','getDb','ignoreSchemaError','ensureSchema','localNow','isDataLocked','setDataLocked'],
   auth: ['ensureAuthPassword','getUsername','changeUsername','isFirstUse','getPlainPassword','verifyPassword','changePassword'],
   parts: ['getParts','getPart','savePart','deletePart','getPriceHistory','getCategories','getMainCategories','getSubCategories','getAllPartSuppliers','getPartSuppliers','addPartSupplier','updatePartSupplier','deletePartSupplier','updatePartWeightedCost','getSupplierPriceHistory'],
-  suppliers: ['getSupplierProfiles','getSupplierProfile','saveSupplierProfile','deleteSupplierProfile'],
+  suppliers: ['getSupplierResources','getSupplierProfiles','getSupplierProfile','saveSupplierProfile','deleteSupplierProfile'],
   projects: ['getProjects','getProject','saveProject','deleteProject','getProductCategories','saveProductCategory','deleteProductCategory','ensureDefaultCategories','copyProject','getProjectBOMs','recordProjectCostSnapshot','getProjectCostSnapshots','getSnapshotBOMDetail','deleteProjectCostSnapshot','addBOMItem','addVirtualBOMItem','updateBOMItem','updateBOMRefProject','deleteBOMItem','getModules','getModuleItems','saveModule','getModuleCategories','getModuleCategoryOrder','saveModuleCategoryOrder','deleteModule','updateModuleCategoryByName','syncPartsProjectsField','syncProjectModulesToLibrary','saveModuleItem','deleteModuleItem','getModuleCost','getLibraryModules','getLibraryModuleItems','updateLibraryModuleItem','deleteLibraryModule','renameLibraryModule','getProjectModuleSummary','getCostReviews','saveCostReview','deleteCostReview','getMeasures','saveMeasure','deleteMeasure','getTargets','saveTarget','deleteTarget','getSkus','getAllSkus','saveSku','deleteSku','getSkuDiffs','saveSkuDiff','deleteSkuDiff','getAllSkuDiffs','getProjectSuppliers','saveProjectSupplier','deleteProjectSupplier','getProjectSupplierPriceHistory','saveProjectSupplierPriceHistory'],
   competitors: ['getCompetitors','getCompetitor','saveCompetitor','deleteCompetitor','getCompetitorBOMs','addCompetitorBOMItem','updateCompetitorBOMItem','deleteCompetitorBOMItem','getCompetitorParts','saveCompetitorPart','deleteCompetitorPart','getFeatures','saveFeature','deleteFeature','getScores','saveScore','getAllScoresForRefs','getModuleNames','getModuleFeatureLinks','setModuleFeatureLinks'],
   compare: ['normalizePartName','getPartAliases','savePartAlias','deletePartAlias','getCompareCache','saveCompareCache','upsertInsight','getInsights','getUnreadInsightCount','markInsightRead'],
@@ -81,7 +81,7 @@ fs.mkdirSync(path.join(ROOT, 'src', 'db'), { recursive: true });
 for (const dom of Object.keys(DOMAINS)) {
   const parts = [HEAD];
   if (dom === 'core') {
-    parts.push("import Database from '@tauri-apps/plugin-sql';");
+    parts.push("import Database from './sql';");
     parts.push("import { invoke } from '@tauri-apps/api/core';");
   }
   if (dom === 'settings') parts.push("import { PRESET_PROVIDERS as PRESET_PROVIDER_TEMPLATES } from '../constants';");

@@ -14,6 +14,7 @@ const SAMPLE = '27寸液晶面板 | M270QAN | ¥610 | 1\n' +
   '外壳套件 | SHELL-27 | ¥95 | 1';
 
 const VERDICT_TAG: Record<string, { color: string; text: string }> = {
+  unknown: { color: 'default', text: '待核实' },
   '虚高': { color: 'red', text: '❌ 虚高' },
   '偏高': { color: 'orange', text: '⚠️ 偏高' },
   '合理': { color: 'green', text: '✅ 合理' },
@@ -73,7 +74,7 @@ export default function QuoteReview() {
       else {
         const xu = items.filter(i => i.verdict === '虚高').length;
         const gao = items.filter(i => i.verdict === '偏高').length;
-        message.success('审价完成：' + (xu + gao > 0 ? '发现 ' + xu + ' 项虚高、' + gao + ' 项偏高，可据此议价' : '全部价格合理'));
+        message.success('审价完成：' + (xu + gao > 0 ? '发现 ' + xu + ' 项虚高、' + gao + ' 项偏高，可据此议价' : '未发现有依据的偏高项，请检查待核实项'));
       }
     } catch (e: any) { setErr('审价失败：' + (e?.message || e)); }
     finally { setBusy(false); }
@@ -87,7 +88,7 @@ export default function QuoteReview() {
       <div className="page-title"><AuditOutlined /> AI 审价助手</div>
       <Card size="small" style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 11.5, color: '#94A3B8', lineHeight: 1.6, marginBottom: 10 }}>
-          把供应商报价贴进来（每行一项，含 器件名/型号/单价 即可），AI 会对照「器件库已有参考价」（当前 {refCount} 种器件）+ 品类常识逐项审价：标出 虚高/偏高/合理，给出合理价区间和议价要点。判断仅供参考，最终以你的业务判断为准。
+          把供应商报价贴进来（每行一项，含 器件名/型号/单价 即可），AI 会对照「器件库已有参考价」（当前 {refCount} 种器件）逐项审价，缺少可比证据时标为待核实：标出 虚高/偏高/合理，给出合理价区间和议价要点。判断仅供参考，最终以你的业务判断为准。
         </div>
         <Input.TextArea rows={7} value={quote} onChange={e => setQuote(e.target.value)} placeholder={'粘贴供应商报价，例如：\n' + SAMPLE} />
         <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -104,8 +105,9 @@ export default function QuoteReview() {
             <b style={{ fontSize: 12.5 }}>审价结果</b>
             {xu > 0 && <Tag color="red">❌ {xu} 虚高</Tag>}
             {gao > 0 && <Tag color="orange">⚠️ {gao} 偏高</Tag>}
-            {result.length - xu - gao > 0 && <Tag color="green">✅ {result.length - xu - gao} 合理</Tag>}
+            {result.filter(i => i.verdict === '合理').length > 0 && <Tag color="green">✅ {result.filter(i => i.verdict === '合理').length} 合理</Tag>}
             <span style={{ fontSize: 11, color: '#94A3B8' }}>共 {result.length} 项</span>
+            {result.some(i => i.verdict === 'unknown') && <Tag>{result.filter(i => i.verdict === 'unknown').length} 待核实</Tag>}
           </div>
           <Table size="small" dataSource={result} rowKey="index" pagination={false} columns={[
             { title: '#', dataIndex: 'index', width: 44, align: 'center' },
@@ -136,3 +138,4 @@ export default function QuoteReview() {
     </div>
   );
 }
+

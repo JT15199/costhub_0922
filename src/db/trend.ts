@@ -1,8 +1,237 @@
 // 由 _tools/split-db.mjs 自动生成（db.ts 按域拆分）
 // 手工修改请改对应域文件；新增函数请更新 _tools/split-db.mjs 的 DOMAINS 映射
 
+import { invoke } from '@tauri-apps/api/core';
 import { getDb, localNow } from './core';
 
+export type MaterialInsightSubjectKind = 'decomposition' | 'direct';
+export type MaterialInsightSubjectStatus = 'draft' | 'ready' | 'pending' | 'queued' | 'running' | 'paused' | 'partial' | 'completed' | 'failed';
+export interface MaterialInsightSubject {
+  key: string;
+  kind: MaterialInsightSubjectKind;
+  title: string;
+  categoryType: string;
+  rootNodeId: number | null;
+  nodes: any[];
+  trendItemId: number | null;
+  trendItemIds: number[];
+  childTrendItemIds: number[];
+  trendItem: any | null;
+  latestSnapshot: any | null;
+  status: MaterialInsightSubjectStatus;
+  nodeCount: number;
+  totalNodes: number;
+  completedNodes: number;
+  failedNodes: number;
+  queuedNodes: number;
+  runningNodes: number;
+  pausedNodes: number;
+  pendingNodes: number;
+  skippedNodes: number;
+  updatedAt: string;
+  favorite: boolean;
+  archived: boolean;
+  historyCount: number;
+  needsReview?: boolean;
+}
+
+const numericId = (value: unknown) => {
+  const id = Number(value);
+  return Number.isFinite(id) && id > 0 ? id : null;
+};
+
+const latestById = (rows: any[]) => rows.slice().sort((a, b) => (Number(b?.id) || 0) - (Number(a?.id) || 0))[0] || null;
+const latestTime = (rows: any[]) => rows.map(row => String(row?.updated_at || row?.query_time || row?.last_queried_at || row?.created_at || '')).sort().pop() || '';
+const directKey = (item: any) => `${String(item?.query_category || '').trim().toLocaleLowerCase()}|${String(item?.category_type || '直接查询').trim().toLocaleLowerCase()}`;
+
+function nodeCounts(nodes: any[]) {
+  const work = nodes.filter(node => node?.node_type === 'terminal');
+  const count = (values: string[]) => work.filter(node => values.includes(String(node?.insight_status || 'pending'))).length;
+  const completedNodes = count(['queried', 'completed']);
+  const failedNodes = count(['failed', 'error']);
+  const queuedNodes = count(['queued']);
+  const runningNodes = count(['running']);
+  const pausedNodes = count(['paused']);
+  const skippedNodes = count(['skipped', 'ready']);
+  const pendingNodes = count(['pending', '']);
+  let status: MaterialInsightSubjectStatus = 'pending';
+  if (work.length === 0) status = 'draft';
+  else if (pausedNodes > 0 && runningNodes === 0) status = 'paused';
+  else if (runningNodes > 0) status = 'running';
+  else if (queuedNodes > 0) status = 'queued';
+  else if (failedNodes > 0 && completedNodes > 0) status = 'partial';
+  else if (failedNodes > 0 && completedNodes === 0 && pendingNodes === 0 && skippedNodes === 0) status = 'failed';
+  else if (completedNodes === work.length) status = 'completed';
+  else if (completedNodes > 0 || failedNodes > 0) status = 'partial';
+  else if (skippedNodes === work.length) status = 'ready';
+  return { work, status, completedNodes, failedNodes, queuedNodes, runningNodes, pausedNodes, pendingNodes, skippedNodes };
+}
+
+/** Pure grouping rule shared by the workbench, results page and tests. */
+export function groupMaterialInsightRows(trendItems: any[], treeNodes: any[], snapshots: any[] = []): MaterialInsightSubject[] {
+  const items = Array.isArray(trendItems) ? trendItems : [];
+  const nodes = Array.isArray(treeNodes) ? treeNodes : [];
+  const snaps = Array.isArray(snapshots) ? snapshots : [];
+  const roots = nodes.filter(node => node?.parent_id == null && numericId(node?.id));
+  const rootTrendIds = new Set<number>();
+  const childTrendIds = new Set<number>();
+  const subjects: MaterialInsightSubject[] = [];
+
+  for (const root of roots) {
+    const rootId = Number(root.id);
+    const related = new Map<number, any>([[rootId, root]]);
+    const queue = [rootId];
+    while (queue.length) {
+      const parentId = queue.shift()!;
+      for (const node of nodes) {
+        if (Number(node?.parent_id) !== parentId || !numericId(node?.id) || related.has(Number(node.id))) continue;
+        related.set(Number(node.id), node);
+        queue.push(Number(node.id));
+      }
+    }
+    // Older databases sometimes retained root_part_id without a complete parent chain.
+    const legacyRootPart = root.root_part_id;
+    if (legacyRootPart != null) {
+      const sameLegacyRoot = roots.filter(candidate => candidate.id !== root.id && candidate.root_part_id === legacyRootPart);
+      if (sameLegacyRoot.length === 0) {
+        nodes.filter(node => node.root_part_id === legacyRootPart && node.parent_id != null).forEach(node => related.set(Number(node.id), node));
+      }
+    }
+    const groupedNodes = [...related.values()];
+    const rootTrendId = numericId(root.trend_item_id);
+    if (rootTrendId) rootTrendIds.add(rootTrendId);
+    const childIds = groupedNodes.filter(node => Number(node.id) !== rootId).map(node => numericId(node.trend_item_id)).filter((id): id is number => id != null);
+    childIds.forEach(id => childTrendIds.add(id));
+    const trendIds = [...new Set([...(rootTrendId ? [rootTrendId] : []), ...childIds])];
+    const trendItem = rootTrendId ? items.find(item => Number(item.id) === rootTrendId) || null : null;
+    const subjectSnaps = snaps.filter(snap => trendIds.includes(Number(snap.trend_item_id)));
+    const snapshotTrendIds = new Set(subjectSnaps.map(snap => Number(snap.trend_item_id)));
+    const resolvedNodes = groupedNodes.map(node => {
+      const status = String(node.insight_status || '');
+      return snapshotTrendIds.has(Number(node.trend_item_id)) && ['pending', 'ready', ''].includes(status)
+        ? { ...node, insight_status: 'queried' }
+        : node;
+    });
+    const counts = nodeCounts(resolvedNodes.filter(node => Number(node.id) !== rootId));
+    const rootUpdated = latestTime(groupedNodes);
+    const latestSnapshot = latestById(subjectSnaps);
+    subjects.push({
+      key: `tree:${rootId}`,
+      kind: 'decomposition',
+      title: String(root.component_name || '未命名物料'),
+      categoryType: String(trendItem?.category_type || '分解洞察'),
+      rootNodeId: rootId,
+      nodes: resolvedNodes,
+      trendItemId: rootTrendId,
+      trendItemIds: trendIds,
+      childTrendItemIds: childIds,
+      trendItem,
+      latestSnapshot,
+      status: counts.status,
+      nodeCount: resolvedNodes.filter(node => Number(node.id) !== rootId).length,
+      totalNodes: counts.work.length,
+      completedNodes: counts.completedNodes,
+      failedNodes: counts.failedNodes,
+      queuedNodes: counts.queuedNodes,
+      runningNodes: counts.runningNodes,
+      pausedNodes: counts.pausedNodes,
+      pendingNodes: counts.pendingNodes,
+      skippedNodes: counts.skippedNodes,
+      updatedAt: [rootUpdated, latestTime(subjectSnaps)].sort().pop() || '',
+      favorite: false,
+      archived: false,
+      historyCount: subjectSnaps.length,
+    });
+  }
+
+  const directGroups = new Map<string, any[]>();
+  for (const item of items) {
+    const id = numericId(item?.id);
+    if (!id || childTrendIds.has(id) || rootTrendIds.has(id)) continue;
+    const key = directKey(item);
+    directGroups.set(key, [...(directGroups.get(key) || []), item]);
+  }
+  for (const [key, groupedItems] of directGroups) {
+    const trendItem = groupedItems.slice().sort((a, b) => {
+      const aTime = String(a?.last_queried_at || a?.last_updated_at || a?.created_at || '');
+      const bTime = String(b?.last_queried_at || b?.last_updated_at || b?.created_at || '');
+      return bTime.localeCompare(aTime) || (Number(b.id) || 0) - (Number(a.id) || 0);
+    })[0];
+    const trendIds = groupedItems.map(item => Number(item.id)).filter(Number.isFinite);
+    const subjectSnaps = snaps.filter(snap => trendIds.includes(Number(snap.trend_item_id)));
+    const latestSnapshot = latestById(subjectSnaps);
+    const completed = subjectSnaps.length > 0 || !!trendItem?.trend_direction || !!trendItem?.summary;
+    subjects.push({
+      key: `direct:${key}`,
+      kind: 'direct',
+      title: String(trendItem?.query_category || '未命名物料'),
+      categoryType: String(trendItem?.category_type || '直接查询'),
+      rootNodeId: null,
+      nodes: [],
+      trendItemId: Number(trendItem.id),
+      trendItemIds: trendIds,
+      childTrendItemIds: [],
+      trendItem,
+      latestSnapshot,
+      status: completed ? 'completed' : 'pending',
+      nodeCount: 0,
+      totalNodes: 1,
+      completedNodes: completed ? 1 : 0,
+      failedNodes: 0,
+      queuedNodes: 0,
+      runningNodes: 0,
+      pausedNodes: 0,
+      pendingNodes: completed ? 0 : 1,
+      skippedNodes: 0,
+      updatedAt: [latestTime(groupedItems), latestTime(subjectSnaps)].sort().pop() || '',
+      favorite: false,
+      archived: false,
+      historyCount: subjectSnaps.length,
+      needsReview: !['quick', 'auto'].includes(String(trendItem?.source_type || '')),
+    });
+  }
+
+  // Keep orphaned nodes out of the parent list; they remain available through their raw tree rows.
+  return subjects.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')) || a.title.localeCompare(b.title));
+}
+
+export async function getMaterialInsightSubjects(): Promise<MaterialInsightSubject[]> {
+  try {
+    const d = await getDb();
+    const [items, nodes, snapshots] = await Promise.all([
+      d.select<any[]>('SELECT * FROM trend_items ORDER BY id DESC'),
+      d.select<any[]>('SELECT * FROM decomposition_tree ORDER BY id'),
+      d.select<any[]>('SELECT * FROM trend_snapshots ORDER BY id DESC'),
+    ]);
+    const subjects = groupMaterialInsightRows(items, nodes, snapshots);
+    let metas: any[] = [];
+    try { metas = await d.select<any[]>('SELECT * FROM analysis_item_meta WHERE item_key LIKE ?', ['material_subject:%']); } catch { }
+    const metaMap = new Map(metas.map(meta => [String(meta.item_key), meta]));
+    return subjects
+      .map(subject => ({ ...subject, favorite: Boolean(Number(metaMap.get(`material_subject:${subject.key}`)?.favorite)), archived: Boolean(Number(metaMap.get(`material_subject:${subject.key}`)?.archived)) }))
+      .filter(subject => !subject.archived);
+  } catch {
+    return [];
+  }
+}
+
+export async function updateMaterialInsightSubjectMeta(key: string, patch: { favorite?: boolean; archived?: boolean }) {
+  const d = await getDb();
+  await d.execute(`CREATE TABLE IF NOT EXISTS analysis_item_meta (item_key TEXT PRIMARY KEY, domain TEXT DEFAULT '', object_type TEXT DEFAULT '', object_id TEXT DEFAULT '', object_name TEXT DEFAULT '', favorite INTEGER DEFAULT 0, archived INTEGER DEFAULT 0, updated_at TEXT DEFAULT (datetime('now','localtime')))`);
+  const itemKey = `material_subject:${key}`;
+  const current = (await d.select<any[]>('SELECT * FROM analysis_item_meta WHERE item_key=?', [itemKey]))[0] || {};
+  await d.execute(`INSERT OR REPLACE INTO analysis_item_meta (item_key,domain,object_type,object_id,object_name,favorite,archived,updated_at) VALUES (?,?,?,?,?,?,?,datetime('now','localtime'))`, [
+    itemKey, 'material', current.object_type || '', current.object_id || key, current.object_name || '', patch.favorite ?? Boolean(Number(current.favorite)), patch.archived ?? Boolean(Number(current.archived)),
+  ]);
+}
+
+export async function getDirectTrendItemByCategory(category: string, categoryType = '直接查询') {
+  try {
+    return (await (await getDb()).select<any[]>(`SELECT t.* FROM trend_items t WHERE t.query_category = ? AND t.category_type = ? AND NOT EXISTS (SELECT 1 FROM decomposition_tree n WHERE n.trend_item_id = t.id) ORDER BY t.id DESC LIMIT 1`, [category, categoryType]))[0] || null;
+  } catch {
+    return getTrendItemByCategory(category, categoryType);
+  }
+}
 
 
 export async function getTrendItem(id: number) {
@@ -86,8 +315,44 @@ export async function saveTrendItem(data: any) {
 
 
 
+export function getMaterialInsightDeleteIds(subjects: Array<Pick<MaterialInsightSubject, 'key' | 'rootNodeId' | 'trendItemIds'>>) {
+  return {
+    rootNodeIds: [...new Set(subjects.map(subject => Number(subject.rootNodeId)).filter(id => Number.isFinite(id) && id > 0))],
+    trendItemIds: [...new Set(subjects.flatMap(subject => subject.trendItemIds).map(Number).filter(id => Number.isFinite(id) && id > 0))],
+    subjectKeys: [...new Set(subjects.map(subject => subject.key))],
+  };
+}
+
+/** 洞察决策上下文：物料映射到哪些项目 BOM，以及当前金额/数量。 */
+export async function getTrendProjectContext(trendItemId: number) {
+  return (await getDb()).select<any[]>(`SELECT p.id AS part_id, p.name AS part_name, p.model AS part_model,
+    pr.id AS project_id, pr.code AS project_code, pr.name AS project_name,
+    pb.module_name, pb.quantity,
+    CASE WHEN pb.part_cost > 0 THEN pb.part_cost ELSE p.cost END AS unit_cost,
+    (CASE WHEN pb.part_cost > 0 THEN pb.part_cost ELSE p.cost END) * COALESCE(pb.quantity, 1) AS line_cost
+    FROM trend_items ti
+    JOIN parts p ON (
+      EXISTS (SELECT 1 FROM trend_part_mapping tpm WHERE tpm.trend_item_id = ti.id AND tpm.part_id = p.id)
+      OR lower(trim(p.name)) = lower(trim(ti.query_category))
+      OR lower(trim(p.model)) = lower(trim(ti.query_category))
+    )
+    JOIN project_boms pb ON pb.part_id = p.id AND COALESCE(pb.is_deleted, 0) = 0
+    JOIN projects pr ON pr.id = pb.project_id AND COALESCE(pr.is_deleted, 0) = 0
+    WHERE ti.id = ?
+    ORDER BY pr.code, pb.module_name, p.name`, [trendItemId]);
+}
+
 export async function deleteTrendItem(id: number) {
-  await (await getDb()).execute('DELETE FROM trend_items WHERE id = ?', [id]);
+  await invoke('delete_material_insight_subjects', { request: { rootNodeIds: [], trendItemIds: [id], subjectKeys: [] } });
+}
+
+export async function deleteMaterialInsightSubjects(subjects: Array<Pick<MaterialInsightSubject, 'key' | 'rootNodeId' | 'trendItemIds'>>) {
+  const plan = getMaterialInsightDeleteIds(subjects);
+  await invoke('delete_material_insight_subjects', { request: {
+    rootNodeIds: plan.rootNodeIds,
+    trendItemIds: plan.trendItemIds,
+    subjectKeys: plan.subjectKeys,
+  } });
 }
 
 
@@ -158,9 +423,12 @@ export async function getLatestTrendSnapshot(trendItemId: number) {
 export async function saveTrendSnapshot(data: any) {
   const d = await getDb();
   const confidenceLevel = data.confidence_level ?? data.confidence ?? '';
+  const resultJson = typeof data.result_json === 'string'
+    ? data.result_json
+    : JSON.stringify(data.result ?? {});
   const r = await d.execute(
-    'INSERT INTO trend_snapshots (trend_item_id, query_time, source_type, direction, confidence, confidence_level, summary, suggested_action, skill_used, magnitude_min, magnitude_max, magnitude_reference) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-    [data.trend_item_id, data.query_time ?? localNow(), data.source_type || 'direct_query', data.direction, confidenceLevel, confidenceLevel, data.summary, data.suggested_action, data.skill_used, data.magnitude_min, data.magnitude_max, data.magnitude_reference]
+    'INSERT INTO trend_snapshots (trend_item_id, query_time, source_type, direction, confidence, confidence_level, summary, suggested_action, skill_used, magnitude_min, magnitude_max, magnitude_reference, result_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    [data.trend_item_id, data.query_time ?? localNow(), data.source_type || 'direct_query', data.direction, confidenceLevel, confidenceLevel, data.summary, data.suggested_action, data.skill_used, data.magnitude_min, data.magnitude_max, data.magnitude_reference, resultJson]
   );
   return r.lastInsertId;
 }

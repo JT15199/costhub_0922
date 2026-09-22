@@ -1,0 +1,16 @@
+.quote-review-workspace { display:grid; gap:16px; min-width:0; }
+.quote-review-loading { display:grid; place-items:center; min-height:200px; }
+.quote-review-total { display:flex; align-items:center; justify-content:space-between; gap:24px; }
+.quote-review-total > div { display:grid; gap:5px; flex:none; }
+.quote-review-total span,.quote-review-total p,.quote-review-note { color:var(--color-text-secondary,#74808e); font-size:12px; line-height:1.7; }
+.quote-review-total strong { color:var(--color-text-primary,#253c56); font-size:28px; font-weight:650; font-variant-numeric:tabular-nums; }
+.quote-review-note { margin:10px 0 14px; }
+.quote-review-rounds { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.quote-review-rounds > span { font-size:12px; color:var(--color-text-secondary); }
+.quote-review-reference { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.quote-review-reference > span { font-size:12px; }
+.quote-review-reference .ant-select { min-width:200px; max-width:100%; }
+.quote-review-feedback { display:block; margin-top:4px; color:var(--color-text-secondary); font-size:11px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.quote-follow-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.quote-follow-grid .ant-input-number { width:100%; }
+@media(max-width:800px) { .quote-review-total { align-items:flex-start; flex-direction:column; gap:8px; }.quote-follow-grid { grid-template-columns:1fr; gap:0; }.quote-review-reference .ant-select { flex:1; } }

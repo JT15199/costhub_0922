@@ -21,21 +21,23 @@ export function extractNums(text: string): UnverifiedNum[] {
 }
 
 // 校验：结论数字是否在证据中出现（支持原样 / ¥前缀 / 元 / % 后缀；±0.005 内视为一致）
-export function verifyConclusionNumbers(conclusion: string, evidence: string): { unverified: UnverifiedNum[] } {
+export interface StructuredNumericEvidence { value?: string | number; field?: string; deepLink?: { params?: Record<string, string | number> }; }
+export interface VerificationOptions { projectId?: number; }
+
+function numbersInEvidence(evidence: string): number[] {
+  const out: number[] = []; const re = /(?<![\d.])\d+(?:\.\d+)?(?![\d.])/g; let m: RegExpExecArray | null;
+  while ((m = re.exec(evidence || ''))) out.push(Number(m[0]));
+  return out;
+}
+
+export function verifyConclusionNumbers(conclusion: string, evidence: string | StructuredNumericEvidence[], options: VerificationOptions = {}): { unverified: UnverifiedNum[] } {
   const nums = extractNums(conclusion);
   const unverified: UnverifiedNum[] = [];
-  const ev = evidence || '';
+  const structured = Array.isArray(evidence) ? evidence : null;
+  const values = structured ? structured.filter(item => options.projectId == null || Number(item.deepLink?.params?.projectId) === options.projectId).map(item => Number(item.value)).filter(Number.isFinite) : numbersInEvidence(typeof evidence === 'string' ? evidence : '');
   for (const n of nums) {
-    const hits = [
-      ev.includes(String(n.num)),
-      ev.includes('¥' + n.num),
-      ev.includes(n.num + '元'),
-      ev.includes(n.num + '%'),
-      ev.includes(String(Math.round(n.num * 1000) / 1000)),
-      ev.includes(String(Math.round(n.num * 100) / 100)),
-      ev.includes(String(Math.round(n.num * 10) / 10)),
-    ];
-    if (!hits.some(Boolean)) unverified.push(n);
+    const hits = values.some(value => Math.abs(value - n.num) <= 0.005 || (/%/.test(n.ctx) && value <= 1 && Math.abs(value * 100 - n.num) <= 0.005));
+    if (!hits) unverified.push(n);
   }
   return { unverified };
 }

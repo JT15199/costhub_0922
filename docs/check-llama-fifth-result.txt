@@ -1,0 +1,13 @@
+
+> tauri-app@2.3.19 test
+> vitest run
+
+
+ RUN  v4.1.10 D:/AI coding folder/costhub
+
+
+ Test Files  66 passed (66)
+      Tests  378 passed | 2 skipped (380)
+   Start at  10:48:16
+   Duration  7.72s (transform 8.35s, setup 0ms, import 63.32s, tests 8.47s, environment 11ms)
+

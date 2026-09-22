@@ -192,7 +192,7 @@ JSON 格式（必须严格符合）：
       } else {
         b64 = await buildPptxBase64(data);
       }
-      await invoke('save_export_file', { fileName: name, base64Data: b64 });
+      await invoke('save_export_file', { fileName: name, base64Data: b64, targetDir: (await getSetting('ai_work_folder', '')).trim() || undefined });
       setLastFile(name);
       logLocalAICall({
         request_type: 'demo_generate',
@@ -257,6 +257,11 @@ JSON 格式（必须严格符合）：
     setHabits(await loadContextEntries());
     message.success('习惯已保存');
   };
+
+  const openWorkFolder = async () => {
+    try { await invoke('open_ai_work_folder', { path: (await getSetting('ai_work_folder', '')).trim() || undefined }); }
+    catch { message.warning('无法打开 AI 工作文件夹'); }
+  };
   const delHabit = async (key: string) => {
     await deleteContextEntry(key);
     setPicked(p => p.filter(k => k !== key));
@@ -297,7 +302,7 @@ JSON 格式（必须严格符合）：
           <Space wrap>
             <Radio.Group value={genType} onChange={e => setGenType(e.target.value)} optionType="button" buttonStyle="solid" size="small"
               options={[{ label: 'HTML 演示', value: 'html' }, { label: 'PPTX 演示', value: 'pptx' }]} />
-            <Button size="small" icon={<FolderOpenOutlined />} onClick={() => invoke('open_exports_dir')}>打开导出目录</Button>
+            <Button size="small" icon={<FolderOpenOutlined />} onClick={() => void openWorkFolder()}>打开 AI 工作文件夹</Button>
           </Space>
         </div>
         <Input.TextArea value={material} onChange={e => setMaterial(e.target.value)} rows={7}
@@ -346,7 +351,7 @@ JSON 格式（必须严格符合）：
         )}
         {lastFile && !generating && (
           <Alert style={{ marginTop: 10 }} type="success" showIcon message={`已生成：${lastFile}`}
-            description={<Button size="small" icon={<FolderOpenOutlined />} onClick={() => invoke('open_exports_dir')}>打开导出目录查看</Button>} />
+            description={<Button size="small" icon={<FolderOpenOutlined />} onClick={() => void openWorkFolder()}>打开 AI 工作文件夹查看</Button>} />
         )}
         {errorMsg && !generating && <Alert style={{ marginTop: 10 }} type="error" showIcon message="生成失败" description={errorMsg} />}
       </div>

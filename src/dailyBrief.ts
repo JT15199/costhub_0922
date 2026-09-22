@@ -2,7 +2,6 @@
 // 链路：本地规则收集事实（不查外部）→ 本地 Ollama 润色成自然语言 → 失败静默降级规则文案
 // 节流：settings ai_daily_brief 存 {date, hash, text, model}；同日同指纹直接复用，数据变化自动重生成
 // 留痕：logLocalAICall('daily_brief')；数据安全：只走本地模型通道，外部 LLM 无任何数据通道
-import { invoke } from '@tauri-apps/api/core';
 import { getProjects, getParts, getInsights, getWorkLogs, getSetting, setSetting } from './db';
 import { getAdvisorInsights } from './db/advisor';
 import { logLocalAICall } from './ollama';
@@ -106,17 +105,8 @@ export async function runDailyBrief(opts?: { force?: boolean }): Promise<BriefRe
   if (!model) return { text: buildRuleBrief(facts), source: 'rule', facts };
   const { system, user } = buildBriefPrompt(facts);
   try {
-    const base = (await getSetting('local_ai_base_url', 'http://localhost:11434')).replace(/\/$/, '');
-    const resp = await invoke<{ status: number; body: string; success: boolean }>('http_post', {
-      request: {
-        url: `${base}/api/chat`,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], stream: false, options: { temperature: 0.3 } }),
-      },
-    });
-    if (!resp.success) throw new Error(`HTTP ${resp.status}`);
-    const parsed = JSON.parse(resp.body);
-    const content: string = (parsed?.message?.content || '').trim();
+    const { localCompletion } = await import('./localBackend');
+    const content = (await localCompletion(system, user)).trim();
     if (!content) throw new Error('空响应');
     const text = content.slice(0, 800);
     await logLocalAICall({

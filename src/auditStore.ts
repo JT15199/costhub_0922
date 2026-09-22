@@ -100,6 +100,10 @@ export async function replaceAuditFindings(findings: Omit<AuditFinding, 'id' | '
       [f.type, f.level, f.title, f.detail, f.objects || '[]', f.status || 'unread', f.source || 'rule', f.suggestion || '']);
     added++;
   }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('costhub-audit-changed'));
+    window.dispatchEvent(new Event('costhub-insights-changed'));
+  }
   return added;
 }
 

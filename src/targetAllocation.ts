@@ -2,6 +2,7 @@
 // 领域 = 项目 BOM 模块分组（用户：大结构/大硬件/多媒体/包装/互连等）；特性 = 卖点（带声量）；新特性无历史声量 → 手输预算
 // 价值密度 = 支撑声量 ÷ 成本占比（客观数据，不主观打分）；老特性按价值密度自动分配，新特性预算由用户定
 import { allocateModuleCosts } from './sellingPointAnalyzer';
+import { bomExtendedCostStrict } from './ai/contracts';
 
 export interface TargetFeature {
   name: string; isNew: boolean; voice: number; prevCost: number; targetCost: number;
@@ -21,7 +22,8 @@ export function computeModuleCosts(boms: any[]): Record<string, number> {
   for (const b of boms || []) {
     if (b && b.is_deleted) continue;
     const mod = String(b?.module_name || '未归类');
-    const cost = (Number(b?.part_cost ?? b?.cost) || 0) * (Number(b?.quantity) || 1);
+    const cost = bomExtendedCostStrict(b);
+    if (cost === null) continue;
     m[mod] = (m[mod] || 0) + cost;
   }
   return m;

@@ -2,15 +2,21 @@
 // 纯搬移，行为不变
 import { invoke } from '@tauri-apps/api/core';
 import { normalizeLocalAiBaseUrl } from './securityPolicy';
+import { buildLocalChatBody, getLocalBackend, type LocalBackend, type LocalModelOptions } from './localBackend';
 
-export interface OllamaStreamOpts {
+export interface OllamaStreamOpts extends LocalModelOptions {
   num_predict?: number;
+  num_ctx?: number;
   temperature?: number;
   think?: boolean;
   endpoint?: 'v1' | 'native';
   json?: boolean;
   tools?: any[];                       // Ollama function-calling 工具定义（本地模型自主调用云端助手）
   onToolCalls?: (tcs: any[]) => void;  // 工具调用回调
+  onUsage?: (usage: { promptEvalCount?: number; evalCount?: number; totalDurationNs?: number; loadDurationNs?: number; promptEvalDurationNs?: number; evalDurationNs?: number; doneReason?: string }) => void;
+  onTruncated?: () => void;
+  signal?: AbortSignal;
+  backend?: LocalBackend;
 }
 
 /**
@@ -30,69 +36,71 @@ export async function startOllamaStream(
 ): Promise<() => void> {
   const { listen: listenEvent } = await import('@tauri-apps/api/event');
   const eventId = `ollama_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const backend = opts?.backend || await getLocalBackend();
   const base = normalizeLocalAiBaseUrl(baseUrl);
   // 原生 /api/chat 端点：think:false 确定生效（解决 qwen3 思考型模型复述规则的问题）
-  const url = opts?.endpoint === 'native' ? `${base}/api/chat` : `${base}/v1/chat/completions`;
+  const native = backend === 'ollama' && opts?.endpoint === 'native';
+  const url = native ? `${base}/api/chat` : `${base}/v1/chat/completions`;
   const unlisteners: (() => void)[] = [];
-  const cleanup = () => { unlisteners.forEach(u => u()); };
-
-  const u1 = await listenEvent<string>(`llm-token-${eventId}`, ev => {
-    if (ev.payload) {  onToken(ev.payload); }
-  });
-  const u2 = await listenEvent<string>(`llm-reasoning-${eventId}`, ev => {
-    if (ev.payload) onReasoning(ev.payload);
-  });
-  const u3 = await listenEvent<string>(`llm-done-${eventId}`, () => {  cleanup(); onDone(); });
-  const u4t = await listenEvent<string>(`llm-toolcalls-${eventId}`, ev => {
-    if (ev.payload && opts?.onToolCalls) {
-      try { const arr = JSON.parse(ev.payload); opts.onToolCalls(Array.isArray(arr) ? arr : []); } catch { /* 忽略 */ }
-    }
-  });
-  unlisteners.push(u4t);
-  const u4 = await listenEvent<string>(`llm-error-${eventId}`, ev => {  cleanup(); onError(ev.payload); });
-  unlisteners.push(u1, u2, u3, u4);
-  let body: any;
-  if (opts?.endpoint === 'native') {
-    // Ollama 原生 /api/chat 格式
-    body = {
-      model, messages, stream: true,
-      // format:'json' 强制模型只能输出合法JSON——彻底阻止复述规则/散文（json:false 时跳过，用于文本总结等场景）
-      ...(opts?.json === false ? {} : { format: 'json' }),
-      // 工具调用（本地模型自主调用云端助手）：tools 定义由调用方传入
-      ...(opts?.tools && opts.tools.length > 0 ? { tools: opts.tools } : {}),
-      options: {
-        temperature: opts?.temperature ?? 0.3,
-        num_predict: opts?.num_predict ?? 16384,
-      },
-      keep_alive: '30m',
-    };
-    if (opts?.think === false) {
-      body.think = false;
-      body.options.enable_thinking = false; // 双保险：Ollama 原生参数也关闭思考
-    }
-  } else {
-    body = {
-      model, messages, stream: true,
-      temperature: opts?.temperature ?? 0.3,
-      num_predict: opts?.num_predict ?? 16384,
-      max_tokens: opts?.num_predict ?? 16384, // /v1 端点认 max_tokens，双保险
-      keep_alive: '30m',
-    };
-    if (opts?.think === false) {
-      body.think = false;
-      body.enable_thinking = false;
-      body.reasoning_effort = 'none';
-      body.chat_template_kwargs = { enable_thinking: false };
-    }
+  let settled = false;
+  const fail = (error: string) => { if (settled) return; settled = true; cleanup(); onError(error); };
+  const deltaToolCalls = new Map<number, { id?: string; name: string; arguments: string }>();
+  const flushDeltaToolCalls = () => {
+    if (!deltaToolCalls.size || !opts?.onToolCalls) return;
+    opts.onToolCalls([...deltaToolCalls.entries()].sort(([a], [b]) => a - b).map(([, call]) => ({ id: call.id, function: { name: call.name, arguments: call.arguments || '{}' } })));
+    deltaToolCalls.clear();
+  };
+  const cleanup = () => { unlisteners.splice(0).forEach(u => u()); opts?.signal?.removeEventListener('abort', onAbort); };
+  const onAbort = () => { void invoke('cancel_http_stream', { eventId }).catch(() => undefined); fail('已取消'); };
+  opts?.signal?.addEventListener('abort', onAbort, { once: true });
+  const listen = async <T>(name: string, handler: (event: { payload: T }) => void) => {
+    const unlisten = await listenEvent<T>(name, handler);
+    if (settled) unlisten(); else unlisteners.push(unlisten);
+  };
+  try {
+    if (opts?.signal?.aborted) { fail('已取消'); return cleanup; }
+    await listen<string>(`llm-token-${eventId}`, ev => { if (!settled && ev.payload) onToken(ev.payload); });
+    await listen<string>(`llm-reasoning-${eventId}`, ev => { if (!settled && ev.payload) onReasoning(ev.payload); });
+    await listen(`llm-done-${eventId}`, () => { if (settled) return; flushDeltaToolCalls(); if (settled) return; settled = true; cleanup(); onDone(); });
+    await listen<string>(`llm-toolcalls-${eventId}`, ev => {
+      if (settled || !ev.payload || !opts?.onToolCalls) return;
+      try { const arr = JSON.parse(ev.payload); if (!Array.isArray(arr)) throw new Error(); opts.onToolCalls(arr); } catch { fail('工具调用数据损坏，未执行本轮工具'); }
+    });
+    await listen<string>(`llm-toolcall-delta-${eventId}`, ev => {
+      try {
+        const items = JSON.parse(ev.payload || '[]');
+        if (!Array.isArray(items)) throw new Error();
+        for (const item of items) {
+          const explicitIndex = Number.isSafeInteger(Number(item?.index)) ? Number(item.index) : undefined;
+          const existingIndex = item?.id ? [...deltaToolCalls.entries()].find(([, call]) => call.id === String(item.id))?.[0] : undefined;
+          const index = explicitIndex ?? existingIndex ?? (deltaToolCalls.size === 0 ? 0 : undefined);
+          if (index === undefined) throw new Error('工具调用缺少 index/id');
+          const current = deltaToolCalls.get(index) || { name: '', arguments: '' };
+          if (item?.id) current.id = String(item.id);
+          if (item?.function?.name) current.name += String(item.function.name);
+          if (item?.function?.arguments) current.arguments += String(item.function.arguments);
+          deltaToolCalls.set(index, current);
+        }
+      } catch { fail('工具调用分段数据损坏，未执行本轮工具'); }
+    });
+    await listen<string>(`llm-meta-${eventId}`, ev => { try { if (!settled) opts?.onUsage?.(JSON.parse(ev.payload || '{}')); } catch { /* 元数据损坏不影响正文 */ } });
+    await listen(`llm-truncated-${eventId}`, () => { if (!settled) opts?.onTruncated?.(); });
+    await listen<string>(`llm-error-${eventId}`, ev => fail(ev.payload));
+    const body = buildLocalChatBody(native ? 'ollama' : backend, model, messages, {
+      ...opts, stream: true, json: opts?.json ?? native,
+      context: opts?.num_ctx, maxTokens: opts?.num_predict,
+    });
+    // Listeners must all be installed before dispatch; an abort during setup must not start a request.
+    if (settled || opts?.signal?.aborted) { fail('已取消'); return cleanup; }
+    void invoke('http_stream', {
+      url, eventId,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      backend,
+    }).catch(err => fail(String(err)));
+  } catch (error) {
+    fail(String((error as Error)?.message || error));
   }
-
-  
-  invoke('http_stream', {
-    url, eventId,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }).catch(err => { cleanup(); onError(String(err)); });
-
   return cleanup;
 }
 
@@ -111,6 +119,7 @@ export async function logLocalAICall(data: {
   try {
     const { saveAIRequestLog } = await import('./db');
     await saveAIRequestLog({
+        request_channel: 'local',
       request_type: data.request_type,
       material_name: data.material_name || '',
       system_prompt: data.system_prompt,
@@ -118,7 +127,7 @@ export async function logLocalAICall(data: {
       response_summary: data.response_summary,
       success: data.success ? 1 : 0,
       error_message: data.error_message || '',
-      provider_name: 'Ollama 本地',
+      provider_name: (await getLocalBackend()) + ' 本地',
       model_name: data.model_name || '',
       prompt_tokens: 0, completion_tokens: 0, total_tokens: 0,
     } as any);

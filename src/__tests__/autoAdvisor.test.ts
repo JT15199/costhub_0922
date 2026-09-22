@@ -110,4 +110,19 @@ describe('buildRuleCandidates', () => {
     const fps = a.map(c => c.fingerprint);
     expect(new Set(fps).size).toBe(fps.length);
   });
+
+  it('同一物料仅因用量不同不报跨项目价差', () => {
+    const input = baseInput();
+    input.projects = input.projects.slice(0, 2);
+    input.bomsByProject = { 1: [{ part_id: 21, part_name: '电容', part_model: 'C1', part_cost: 5, quantity: 1 }], 2: [{ part_id: 21, part_name: '电容', part_model: 'C1', part_cost: 5, quantity: 4 }] };
+    const out = buildRuleCandidates(input);
+    expect(out.filter(c => c.insight_type === 'cross_project_price_gap')).toHaveLength(0);
+  });
+
+  it('读取 material/part:ID 基线并按单价比较', () => {
+    const input = baseInput();
+    input.baselineByKey = { 'part:11': 280 };
+    const out = buildRuleCandidates(input).filter(c => c.insight_type === 'price_above_baseline');
+    expect(out.some(c => c.detail.includes('单价高出'))).toBe(true);
+  });
 });

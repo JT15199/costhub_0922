@@ -63,21 +63,43 @@ function hasNewGroups(oldJson: string, newJson: string): boolean {
   const oldSet = new Set(parseGroupNames(oldJson));
   return parseGroupNames(newJson).some(n => n && !oldSet.has(n));
 }
+
+// 写入前再次按已处理记录过滤，防止确认操作与后台旧扫描结果竞态时把情报复活。
+export function filterStoredInsightGroups(groups: any[], aliases: any[]): any[] {
+  const partKey = (r: any) => `${normalizePartName(r?.name)}|${normalizePartName(r?.model)}`;
+  const confirmed = new Set<string>();
+  aliases.filter((a: any) => a.source === 'user_confirmed').forEach((a: any) => confirmed.add(partKey({ name: a.alias_name, model: a.alias_model })));
+  const rowDiff = new Set<string>();
+  aliases.filter((a: any) => a.source === 'marked_different' && String(a.alias_name || '').startsWith('#ROWDIFF#'))
+    .forEach((a: any) => rowDiff.add(String(a.alias_name).slice(9)));
+  const negGroups = new Set(aliases.filter((a: any) => a.source === 'marked_different' && String(a.alias_name || '').startsWith('#NEG#')).map((a: any) => String(a.alias_name).slice(5)));
+  return (Array.isArray(groups) ? groups : []).flatMap((g: any) => {
+    const originalRows = Array.isArray(g?.rows) ? g.rows : [];
+    if (negGroups.has(originalRows.map(partKey).sort().join(';'))) return [];
+    const rows = originalRows.filter((r: any) => !confirmed.has(partKey(r)) && !rowDiff.has(partKey(r)));
+    if (rows.length < 2) return [];
+    const prices = rows.map((r: any) => Number(r.cost) || 0);
+    return [{ ...g, rows, diff: Math.round((Math.max(...prices) - Math.min(...prices)) * 100) / 100 }];
+  });
+}
+
 export async function upsertInsight(category: string, moduleName: string, insightJson: string) {
   const d = await getDb();
+  let nextGroups: any[] = [];
+  try { const parsed = JSON.parse(insightJson || '[]'); nextGroups = Array.isArray(parsed) ? parsed : []; } catch { nextGroups = []; }
+  try { nextGroups = filterStoredInsightGroups(nextGroups, await getPartAliases(moduleName)); } catch { return; } // 无法核对处理记录时不覆盖用户决定
+  const nextJson = JSON.stringify(nextGroups);
   const old = await d.select<any[]>('SELECT * FROM part_insights WHERE category = ? AND module_name = ?', [category || '', moduleName]);
   if (old[0]) {
-    if (old[0].insight_json === insightJson) return;
+    if (old[0].insight_json === nextJson) return;
     // 出现新组（数据变化导致的新情报）→ unread；否则（用户处理/归档导致的变化）保持原状态
-    const newStatus = hasNewGroups(old[0].insight_json, insightJson) ? 'unread' : old[0].status;
-    await d.execute("UPDATE part_insights SET insight_json = ?, status = ?, updated_at = datetime('now','localtime') WHERE id = ?", [insightJson, newStatus, old[0].id]);
+    const newStatus = nextGroups.length === 0 ? 'read' : hasNewGroups(old[0].insight_json, nextJson) ? 'unread' : old[0].status;
+    await d.execute("UPDATE part_insights SET insight_json = ?, status = ?, updated_at = datetime('now','localtime') WHERE id = ?", [nextJson, newStatus, old[0].id]);
     return;
   }
   // 无异常（空情报）不创建记录——避免"已核对"空模块占住待处理
-  let arr: any[] = [];
-  try { arr = JSON.parse(insightJson || '[]'); } catch { arr = []; }
-  if (arr.length === 0) return;
-  await d.execute("INSERT INTO part_insights (category, module_name, insight_json, status) VALUES (?,?,?,'unread')", [category || '', moduleName, insightJson]);
+  if (nextGroups.length === 0) return;
+  await d.execute("INSERT INTO part_insights (category, module_name, insight_json, status) VALUES (?,?,?,'unread')", [category || '', moduleName, nextJson]);
 }
 
 // 历史脏数据一次性清理（2026-08-17）：无待处理组（已核对/已处理完）的模块不应停在待处理——统一归档为已读
@@ -87,6 +109,7 @@ export async function cleanupInsightStatus() {
   for (const r of rows) {
     let data: any[] = [];
     try { data = JSON.parse(r.insight_json || '[]'); } catch { data = []; }
+    if (!Array.isArray(data)) data = [];
     if (data.length === 0 && r.status === 'unread') {
       await d.execute("UPDATE part_insights SET status = 'read' WHERE id = ?", [r.id]);
     }

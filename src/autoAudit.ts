@@ -4,16 +4,17 @@
 import { startOllamaStream, logLocalAICall } from './ollama';
 import { getSetting } from './db';
 import { replaceAuditFindings, type AuditFinding } from './auditStore';
+import { bomExtendedCostStrict, sumBomCostStrict } from './ai/contracts';
 
 // ============ 规则层发现（纯函数，可单测） ============
 
 export interface RuleCtx {
   projects: { id: number; code: string; project_type?: string; status?: string }[];
   targetsByProject: Record<number, { domain: string; target_cost: number }[]>;
-  bomsByProject: Record<number, { module_name?: string; main_category?: string; part_name: string; part_cost?: number; quantity?: number }[]>;
+  bomsByProject: Record<number, { module_name?: string; main_category?: string; part_name: string; part_cost?: number; quantity?: number; price_state?: string }[]>;
   suppliersByPart: Record<number, { supplier_name: string; price: number; share_ratio: number; is_active: number }[]>;
   skus: { id: number; project_id: number; sku_code: string }[];
-  skuCostBySku: Record<number, { cost: number; baseCost: number }>;
+  skuCostBySku: Record<number, { cost: number | null; baseCost: number | null }>;
   insightsCount: number;
 }
 
@@ -50,10 +51,12 @@ export function ruleFindings(ctx: RuleCtx): Omit<AuditFinding, 'id' | 'created_a
   // 3) 单模块占比异常（≥60% —— 关键物料依赖信号）
   ctx.projects.forEach(p => {
     const boms = ctx.bomsByProject[p.id] || [];
-    const total = boms.reduce((s, b) => s + (b.part_cost || 0) * (b.quantity || 1), 0);
+    const costs = boms.map(bomExtendedCostStrict);
+    if (costs.some(value => value === null)) return;
+    const total = costs.reduce<number>((s, value) => s + (value ?? 0), 0);
     if (total <= 0) return;
     const byMod: Record<string, number> = {};
-    boms.forEach(b => { const m = b.module_name || '未归类'; byMod[m] = (byMod[m] || 0) + (b.part_cost || 0) * (b.quantity || 1); });
+    boms.forEach((b, index) => { const m = b.module_name || '未归类'; byMod[m] = (byMod[m] || 0) + (costs[index] ?? 0); });
     Object.entries(byMod).forEach(([mod, cost]) => {
       const ratio = cost / total;
       if (ratio >= 0.6) {
@@ -70,7 +73,7 @@ export function ruleFindings(ctx: RuleCtx): Omit<AuditFinding, 'id' | 'created_a
 
   // 4) SKU 成本偏离基座过大（≥40%）
   Object.entries(ctx.skuCostBySku).forEach(([skuId, sc]) => {
-    if (!sc.baseCost) return;
+    if (sc.baseCost == null || sc.cost == null || sc.baseCost <= 0) return;
     const pct = (sc.cost - sc.baseCost) / sc.baseCost * 100;
     if (Math.abs(pct) >= 40) {
       const sku = ctx.skus.find(s => s.id === Number(skuId));
@@ -88,11 +91,14 @@ export function ruleFindings(ctx: RuleCtx): Omit<AuditFinding, 'id' | 'created_a
   // 5) 跨项目同模块成本对比：某项目模块总成本显著高于其他项目同模块 → 议价机会
   const modCostsByProj: Record<string, { cost: number; projects: number }> = {};
   ctx.projects.forEach(p => {
-    (ctx.bomsByProject[p.id] || []).forEach(b => {
+    const boms = ctx.bomsByProject[p.id] || [];
+    const costs = boms.map(bomExtendedCostStrict);
+    if (costs.some(value => value === null)) return;
+    boms.forEach((b, index) => {
       const m = b.module_name || '未归类';
       const k = p.id + '|' + m;
       if (!modCostsByProj[k]) modCostsByProj[k] = { cost: 0, projects: 0 };
-      modCostsByProj[k].cost += (b.part_cost || 0) * (b.quantity || 1);
+      modCostsByProj[k].cost += costs[index] ?? 0;
     });
   });
   const modAgg: Record<string, { cost: number; count: number; projCosts: Record<number, number> }> = {};
@@ -160,7 +166,7 @@ export function computeAuditFingerprint(
   projects: any[], bomsByProject: Record<number, any[]>, suppliersByPart: Record<number, any[]>,
   skus: any[], insights: any[], recentChanges: any[],
 ): string {
-  const totalCost = projects.reduce((s, p) => s + (bomsByProject[p.id] || []).reduce((x, b) => x + (b.part_cost || 0) * (b.quantity || 1), 0), 0);
+  const totalCost = projects.reduce((s, p) => s + (bomsByProject[p.id] || []).reduce((x, b) => x + (bomExtendedCostStrict(b) ?? 0), 0), 0);
   const bomCount = Object.values(bomsByProject).reduce((s, b) => s + b.length, 0);
   const changes = (recentChanges || []).slice(0, 5).map((c: any) => c.id + ':' + (c.old_cost || 0) + '>' + (c.new_cost || 0)).join(',');
   const insightsSig = (insights || []).slice(0, 5).map((i: any) => i.id + ':' + i.status).join(',');
@@ -172,13 +178,14 @@ export function computeAuditFingerprint(
 export async function buildAuditContext(
   projects: any[], bomsByProject: Record<number, any[]>, targetsByProject: Record<number, any[]>,
   suppliersByPart: Record<number, any[]>, snapshotsByProject: Record<number, any[]>, insights: any[],
-  skus: any[], skuCostBySku: Record<number, { cost: number; baseCost: number }>,
+  skus: any[], skuCostBySku: Record<number, { cost: number | null; baseCost: number | null }>,
 ): Promise<string> {
   const lines: string[] = [];
   lines.push(`共 ${projects.length} 个项目、${Object.values(bomsByProject).reduce((s, b) => s + b.length, 0)} 个 BOM 项、${Object.keys(suppliersByPart).length} 个器件有供应商、${insights.length} 条报价情报、${skus.length} 个 SKU`);
   projects.forEach(p => {
     const boms = bomsByProject[p.id] || [];
-    const total = boms.reduce((s, b) => s + (b.part_cost || 0) * (b.quantity || 1), 0);
+    const values = boms.map(bomExtendedCostStrict);
+    const total = values.some(value => value === null) ? null : values.reduce<number>((s, value) => s + (value ?? 0), 0);
     const specs = p.category === '显示器'
       ? [p.screen_size, p.resolution, p.refresh_rate, p.panel_type].filter(Boolean).join('/')
       : (p.specs || '');
@@ -187,7 +194,7 @@ export async function buildAuditContext(
     const snapInfo = snaps.length >= 2
       ? `最近快照 ${snaps[snaps.length - 1].bom_cost}（共 ${snaps.length} 条）`
       : `快照 ${snaps.length} 条`;
-    lines.push(`项目 ${p.code}[${p.name || ''}] ${p.project_type || ''} 规格(${specs}) BOM成本¥${total.toFixed(2)} 目标(${t}) ${snapInfo}`);
+    lines.push(`项目 ${p.code}[${p.name || ''}] ${p.project_type || ''} 规格(${specs}) BOM成本${total == null ? '待补证据' : '¥' + total.toFixed(2)} 目标(${t}) ${snapInfo}`);
   });
   // 模块成本分布（跨项目看模式）
   const modCosts: Record<string, { cost: number; projects: number }> = {};
@@ -195,7 +202,7 @@ export async function buildAuditContext(
     (bomsByProject[p.id] || []).forEach(b => {
       const m = b.module_name || '未归类';
       if (!modCosts[m]) modCosts[m] = { cost: 0, projects: 0 };
-      modCosts[m].cost += (b.part_cost || 0) * (b.quantity || 1);
+      modCosts[m].cost += bomExtendedCostStrict(b) ?? 0;
       modCosts[m].projects += 1;
     });
   });
@@ -207,7 +214,7 @@ export async function buildAuditContext(
   }).filter(Boolean);
   if (supInfo.length) lines.push('供应商报价：' + supInfo.join(' | '));
   // SKU
-  if (skus.length) lines.push('SKU：' + skus.map(s => `${s.sku_code}(基座¥${skuCostBySku[s.id]?.baseCost || 0}→¥${skuCostBySku[s.id]?.cost || 0})`).join('、'));
+  if (skus.length) lines.push('SKU：' + skus.map(s => `${s.sku_code}(基座${skuCostBySku[s.id]?.baseCost == null ? '待补证据' : '¥' + skuCostBySku[s.id].baseCost}→${skuCostBySku[s.id]?.cost == null ? '待补证据' : '¥' + skuCostBySku[s.id].cost})`).join('、'));
   return lines.join('\n');
 }
 
@@ -281,10 +288,11 @@ export async function runAutoAudit(): Promise<AutoAuditResult | null> {
     const skus2 = await (await import('./db')).getAllSkus().catch(() => []);
     let skuDiffsMap: Record<number, any[]> = {};
     try { skuDiffsMap = await getAllSkuDiffs(skus2.map((s: any) => s.id)); } catch { /* 忽略 */ }
-    const skuCostBySku: Record<number, { cost: number; baseCost: number }> = {};
+    const skuCostBySku: Record<number, { cost: number | null; baseCost: number | null }> = {};
     for (const s of skus2) {
-      const baseCost = (bByP[s.project_id] || []).reduce((sum: number, b: any) => sum + (b.part_cost || 0) * (b.quantity || 1), 0);
-      const r = calcSkuCost(bByP[s.project_id] || [], skuDiffsMap[s.id] || [], baseCost);
+      const baseState = sumBomCostStrict(bByP[s.project_id] || []);
+      const baseCost = baseState.missing.length ? null : baseState.total;
+      const r = baseCost == null ? { cost: null } : calcSkuCost(bByP[s.project_id] || [], skuDiffsMap[s.id] || [], baseCost);
       skuCostBySku[s.id] = { cost: r.cost, baseCost };
     }
     // 规则层

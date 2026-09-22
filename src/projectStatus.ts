@@ -22,7 +22,7 @@ export function computeProjectStatuses(
   computeTargetStatuses(projects, targetsByProject, bomsByProject)
     .filter(t => t.missed)
     .forEach(t => {
-      out[t.projectId].reasons.push(`${t.domain} 超目标 ¥${t.diff.toFixed(2)}`);
+      if (t.diff != null) out[t.projectId].reasons.push(`${t.domain} 超目标 ¥${t.diff.toFixed(2)}`);
     });
 
   // 2) 报价情报（未读且涉及该项目）→ warn

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Input, Button, message } from 'antd';
+import { Input, Button, message, Alert } from 'antd';
 import { UserOutlined, LockOutlined, KeyOutlined, SafetyOutlined, DatabaseOutlined, FileSearchOutlined, CloudOutlined } from '@ant-design/icons';
 import defaultLogo from '../assets/costhub-logo.png';
 
@@ -9,26 +9,28 @@ interface Props {
 }
 
 export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState('admin');
+  const [initializing, setInitializing] = useState(true);
+  const [initError, setInitError] = useState('');
   const [pwd, setPwd] = useState('');
   const [checking, setChecking] = useState(false);
   // 首次使用提示（改过密码后不再显示）
   const [firstUse, setFirstUse] = useState(false);
-  // 双击 Logo 显示真实密码（单机使用的防遗忘机制）
-  const [showPwd, setShowPwd] = useState(false);
-  const [plainPwd, setPlainPwd] = useState('');
   const [entering, setEntering] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const { isFirstUse, getUsername, getPlainPassword } = await import('../db');
-        setFirstUse(await isFirstUse());
-        setUsername(await getUsername());
-        setPlainPwd(await getPlainPassword());
-      } catch { }
-    })();
-  }, []);
+  const initialize = async () => {
+    setInitializing(true);
+    setInitError('');
+    try {
+      const { ensureAuthPassword, isFirstUse, getUsername } = await import('../db');
+      await ensureAuthPassword();
+      setFirstUse(await isFirstUse());
+      setUsername(await getUsername());
+    } catch (error) {
+      setInitError(error instanceof Error ? error.message : String(error));
+    } finally { setInitializing(false); }
+  };
+  useEffect(() => { void initialize(); }, []);
 
   const submit = async (isCorrect: boolean) => {
     if (isCorrect) {
@@ -44,17 +46,14 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
     }
   };
 
-  const revealPassword = () => {
-    setShowPwd(!showPwd);
-    if (!showPwd) message.info(`密码：${plainPwd}（仅本机可见）`);
-  };
-
   const handleSubmit = async () => {
+    if (initializing || initError) return;
     if (!username.trim()) { message.warning('请输入用户名'); return; }
     if (!pwd.trim()) { message.warning('请输入密码'); return; }
     setChecking(true);
     try {
-      const { verifyPassword, getUsername } = await import('../db');
+      const { ensureAuthPassword, verifyPassword, getUsername } = await import('../db');
+      await ensureAuthPassword();
       const savedName = await getUsername();
       const ok = username.trim() === savedName && (await verifyPassword(pwd));
       await submit(ok);
@@ -72,11 +71,7 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
       <div className="login-shell">
         <section className="login-brand-pane" aria-label="CostHub 产品信息">
           <div className="login-brand-lockup">
-            <div
-              className="login-logo-hitarea"
-              onDoubleClick={revealPassword}
-              title="双击显示本机密码"
-            >
+            <div className="login-logo-hitarea">
               <img className="login-logo-image" src={defaultLogo} alt="CostHub" />
             </div>
             <div className="login-brand-name">CostHub</div>
@@ -95,12 +90,6 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
             <h1>欢迎回来</h1>
             <p>继续管理你的成本决策</p>
           </div>
-
-          {showPwd && (
-            <div className="login-password-reveal" role="status">
-              <KeyOutlined /> 当前密码：{plainPwd}
-            </div>
-          )}
 
           <label className="login-field">
             <span className="login-field-label">用户名</span>
@@ -127,9 +116,11 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
             />
           </label>
 
-          <Button type="primary" size="large" block loading={checking} className="login-btn" onClick={handleSubmit}>
-            登录
+          <Button type="primary" size="large" block disabled={!!initError} loading={checking || initializing} className="login-btn" onClick={handleSubmit}>
+            {initializing ? '正在准备本地数据库…' : '登录'}
           </Button>
+
+          {initError && <Alert type="error" showIcon title="数据库初始化未完成" description={initError} action={<Button onClick={initialize}>重试</Button>} style={{marginTop:12}} />}
 
           <div className="login-security-row">
             <button type="button" onClick={() => message.info('成本数据默认仅在本机处理；任何云端分析都需先经过脱敏与审批。')}>

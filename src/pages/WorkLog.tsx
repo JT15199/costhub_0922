@@ -1,819 +1,274 @@
-import { useState, useEffect, useCallback } from 'react';
-import { EmojiIcon } from '../iconMap';
-import { Button, Input, Select, message, Empty, Popconfirm, DatePicker, Spin, Tooltip, Checkbox, Modal, AutoComplete } from 'antd';
-import { PlusOutlined, DeleteOutlined, SearchOutlined, RobotOutlined, CheckOutlined, CloseOutlined, FlagOutlined, CheckCircleFilled, BookOutlined, PushpinOutlined, SaveOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
-import {
-  getWorkLogs, saveWorkLog, deleteWorkLog, toggleWorkLogDone,
-} from '../db';
-
-const LOG_CATEGORIES = ['成本分析', '供应商谈判', 'BOM审核', '项目推进', '会议', '问题解决', '工具建设', '其他'];
-
-const NOTE_COLORS: Record<string, string> = {
-  '成本分析': '#FFF8E1', '供应商谈判': '#FFE9E4', 'BOM审核': '#E8F4FD',
-  '项目推进': '#E8F5E9', '会议': '#F3E8FF', '问题解决': '#FFEBEE',
-  '工具建设': '#E0F7FA', '其他': '#F5F5F5',
-};
-const NOTE_PIN: Record<string, string> = {
-  '成本分析': '#F9A825', '供应商谈判': '#F4511E', 'BOM审核': '#1E88E5',
-  '项目推进': '#43A047', '会议': '#8E24AA', '问题解决': '#E53935',
-  '工具建设': '#00ACC1', '其他': '#757575',
-};
-
-// 通用流式调用（复用 src/ollama.ts 的 startOllamaStream，与右侧 AI 协作窗/演示生成器共用）
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AutoComplete, Button, DatePicker, Empty, Form, Input, InputNumber, Modal, Select, Spin, Tag, message } from 'antd';
+import { BookOutlined, DeleteOutlined, EditOutlined, LinkOutlined, RobotOutlined, SaveOutlined, SearchOutlined } from '@ant-design/icons';
+import JournalShelf, { bookAppearance, JournalTurningPage, journalMotionEnabled } from '../components/JournalShelf';
+import dayjs, { type Dayjs } from 'dayjs';
+import { buildSummaryPrompts, deleteWorkLog, deleteWorkSummary, getProjectBOMs, getProjects, getSetting, getWorkLogs, getWorkSummaries, saveProductionCostSaving, saveWorkLog, saveWorkSummary, setSetting, toggleWorkLogDone, type WorkLogRecord, WORK_LOG_TYPES } from '../db';
+import { isSqliteLockedError } from '../db/core';
 import { startOllamaStream } from '../ollama';
-async function startSummaryStream(
-  baseUrl: string, model: string,
-  systemPrompt: string, userPrompt: string,
-  onToken: (t: string) => void,
-  onReasoning: (t: string) => void,
-  onDone: () => void,
-  onError: (msg: string) => void,
-  onTimeout: () => void,
-) {
-  let finished = false;
-  const timeoutId = setTimeout(() => { if (!finished) { finished = true; onTimeout(); } }, 600000);
-  const finish = () => { if (!finished) { finished = true; clearTimeout(timeoutId); } };
-  try {
-    const cleanup = await startOllamaStream(
-      baseUrl, model,
-      [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-      onToken,
-      onReasoning,
-      () => { finish(); onDone(); },
-      (e) => { finish(); onError(e); },
-      { num_predict: 16384, temperature: 0.3, think: false, endpoint: 'native', json: false },
-    );
-    // 超时后清理监听器
-    const t = setTimeout(() => { try { cleanup(); } catch { } }, 610000);
-    void t;
-  } catch (e: any) { finish(); onError(String(e?.message || e)); }
-}
+
+type EditorValue = Partial<WorkLogRecord> & { evidence_json?: string };
+
+const TYPE_LABEL: Record<string, string> = { work_progress: '工作进展', decision: '决策记录', risk: '问题风险', reflection: '心得思考', outcome: '成果痕迹', follow_up: '待跟进', cost_progress: '关键成本进展' };
+const SUMMARY_LABEL: Record<string, string> = { week: '周报', month: '月报', project_review: '项目复盘', performance: '绩效总结', growth: '成长复盘' };
+const PROJECT_STAGES = ['Charter', 'CDCP', 'PDCP', 'ADCP', '量产后降本'];
+const newJournalEntry = (project_id = 0, work_project = ''): EditorValue => ({ log_date: dayjs().format('YYYY-MM-DD HH:mm'), record_type: 'work_progress', stage: 'Charter', content: '', title: '', project_id, work_project, impact: '', next_action: '', importance: 'normal', due_at: '' });
+const dateRange = (kind: string): [Dayjs, Dayjs] => kind === 'month' ? [dayjs().startOf('month'), dayjs()] : [dayjs().subtract(6, 'day'), dayjs()];
 
 export default function WorkLog() {
-  const [logs, setLogs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState('');
-  const [keyword, setKeyword] = useState('');
-  const [view, setView] = useState<'notes' | 'todos'>('notes');
-  // 分类章节折叠状态（默认全展开）
-  const [collapsedCats, setCollapsedCats] = useState<Record<string, boolean>>({});
-  // 便签编辑状态
-  const [composing, setComposing] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [noteDate, setNoteDate] = useState(dayjs());
-  const [noteCategory, setNoteCategory] = useState('');
-  const [noteTitle, setNoteTitle] = useState('');
-  const [noteContent, setNoteContent] = useState('');
-  // 项目标签（来自项目库 + 自由输入，空=公共/其他）
-  const [noteProject, setNoteProject] = useState('');
-  const [projectOptions, setProjectOptions] = useState<string[]>([]);
-  const [projectFilter, setProjectFilter] = useState('');
-  // 待办输入
-  const [todoInput, setTodoInput] = useState('');
-  const [todoProject, setTodoProject] = useState('');
-  // 总结
-  const [summaryOpen, setSummaryOpen] = useState(false);
-  const [summarizing, setSummarizing] = useState(false);
-  const [summaryRange, setSummaryRange] = useState<[any, any] | null>(null);
-  // 时间轴：根据记录日期生成的快捷月份
-  const [timelineMonths, setTimelineMonths] = useState<{ key: string; label: string; start: string; end: string; count: number }[]>([]);
-  // 时间轴多选月份
-  const [selectedMonths, setSelectedMonths] = useState<string[]>([]);
-  const [summaryResult, setSummaryResult] = useState('');
-  // 总结模型（独立设置，可用非思考型模型加速）
-  const [summaryModel, setSummaryModel] = useState('');
-  const [summaryModels, setSummaryModels] = useState<string[]>([]);
-  // 已保存的总结
-  const [savedSummaries, setSavedSummaries] = useState<any[]>([]);
-  const [showSaved, setShowSaved] = useState(false);
-  // 当前查看全文的总结
-  const [viewingSummary, setViewingSummary] = useState<any>(null);
-  const [summaryElapsed, setSummaryElapsed] = useState(0);
-  // 收到字符计数（实时反馈模型在响应）
-  const [summaryChars, setSummaryChars] = useState(0);
-  // 第一步压缩阶段的字符计数（压缩时界面也有实时反馈）
-  const [condenseChars, setCondenseChars] = useState(0);
-  // 第一步压缩阶段的实时文本（界面实时展示压缩内容）
-  const [condensedText, setCondensedText] = useState('');
-  const [summaryPhase, setSummaryPhase] = useState<'idle' | 'preparing' | 'reading' | 'generating' | 'done' | 'error'>('idle');
+  const [projectsReady, setProjectsReady] = useState(false);
+  const [tab, setTab] = useState<'records' | 'project' | 'summary'>('records');
+  const [logs, setLogs] = useState<WorkLogRecord[]>([]); const [projects, setProjects] = useState<any[]>([]); const [loading, setLoading] = useState(true);
+  const [keyword, setKeyword] = useState(''); const [projectFilter, setProjectFilter] = useState<number | ''>(''); const [typeFilter, setTypeFilter] = useState('');
+  const [editing, setEditing] = useState<EditorValue | null>(null); const [selectedProject, setSelectedProject] = useState<number | ''>('');
+  const [summaries, setSummaries] = useState<any[]>([]); const [viewingSummary, setViewingSummary] = useState<any>(null); const [sourceRows, setSourceRows] = useState<WorkLogRecord[]>([]);
+  const [summaryType, setSummaryType] = useState('week'); const [summaryRange, setSummaryRange] = useState<[Dayjs, Dayjs]>(dateRange('week')); const [summaryProject, setSummaryProject] = useState<number | ''>(''); const [summaryModel, setSummaryModel] = useState('');
+  const [summaryText, setSummaryText] = useState(''); const [summaryRows, setSummaryRows] = useState<WorkLogRecord[]>([]); const [summarizing, setSummarizing] = useState(false);
 
-  // 总结计时器
-  useEffect(() => {
-    if (!summarizing) return;
-    setSummaryElapsed(0);
-    const start = Date.now();
-    const iv = setInterval(() => setSummaryElapsed(Math.floor((Date.now() - start) / 1000)), 500);
-    return () => clearInterval(iv);
-  }, [summarizing]);
-
-  const loadLogs = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async () => { setLoading(true); try { setLogs(await getWorkLogs()); setSummaries(await getWorkSummaries()); } catch (e: any) { message.error(`工作手账加载失败：${String(e?.message || e).slice(0, 100)}`); } finally { setLoading(false); } }, []);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { Promise.all([getProjects('', '', ''), getSetting('local_ai_summary_model', '')]).then(([ps, m]) => { setProjects(Array.isArray(ps) ? ps : []); setSummaryModel(m); setSelectedProject(p => p || (ps[0]?.id || '')); setProjectsReady(true); }).catch(() => { }); }, []);
+  const visibleLogs = useMemo(() => logs.filter(l => (!typeFilter || l.record_type === typeFilter) && (!projectFilter || l.project_id === projectFilter) && (!keyword.trim() || [l.title, l.content, l.tags, l.work_project].join(' ').toLowerCase().includes(keyword.trim().toLowerCase()))), [logs, typeFilter, projectFilter, keyword]);
+  const followUps = useMemo(() => logs.filter(l => (l.record_type === 'follow_up' || l.is_todo) && !l.done), [logs]);
+  const openEditor = (log?: WorkLogRecord) => setEditing(log ? { ...log, evidence_json: JSON.stringify(log.evidence || []) } : newJournalEntry());
+  const save = async (value = editing): Promise<number | false> => {
+    if (!value?.content?.trim()) { message.warning('请先填写工作记录'); return false; }
     try {
-      const rows = await getWorkLogs(categoryFilter, keyword, '', '', projectFilter);
-      setLogs(rows);
-    } catch (e) { console.error('加载失败:', e); }
-    setLoading(false);
-  }, [categoryFilter, keyword, projectFilter]);
-
-  useEffect(() => { loadLogs(); }, [loadLogs]);
-
-  const notes = logs.filter(l => !l.is_todo);
-  // 时间轴：按月份聚合有记录的日期（只显示有记录的月份）
-  useEffect(() => {
-    if (!logs.length) { setTimelineMonths([]); return; }
-    const byMonth: Record<string, { label: string; count: number }> = {};
-    logs.forEach(l => {
-      const d = (l.log_date || '').slice(0, 7); // YYYY-MM
-      if (!d) return;
-      if (!byMonth[d]) {
-        byMonth[d] = { label: d, count: 0 };
-      }
-      byMonth[d].count++;
-    });
-    // 时间轴从左到右递增：最早的月份在左，最近的月份在右（YYYY-MM 字符串排序即时间顺序）
-    const months = Object.keys(byMonth).sort().map(k => ({
-      key: k, label: k, count: byMonth[k].count,
-      start: `${k}-01`,
-      end: `${k}-${new Date(Number(k.slice(0, 4)), Number(k.slice(5, 7)), 0).getDate()}`,
-    }));
-    setTimelineMonths(months);
-  }, [logs]);
-  const todos = logs.filter(l => l.is_todo);
-  const openTodos = todos.filter(t => !t.done);
-  const doneTodos = todos.filter(t => t.done);
-
-  const startCompose = () => {
-    setEditingId(null); setNoteDate(dayjs()); setNoteCategory('');
-    setNoteTitle(''); setNoteContent(''); setNoteProject(''); setComposing(true);
+      const id = await saveWorkLog({ ...value, is_todo: value.record_type === 'follow_up' ? 1 : 0, done: value.done || 0, category: value.category || '其他', tags: value.tags || '', content: value.content.trim() } as any);
+      if (!id) throw new Error('未写入记录，请确认数据库已解锁');
+      setEditing(null); await load(); message.success(value.id ? '本条记录已修改' : '已新增一条记录，历史内容保留'); return id;
+    } catch (e: any) { message.error(isSqliteLockedError(e) ? '数据库仍被占用，本条内容已保留，请稍后再保存。' : `保存失败：${e?.message || e}`); return false; }
   };
-  const startEdit = (log: any) => {
-    setEditingId(log.id); setNoteDate(dayjs(log.log_date));
-    setNoteCategory(log.category || ''); setNoteTitle(log.title || '');
-    setNoteContent(log.content); setNoteProject(log.work_project || ''); setComposing(true);
+  const startSummary = (type = summaryType) => { const range = dateRange(type === 'month' ? 'month' : 'week'); setSummaryType(type); setSummaryRange(range); setTab('summary'); setSummaryText(''); };
+  const generateSummary = async () => {
+    const start = summaryRange[0]?.format('YYYY-MM-DD'), end = summaryRange[1]?.format('YYYY-MM-DD'); if (!start || !end) return;
+    setSummarizing(true); setSummaryText('');
+    try { const rows = await getWorkLogs('', '', start, end, summaryProject); if (!rows.length) { message.info('该范围内没有工作记录'); setSummarizing(false); return; } setSummaryRows(rows); const base = await getSetting('local_ai_base_url', 'http://localhost:11434'); const model = summaryModel || await getSetting('local_ai_model', ''); if (!model) throw new Error('未配置本地模型'); const prompt = buildSummaryPrompts(summaryType, start, end, rows); let text = ''; await new Promise<void>(resolve => { startOllamaStream(base, model, [{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }], t => { text += t; setSummaryText(text); }, () => { }, resolve, e => { text = `[生成失败] ${e}`; setSummaryText(text); resolve(); }, { num_predict: 12000, temperature: 0.25, think: false, endpoint: 'native', json: false }); }); if (text.startsWith('[生成失败]')) message.error(text); } catch (e: any) { message.error(`总结失败：${e?.message || e}`); } finally { setSummarizing(false); }
   };
-  const cancelCompose = () => { setComposing(false); setEditingId(null); };
+  const saveSummary = async () => { if (!summaryText || !summaryRows.length) return; const start = summaryRange[0].format('YYYY-MM-DD'), end = summaryRange[1].format('YYYY-MM-DD'); await saveWorkSummary({ title: `${SUMMARY_LABEL[summaryType] || '工作总结'} · ${start} ~ ${end}`, content: summaryText, start_date: start, end_date: end, summary_type: summaryType, project_filter: summaryProject, source_log_ids: summaryRows.map(r => r.id) }); setSummaries(await getWorkSummaries()); message.success('总结已保存，并保留原始记录引用'); };
+  const viewEvidence = async (summary: any) => { const ids = Array.isArray(summary.source_log_ids) ? summary.source_log_ids : []; const all = await getWorkLogs(); setSourceRows(all.filter(r => ids.includes(r.id))); setViewingSummary(summary); };
 
-  // 加载项目库名称作为项目标签选项（含历史便签用过的项目名）
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const [{ getProjects }, { getWorkLogs }] = await Promise.all([
-          import('../db'), import('../db'),
-        ]);
-        const projs = await getProjects();
-        const used = await getWorkLogs('', '', '', '');
-        const names = new Set<string>();
-        projs.forEach((p: any) => { if (p.name) names.add(p.name); });
-        used.forEach((l: any) => { if (l.work_project) names.add(l.work_project); });
-        if (!cancelled) setProjectOptions(Array.from(names).sort((a, b) => a.localeCompare(b, 'zh')));
-      } catch { /* 加载失败不阻塞 */ }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  // 保存时把项目名记入选项（输入过程不记忆，避免"鼠/鼠标/鼠标项"都被存进去）
-  const rememberProject = (name: string) => {
-    const n = (name || '').trim();
-    if (n && !projectOptions.includes(n)) {
-      setProjectOptions(prev => [...prev, n].sort((a, b) => a.localeCompare(b, 'zh')));
-    }
-  };
-
-  const saveNote = async () => {
-    if (!noteContent.trim()) { message.warning('写点内容吧'); return; }
-    try {
-      await saveWorkLog({
-        id: editingId ?? undefined,
-        log_date: noteDate.format('YYYY-MM-DD HH:mm'),
-        title: noteTitle.trim(), content: noteContent.trim(),
-        category: noteCategory || '其他', tags: '', work_project: noteProject.trim(), is_todo: false, done: false,
-      });
-      message.success(editingId ? '已更新' : '已记录');
-      rememberProject(noteProject);
-      setComposing(false); setEditingId(null); loadLogs();
-    } catch (e: any) { message.error(`保存失败：${e?.message || e}`); }
-  };
-
-  const addTodo = async () => {
-    if (!todoInput.trim()) return;
-    try {
-      await saveWorkLog({
-        log_date: dayjs().format('YYYY-MM-DD HH:mm'),
-        title: '', content: todoInput.trim(),
-        category: '项目推进', tags: '', work_project: todoProject.trim(), is_todo: true, done: false,
-      });
-      setTodoInput(''); rememberProject(todoProject); setTodoProject(''); loadLogs();
-    } catch (e: any) { message.error(`添加失败：${e?.message || e}`); }
-  };
-
-  const toggleTodo = async (id: number, done: boolean) => {
-    await toggleWorkLogDone(id, done);
-    loadLogs();
-  };
-
-  // ===== AI 总结（流式输出 + 过程呈现） =====
-  const handleSummarize = async () => {
-    if (!summaryRange || !summaryRange[0] || !summaryRange[1]) {
-      message.warning('请选择总结的时间范围'); return;
-    }
-    setSummarizing(true); setSummaryResult(''); setSummaryElapsed(0); setSummaryChars(0); setCondenseChars(0); setCondensedText(''); setSummaryPhase('preparing');
-    try {
-      const start = summaryRange[0].format('YYYY-MM-DD');
-      const end = summaryRange[1].format('YYYY-MM-DD');
-      setSummaryPhase('reading');
-      const rows = await getWorkLogs('', '', start, end);
-      if (!rows.length) { message.warning('该时间段没有记录'); setSummarizing(false); return; }
-
-      const db = await import('../db').then(m => m.getDb());
-      const cfg = await db.select<any[]>('SELECT key, value FROM settings WHERE key IN (?,?,?)', ['local_ai_base_url', 'local_ai_model', 'local_ai_summary_model']);
-      const baseUrl = cfg.find(c => c.key === 'local_ai_base_url')?.value || 'http://localhost:11434';
-      // 总结模型：优先用独立设置，未设置则用对话模型
-      const model = cfg.find(c => c.key === 'local_ai_summary_model')?.value
-        || cfg.find(c => c.key === 'local_ai_model')?.value || '';
-      if (!model) {
-        message.warning('未配置 AI 模型，请先在设置中配置本地模型');
-        setSummarizing(false); setSummaryPhase('idle'); return;
-      }
-      // 打开总结弹窗（压缩阶段即可看到实时反馈）
-      setSummaryOpen(true);
-
-      // 分组：按项目标签分组（无标签归入"公共/其他"），待办分已完成/未完成
-      const noteRows = rows.filter(r => !r.is_todo);
-      const todoRows = rows.filter(r => r.is_todo);
-      const grouped: Record<string, string[]> = {};
-      noteRows.forEach(r => {
-        const p = (r.work_project || '').trim() || '公共/其他';
-        if (!grouped[p]) grouped[p] = [];
-        grouped[p].push(`${(r.log_date || '').slice(0, 10)} ${r.title ? '[' + r.title + '] ' : ''}${r.content}`);
-      });
-      let logText = '';
-      Object.entries(grouped).forEach(([proj, items]) => {
-        logText += `\n【${proj}】\n` + items.map(i => `- ${i}`).join('\n');
-      });
-      const doneList = todoRows.filter(t => t.done).map(t => `${(t.log_date || '').slice(0, 10)} ${(t.work_project || '').trim() ? '[' + t.work_project.trim() + '] ' : ''}${t.content}`);
-      const openList = todoRows.filter(t => !t.done).map(t => `${(t.log_date || '').slice(0, 10)} ${(t.work_project || '').trim() ? '[' + t.work_project.trim() + '] ' : ''}${t.content}`);
-      if (doneList.length) logText += `\n【已完成的待办事项】\n` + doneList.map(i => `- ${i}`).join('\n');
-      if (openList.length) logText += `\n【未完成的待办事项】\n` + openList.map(i => `- ${i}`).join('\n');
-
-      // ===== 第一步：压缩提炼（控制 token 占用，日志再多也不爆） =====
-      setSummaryPhase('reading');
-      let condensedAcc = '';
-      const condensePrompt = `你是工作日志提炼助手。把下面的工作记录压缩成结构化的素材，供后续撰写总结使用。
-
-要求：
-1. 保持【项目名】分组不变（无项目名的归在"公共/其他"），每组内条目**按时间先后排序**
-2. 每条提炼成一句话要点（20-40字），格式："X月X日 做了什么 → 结果"，保留关键数据（金额、百分比、结论）
-3. **同一项目的多条记录要能串成时间线**：同一项目在不同日期的记录，按时间顺序排列，为后续串联成文做准备
-4. 对"公共/其他"分组：每条要点末尾用【】标注性质——推动协调类标【公共事务】，建模型/建工具/方法论标【能力建设】，支援/带教/借助资源标【协作互助】
-5. 待办事项只保留【已完成】和【未完成】两个标题下的条目
-6. 只输出压缩后的要点，不要解释、不要评价`;
-      const condenseUser = `请压缩这些工作记录：\n${logText}`;
-      await new Promise<void>((resolve) => {
-        startSummaryStream(baseUrl, model, condensePrompt, condenseUser,
-          (t) => { condensedAcc += t; setCondenseChars(condensedAcc.length); setCondensedText(condensedAcc); },
-          () => { /* 压缩阶段不显示思考 */ },
-          () => { resolve(); },
-          () => { resolve(); },
-          () => { resolve(); });
-      });
-      // 如果压缩失败或为空，退回原始文本
-      let condensedText = condensedAcc;
-      if (condensedText.trim().length < 20) { condensedText = logText; }
-
-      // ===== 第二步：正式总结（流式，实时反馈） =====
-      const systemPrompt = `你是员工的绩效总结助手。把下面的工作要点写成一份有层次、有逻辑、能体现真实贡献的年中/年终总结。
-
-## 输出结构（必须遵守）
-按四个维度组织正文，每个维度一个小节：
-一、项目维度（重点，篇幅最大）：按项目成段，每个项目是一段连贯的叙述，不是列表
-二、公共事务：推动XX事项、牵头XX工作等，写清推动了什么、结果如何
-三、能力建设：模型/工具/方法论建设，写清建了什么、用在哪儿、带来什么价值
-四、协作互助：借助别人的帮助 + 帮助别人做得更好，两头各写清楚
-
-## 每个项目/事项的写法（必须遵守）
-- 一段话串起：**起因/背景 → 关键动作（按时间先后，用"随后""接着""在此基础上"衔接）→ 结果/贡献**
-- 同一项目的记录必须合并成一条故事线，例如：
-  ✅ 正确示范："手写笔项目从选件需求梳理起步，先后完成笔尖双供应商比价、传感器模组国产化替代（单支降本2.4元）、主控芯片替代验证，最终BOM定稿¥34.6、较目标低0.4元，首批5000支顺利量产。"
-  ❌ 错误示范（禁止）："手写笔选件需求梳理（6月5日）；笔尖供应商比价（6月12日）；传感器选型（6月19日）..."
-- **禁止**：编号列表、逐条罗列、每条带日期、每条都写"贡献：..."的模板句式
-- 时间跨度长的项目体现阶段推进（初期…随后…最终…）
-
-## 语言风格（必须遵守，书面正式）
-- 使用**正式书面语**，语气严谨、客观，适合绩效考评材料；**禁止口语化表达**
-- ❌ 禁止的口语化表达："搞""弄""整""挺""特别""咱们""一下""这块""那边""差不多""反正""搞定""带了一下""帮忙弄了"等
-- ✅ 正式替代："推进""完成""主导""落实""优化""组织""协调""达成"等书面动词
-- 用词规范：不说"很多"说"显著提升"；不说"花了不少时间"说"投入大量精力"；不说"省了钱"说"实现成本节约"
-- 句式完整、主谓宾齐全，避免碎片化短句；数字和单位规范表述（如"降本2.4元/支""效率提升40%"）
-
-## 硬性禁止
-1. 禁止输出任何编号列表（1. 2. 3.）或项目符号列表
-2. 禁止每条记录单独成行、每条都附日期
-3. 禁止"贡献：xxx"这种机械模板句式——把贡献融进叙述里
-4. 禁止把每条便签翻译一遍；多条记录必须融合成段落
-
-要求：
-1. 保留具体数据，不要虚构
-2. 未完成的事项简要带过或注明进展
-3. 项目归属以【】分组标题为准；【公共/其他】分组内标注了【公共事务】【能力建设】【协作互助】的要点，归入对应维度
-4. 语言专业、简洁、连贯，适合写进绩效考评材料
-5. 直接输出总结正文，不要任何思考过程、不要解释、不要前缀`;
-      const userPrompt = `这是我在 ${start} 到 ${end} 的工作要点：\n${condensedText}\n\n请按四个维度写总结。每个项目写成连贯的一段话（起因→动作→结果），禁止编号列表、禁止逐条罗列、禁止"贡献："模板句式。语言务必正式书面，禁止口语化表达。`;
-
-      // 流式调用（复用 BOM 分类验证可靠的 startOllamaStream，实时反馈）
-      setSummaryPhase('generating');
-      let fullText = '';
-      let step2Error = '';
-      let summaryReasoning = '';
-      await new Promise<void>((resolve) => {
-        startOllamaStream(
-          baseUrl, model,
-          [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-          (t) => { fullText += t; setSummaryChars(fullText.length); setSummaryResult(fullText); },
-          (t) => { summaryReasoning += t; }, // 思考单独收集，不混入正文
-          () => { resolve(); },
-          (e) => { step2Error = e; resolve(); },
-          { num_predict: 16384, temperature: 0.3, think: false, endpoint: 'native', json: false },
-        );
-      });
-      setSummarizing(false);
-      setSummaryPhase(step2Error ? 'error' : fullText ? 'done' : 'error');
-      if (step2Error) {
-        setSummaryResult(`[总结失败] ${step2Error}\n\n请检查：1) Ollama 是否运行 2) 模型是否可用 3) 可重试`);
-        message.error(`总结失败：${step2Error}`);
-      } else if (!fullText) {
-        setSummaryResult('[总结失败] 模型未返回内容（空响应）\n\n可尝试重新生成');
-        setSummaryPhase('error');
-        message.error('总结失败：模型未返回内容');
-      }
-    } catch (e: any) {
-      message.error(`总结失败：${e?.message || e}`);
-      setSummarizing(false); setSummaryPhase('error');
-    }
-  };
-
-  return (
-    <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-      {/* 标题 */}
-      <div style={{ textAlign: 'center', marginBottom: 20 }}>
-        <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          <BookOutlined style={{ color: 'var(--color-primary)' }} /> 工作手账
-        </div>
-        <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginTop: 4 }}>
-          记工作、列待办、打勾完成，年底 AI 帮你串成总结
-        </div>
-      </div>
-
-      {/* 视图切换 + 工具栏 */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', justifyContent: 'center' }}>
-        <div style={{ display: 'flex', background: 'var(--color-surface)', borderRadius: 8, padding: 3, border: '1px solid var(--color-border)' }}>
-          <Button size="small" type={view === 'notes' ? 'primary' : 'text'} onClick={() => setView('notes')}>手账</Button>
-          <Button size="small" type={view === 'todos' ? 'primary' : 'text'} onClick={() => setView('todos')}>
-            待办 {openTodos.length > 0 && <span style={{ marginLeft: 2 }}>({openTodos.length})</span>}
-          </Button>
-        </div>
-        <Input placeholder="搜索…" prefix={<SearchOutlined />} style={{ width: 160 }} value={keyword} onChange={e => setKeyword(e.target.value)} allowClear />
-        <Select placeholder="分类" allowClear style={{ width: 110 }} value={categoryFilter || undefined} onChange={v => setCategoryFilter(v || '')} options={LOG_CATEGORIES.map(c => ({ value: c, label: c }))} />
-        <Select
-          placeholder="项目" allowClear showSearch style={{ width: 150 }}
-          value={projectFilter || undefined} onChange={v => setProjectFilter(v || '')}
-          options={projectOptions.map(p => ({ value: p, label: p }))}
-        />
-        {view === 'notes' && <Button type="primary" icon={<PlusOutlined />} onClick={startCompose}>写一张便签</Button>}
-        <Tooltip title="选时间范围生成工作总结">
-          <Button icon={<RobotOutlined />} onClick={async () => {
-            // 打开总结弹窗时加载模型列表 + 已保存的总结模型设置
-            setSummaryOpen(true);
-            try {
-              const db = await (await import('../db')).getDb();
-              const cfg = await db.select<any[]>('SELECT key, value FROM settings WHERE key IN (?,?)', ['local_ai_base_url', 'local_ai_summary_model']);
-              const baseUrl = cfg.find(c => c.key === 'local_ai_base_url')?.value || 'http://localhost:11434';
-              setSummaryModel(cfg.find(c => c.key === 'local_ai_summary_model')?.value || '');
-              // 拉取模型列表
-              const { invoke } = await import('@tauri-apps/api/core');
-              const result = await invoke<{ success: boolean; body: string }>('http_get', {
-                request: { url: `${baseUrl.replace(/\/$/, '')}/api/tags`, headers: {}, body: null }
-              });
-              if (result.success) {
-                const data = JSON.parse(result.body);
-                setSummaryModels((data.models || []).map((m: any) => m.name));
-              }
-            } catch { /* 拉取失败不影响打开 */ }
-          }} disabled={!logs.length}>AI 总结</Button>
-          <Button icon={<BookOutlined />} onClick={async () => {
-            setSavedSummaries(await (await import('../db')).getWorkSummaries());
-            setShowSaved(true);
-          }}>已保存总结</Button>
-        </Tooltip>
-      </div>
-
-      {loading && <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>}
-
-      {/* ===== 待办视图 ===== */}
-      {!loading && view === 'todos' && (
-        <div style={{ maxWidth: 640, margin: '0 auto' }}>
-          {/* 快速添加待办 */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Input
-              placeholder="添加待办事项，回车确认…" value={todoInput}
-              onChange={e => setTodoInput(e.target.value)}
-              onPressEnter={addTodo}
-              prefix={<FlagOutlined style={{ color: '#F4511E' }} />}
-              style={{ flex: 1, minWidth: 200 }}
-            />
-            <AutoComplete
-              size="middle" allowClear placeholder="项目：选择或输入（空=公共）" style={{ width: 180 }}
-              value={todoProject}
-              onChange={(v: string) => setTodoProject(v)}
-              options={projectOptions.map(p => ({ value: p }))}
-            />
-            <Button type="primary" icon={<PlusOutlined />} onClick={addTodo}>添加</Button>
-          </div>
-
-          {/* 未完成 */}
-          {openTodos.length > 0 && (
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 8 }}>进行中（{openTodos.length}）</div>
-              {openTodos.map(t => (
-                <div key={t.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
-                  background: '#FFF8F0', borderRadius: 8, marginBottom: 8,
-                  border: '1px solid #FFE0B2',
-                }}>
-                  <Checkbox checked={false} onChange={() => toggleTodo(t.id, true)} />
-                  <span style={{ flex: 1, fontSize: 13.5, color: 'rgba(0,0,0,0.85)' }}>{t.content}</span>
-                  <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>{(t.log_date || '').slice(5, 16)}</span>
-                  {t.work_project && (
-                    <span style={{ fontSize: 10.5, padding: '1px 8px', borderRadius: 999, background: 'rgba(0,0,0,0.06)', color: 'rgba(0,0,0,0.6)' }}><EmojiIcon e="📌" /> {t.work_project}</span>
-                  )}
-                  <Popconfirm title="删除？" onConfirm={async () => { await deleteWorkLog(t.id); loadLogs(); }}>
-                    <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-                  </Popconfirm>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* 已完成 */}
-          {doneTodos.length > 0 && (
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 8 }}>
-                已完成（{doneTodos.length}）<span style={{ fontWeight: 400, fontSize: 11 }}>—— 完成的事项会进入年终总结</span>
-              </div>
-              {doneTodos.map(t => (
-                <div key={t.id} style={{
-                  display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
-                  background: '#F0F9F0', borderRadius: 8, marginBottom: 8, border: '1px solid #C8E6C9',
-                }}>
-                  <Checkbox checked onChange={() => toggleTodo(t.id, false)} />
-                  <span style={{ flex: 1, fontSize: 13.5, color: 'rgba(0,0,0,0.45)', textDecoration: 'line-through' }}>{t.content}</span>
-                  <CheckCircleFilled style={{ color: '#43A047' }} />
-                  <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>{(t.log_date || '').slice(5, 16)}</span>
-                  {t.work_project && (
-                    <span style={{ fontSize: 10.5, padding: '1px 8px', borderRadius: 999, background: 'rgba(0,0,0,0.06)', color: 'rgba(0,0,0,0.6)' }}><EmojiIcon e="📌" /> {t.work_project}</span>
-                  )}
-                  <Popconfirm title="删除？" onConfirm={async () => { await deleteWorkLog(t.id); loadLogs(); }}>
-                    <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-                  </Popconfirm>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {!openTodos.length && !doneTodos.length && (
-            <Empty description="还没有待办，在上方添加吧" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ padding: 40 }} />
-          )}
-        </div>
-      )}
-
-      {/* ===== 手账视图（便签墙） ===== */}
-      {!loading && view === 'notes' && (
-        <div>
-          {/* 写便签编辑卡（置顶显示） */}
-          {composing && (
-            <div style={{ maxWidth: 420, margin: '0 auto 24px', background: NOTE_COLORS[noteCategory] || '#FFF8E1', borderRadius: 10,
-              padding: '22px 18px 16px', position: 'relative',
-              boxShadow: '0 6px 20px rgba(0,0,0,0.10)', transform: 'rotate(-0.5deg)' }}>
-              <div style={{
-                position: 'absolute', top: -8, left: '50%', transform: 'translateX(-50%)',
-                width: 22, height: 22, borderRadius: '50%',
-                background: `radial-gradient(circle at 35% 35%, ${NOTE_PIN[noteCategory] || '#F9A825'}, ${NOTE_PIN[noteCategory] || '#F9A825'}99)`,
-                boxShadow: '0 2px 6px rgba(0,0,0,0.3)', zIndex: 2,
-              }} />
-              <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                <Select size="small" allowClear placeholder="分类（可选）" value={noteCategory || undefined} onChange={v => setNoteCategory(v || '')} style={{ width: 110 }} options={LOG_CATEGORIES.map(c => ({ value: c, label: c }))} />
-                <AutoComplete
-                  size="small" allowClear placeholder="项目：选择或输入（空=公共）" style={{ width: 180 }}
-                  value={noteProject}
-                  onChange={(v: string) => setNoteProject(v)}
-                  options={projectOptions.map(p => ({ value: p }))}
-                />
-                <DatePicker size="small" value={noteDate} onChange={v => v && setNoteDate(v)} format="MM-DD" style={{ width: 90 }} />
-              </div>
-              <Input placeholder="标题（可选）" value={noteTitle} onChange={e => setNoteTitle(e.target.value)} bordered={false}
-                style={{ background: 'transparent', fontSize: 15, fontWeight: 600, padding: '0 0 4px', marginBottom: 4 }} />
-              <Input.TextArea autoSize={{ minRows: 4, maxRows: 10 }} value={noteContent} onChange={e => setNoteContent(e.target.value)}
-                placeholder="今天做了什么？结果如何？像写日记一样随手记…" bordered={false}
-                style={{ background: 'transparent', fontSize: 14, lineHeight: 1.8, padding: 0 }} />
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 10 }}>
-                <Button size="small" type="text" icon={<CloseOutlined />} onClick={cancelCompose}>取消</Button>
-                <Button size="small" type="primary" icon={<CheckOutlined />} onClick={saveNote}>保存</Button>
-              </div>
-            </div>
-          )}
-
-          {/* 分类章节：按分类分组，像笔记本的章节 */}
-          {LOG_CATEGORIES.filter(cat => notes.some(n => (n.category || '其他') === cat)).map(cat => {
-            const catNotes = notes.filter(n => (n.category || '其他') === cat);
-            const collapsed = collapsedCats[cat];
-            return (
-              <div key={cat} style={{ marginBottom: 24 }}>
-                {/* 章节头 */}
-                <div
-                  onClick={() => setCollapsedCats(prev => ({ ...prev, [cat]: !prev[cat] }))}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
-                    padding: '10px 16px', marginBottom: 14,
-                    background: `linear-gradient(135deg, ${NOTE_COLORS[cat] || '#FFF8E1'}, ${(NOTE_COLORS[cat] || '#FFF8E1')}88)`,
-                    borderRadius: 10, border: '1px solid rgba(0,0,0,0.06)',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
-                  }}
-                >
-                  <PushpinOutlined style={{ fontSize: 14, color: NOTE_PIN[cat] || '#F9A825' }} />
-                  <span style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>{cat}</span>
-                  <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>{catNotes.length} 张便签</span>
-                  <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)', transition: 'transform 0.2s', transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>▼</span>
-                </div>
-                {/* 章节内容：便签网格 */}
-                {!collapsed && (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 20 }}>
-                    {catNotes.map(log => (
-                      <div key={log.id} style={{
-                        background: NOTE_COLORS[log.category] || '#FFF8E1', borderRadius: 10,
-                        padding: '20px 18px 14px', position: 'relative',
-                        boxShadow: '0 4px 16px rgba(0,0,0,0.08)', transform: 'rotate(-0.4deg)',
-                        transition: 'all 0.25s', cursor: 'pointer',
-                      }}
-                        onMouseEnter={e => { e.currentTarget.style.transform = 'rotate(0deg) scale(1.02)'; e.currentTarget.style.boxShadow = '0 8px 28px rgba(0,0,0,0.14)'; }}
-                        onMouseLeave={e => { e.currentTarget.style.transform = 'rotate(-0.4deg)'; e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.08)'; }}
-                        onClick={() => startEdit(log)}
-                      >
-                        <div style={{
-                          position: 'absolute', top: -8, left: '50%', transform: 'translateX(-50%)',
-                          width: 20, height: 20, borderRadius: '50%',
-                          background: `radial-gradient(circle at 35% 35%, ${NOTE_PIN[log.category] || '#F9A825'}, ${NOTE_PIN[log.category] || '#F9A825'}99)`,
-                          boxShadow: '0 2px 6px rgba(0,0,0,0.3)', zIndex: 2,
-                        }} />
-                        <div style={{ position: 'absolute', top: 8, right: 8, opacity: 0, transition: 'opacity 0.2s' }} onClick={e => e.stopPropagation()}>
-                          <Popconfirm title="删除这张便签？" onConfirm={async () => { await deleteWorkLog(log.id); message.success('已删除'); loadLogs(); }}>
-                            <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-                          </Popconfirm>
-                        </div>
-                        <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: 11, color: 'rgba(0,0,0,0.45)' }}>{(log.log_date || '').slice(5, 16)}</span>
-                          {log.work_project && (
-                            <span style={{
-                              fontSize: 10.5, padding: '1px 8px', borderRadius: 999,
-                              background: 'rgba(0,0,0,0.06)', color: 'rgba(0,0,0,0.6)',
-                              border: '1px solid rgba(0,0,0,0.08)',
-                            }}><EmojiIcon e="📌" /> {log.work_project}</span>
-                          )}
-                        </div>
-                        {log.title && <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, color: 'rgba(0,0,0,0.88)' }}>{log.title}</div>}
-                        <div style={{
-                          fontSize: 13, lineHeight: 1.8, color: 'rgba(0,0,0,0.75)',
-                          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                          maxHeight: 160, overflow: 'hidden',
-                          display: '-webkit-box', WebkitLineClamp: 6, WebkitBoxOrient: 'vertical',
-                        }}>{log.content}</div>
-                        <div style={{ fontSize: 10, color: 'rgba(0,0,0,0.35)', textAlign: 'right', marginTop: 8 }}>点击编辑</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          {!notes.length && !composing && (
-            <Empty description={<span>还没有便签，点「写一张便签」开始记录吧</span>} style={{ padding: 60 }} />
-          )}
-        </div>
-      )}
-
-      {!loading && view === 'notes' && !notes.length && !composing && (
-        <Empty description={<span>还没有便签，点「写一张便签」开始记录吧</span>} style={{ padding: 60 }} />
-      )}
-
-      {/* 总结 Modal（用 antd Modal，portal 挂 body，不受 zoom 缩放影响遮罩覆盖） */}
-      <Modal
-        title={<span style={{ fontWeight: 700, fontSize: 16 }}><RobotOutlined style={{ marginRight: 6 }} />AI 工作总结</span>}
-        open={summaryOpen}
-        onCancel={() => setSummaryOpen(false)}
-        footer={null}
-        width={720}
-        destroyOnClose
-      >
-        {/* 时间轴：横向月份轴，可多选 */}
-        {timelineMonths.length > 0 && (
-          <div style={{ marginBottom: 16, padding: '14px 16px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 12 }}>
-            <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span><EmojiIcon e="📅" /> 时间轴选择</span>
-              <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>点选月份（可多选），范围自动覆盖所选首尾月</span>
-              <Button
-                size="small" type="text" style={{ marginLeft: 'auto', fontSize: 11 }}
-                onClick={() => { setSelectedMonths([]); setSummaryRange(null); }}
-              >清除</Button>
-            </div>
-            <div style={{ position: 'relative', padding: '8px 0 4px' }}>
-              {/* 横轴 */}
-              <div style={{ position: 'absolute', top: 22, left: 8, right: 8, height: 2, background: 'var(--color-border)' }} />
-              {/* 选中的范围高亮带 */}
-              {selectedMonths.length >= 2 && (() => {
-                const idxs = selectedMonths.map(k => timelineMonths.findIndex(m => m.key === k)).filter(i => i >= 0).sort((a, b) => a - b);
-                if (!idxs.length) return null;
-                const left = idxs[0] / Math.max(timelineMonths.length - 1, 1) * 100;
-                const right = (1 - idxs[idxs.length - 1] / Math.max(timelineMonths.length - 1, 1)) * 100;
-                return <div style={{ position: 'absolute', top: 18, left: `${left}%`, right: `${right}%`, height: 10, background: 'rgba(10,132,255,0.15)', borderRadius: 5, transition: 'all 0.2s' }} />;
-              })()}
-              {/* 月份节点 */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', position: 'relative' }}>
-                {timelineMonths.map(m => {
-                  const sel = selectedMonths.includes(m.key);
-                  return (
-                    <div key={m.key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'pointer', zIndex: 1 }}
-                      onClick={() => {
-                        const next = sel ? selectedMonths.filter(k => k !== m.key) : [...selectedMonths, m.key];
-                        setSelectedMonths(next);
-                        if (next.length) {
-                          const first = timelineMonths.filter(x => next.includes(x.key)).sort((a, b) => a.key.localeCompare(b.key))[0];
-                          const last = timelineMonths.filter(x => next.includes(x.key)).sort((a, b) => b.key.localeCompare(a.key))[0];
-                          setSummaryRange([dayjs(first.start), dayjs(last.end)]);
-                        } else {
-                          setSummaryRange(null);
-                        }
-                      }}
-                    >
-                      {/* 节点圆 */}
-                      <div style={{
-                        width: 14, height: 14, borderRadius: '50%', transition: 'all 0.2s',
-                        background: sel ? 'var(--color-primary)' : '#fff',
-                        border: `2px solid ${sel ? 'var(--color-primary)' : 'var(--color-border)'}`,
-                        boxShadow: sel ? '0 0 0 4px rgba(10,132,255,0.15)' : 'none',
-                        transform: sel ? 'scale(1.2)' : 'scale(1)',
-                      }} />
-                      {/* 月份标签：YYYY-MM 取月份数字（如 "2026-07" → 7月） */}
-                      <div style={{ fontSize: 10.5, fontWeight: sel ? 700 : 500, color: sel ? 'var(--color-primary)' : 'var(--color-text-tertiary)', whiteSpace: 'nowrap' }}>
-                        {String(Number(m.label.slice(5, 7)))}月
-                      </div>
-                      {/* 记录数 */}
-                      <div style={{ fontSize: 9.5, color: sel ? 'var(--color-primary)' : 'var(--color-text-tertiary)', opacity: 0.7 }}>
-                        {m.count}条
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            {/* 当前范围显示 */}
-            <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--color-text-secondary)', textAlign: 'center' }}>
-              {selectedMonths.length ? (
-                <>已选 {selectedMonths.length} 个月：{selectedMonths.slice().sort()[0]} ~ {selectedMonths.slice().sort()[selectedMonths.length - 1]}（{summaryRange?.[0]?.format('YYYY-MM-DD')} ~ {summaryRange?.[1]?.format('YYYY-MM-DD')}）</>
-              ) : (
-                <>尚未选择，点选月份设定范围</>
-              )}
-            </div>
-          </div>
-        )}
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
-          <DatePicker.RangePicker value={summaryRange as any} onChange={(v) => setSummaryRange(v as any)} placeholder={['开始日期', '结束日期']} />
-          <Select
-            size="middle" style={{ width: 180 }} allowClear placeholder="总结模型（默认同对话）"
-            value={summaryModel || undefined}
-            onChange={async (v) => {
-              setSummaryModel(v || '');
-              const db = await (await import('../db')).getDb();
-              await db.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)', ['local_ai_summary_model', v || '']);
-              message.success(v ? `总结模型已设为 ${v}` : '总结模型已恢复为对话模型');
-            }}
-            options={summaryModels.map(m => ({ label: m, value: m }))}
-          />
-          <Button type="primary" icon={<RobotOutlined />} loading={summarizing} onClick={handleSummarize}>生成总结</Button>
-          {summarizing && (
-            <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <Spin size="small" />
-              {summaryPhase === 'preparing' || summaryPhase === 'reading' ? `正在读取工作记录… ${summaryElapsed}s`
-                : summaryPhase === 'generating' ? `正在生成总结… ${summaryElapsed}s${summaryChars > 0 ? ` · 已收到 ${summaryChars} 字符` : ''}`
-                : '处理中…'}
-            </span>
-          )}
-        </div>
-        <div style={{ maxHeight: 420, overflowY: 'auto' }}>
-          {summaryResult ? (
-            <div style={{ whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 2, color: '#333' }}>
-              {summaryResult}
-              {summarizing && <span style={{ opacity: 0.5 }}>▍</span>}
-            </div>
-          ) : (
-            <div style={{ color: 'var(--color-text-tertiary)', fontSize: 13, padding: '30px 0', textAlign: 'center' }}>
-              {summarizing ? (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                  <Spin size="small" /> {summaryPhase === 'reading' ? '正在读取并压缩工作记录…' : `正在生成总结…`} <b>{summaryElapsed}s</b>
-                  {(summaryPhase === 'reading' ? condenseChars : summaryChars) > 0 && (
-                    <span style={{ color: 'var(--color-text-tertiary)' }}>· 已收到 {summaryPhase === 'reading' ? condenseChars : summaryChars} 字符</span>
-                  )}
-                </span>
-              ) : (
-                <>
-                  选择时间范围后点击「生成总结」<br />
-                  <span style={{ fontSize: 12 }}>便签按分类组织，已完成待办单独成节，逐字实时呈现</span>
-                </>
-              )}
-              {summarizing && summaryPhase === 'reading' && condensedText && (
-                <div style={{ textAlign: 'left', marginTop: 16, fontSize: 12, lineHeight: 1.9, color: 'var(--color-text-secondary)', whiteSpace: 'pre-wrap' }}>
-                  {condensedText}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        {summaryResult && (
-          <div style={{ textAlign: 'right', marginTop: 12, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <Button icon={<SaveOutlined />} onClick={async () => {
-              const start = summaryRange?.[0]?.format('YYYY-MM-DD') || '';
-              const end = summaryRange?.[1]?.format('YYYY-MM-DD') || '';
-              await (await import('../db')).saveWorkSummary({
-                title: `${start} ~ ${end} 工作总结`, content: summaryResult, start_date: start, end_date: end,
-              });
-              message.success('总结已保存，可在「已保存总结」中查看');
-            }}>保存总结</Button>
-            <Button onClick={() => navigator.clipboard?.writeText(summaryResult).then(() => message.success('已复制'))}>复制总结</Button>
-          </div>
-        )}
-      </Modal>
-
-      {/* 已保存总结查看 */}
-      <Modal
-        title={<span><BookOutlined style={{ marginRight: 6 }} />已保存的总结</span>}
-        open={showSaved}
-        onCancel={() => setShowSaved(false)}
-        footer={null}
-        width={720}
-      >
-        {savedSummaries.length === 0 && (
-          <Empty description="还没有保存的总结。生成总结后点「保存总结」即可存到这里" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ padding: 30 }} />
-        )}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {savedSummaries.map(s => (
-            <div key={s.id} style={{ padding: '12px 16px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>{s.title}</span>
-                <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)' }}>{s.created_at}</span>
-                <Button size="small" type="text" icon={<CheckOutlined />} onClick={() => navigator.clipboard?.writeText(s.content).then(() => message.success('已复制'))} />
-                <Popconfirm title="删除这份总结？" onConfirm={async () => {
-                  await (await import('../db')).deleteWorkSummary(s.id);
-                  setSavedSummaries(await (await import('../db')).getWorkSummaries());
-                  message.success('已删除');
-                }}>
-                  <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-                </Popconfirm>
-              </div>
-              <div style={{ fontSize: 12.5, lineHeight: 1.8, color: 'rgba(0,0,0,0.75)', whiteSpace: 'pre-wrap', maxHeight: 120, overflowY: 'hidden' }}>
-                {s.content.slice(0, 180)}{s.content.length > 180 ? '…' : ''}
-              </div>
-              <div style={{ textAlign: 'right', marginTop: 4 }}>
-                <Button size="small" type="link" onClick={() => setViewingSummary(s)}>查看全文</Button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Modal>
-
-      {/* 已保存总结全文查看 */}
-      <Modal
-        title={<span><BookOutlined style={{ marginRight: 6 }} />总结全文</span>}
-        open={!!viewingSummary}
-        onCancel={() => setViewingSummary(null)}
-        footer={null}
-        width={760}
-      >
-        {viewingSummary && (
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{viewingSummary.title}</div>
-            <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', marginBottom: 10 }}>{viewingSummary.created_at}</div>
-            <div style={{
-              fontSize: 13, lineHeight: 2, color: 'rgba(0,0,0,0.85)', whiteSpace: 'pre-wrap',
-              maxHeight: '60vh', overflowY: 'auto', background: 'var(--color-surface)',
-              border: '1px solid var(--color-border)', borderRadius: 10, padding: '14px 18px',
-            }}>
-              {viewingSummary.content}
-            </div>
-            <div style={{ textAlign: 'right', marginTop: 10 }}>
-              <Button icon={<CheckOutlined />} onClick={() => navigator.clipboard?.writeText(viewingSummary.content).then(() => message.success('已复制'))}>复制全文</Button>
-            </div>
-          </div>
-        )}
-      </Modal>
-    </div>
-  );
+  return <div className="worklog-page"><header className="worklog-header"><div><span className="eyebrow">COSTHUB · WORK JOURNAL</span><h1><BookOutlined /> 工作手账</h1></div><div className="worklog-header-actions"><Button type="primary" onClick={() => openEditor()}>写一条手账</Button><Button type="primary" icon={<RobotOutlined />} onClick={() => startSummary('week')}>生成 AI 总结</Button></div></header><nav className="worklog-tabs" aria-label="工作手账栏目">{[['records', '工作记录'], ['project', '项目脉络'], ['summary', 'AI 总结']].map(([key, label]) => <button type="button" className={tab === key ? 'is-active' : ''} key={key} onClick={() => setTab(key as any)}>{label}</button>)}</nav>
+    {tab === 'records' && <Records allLogs={logs} logs={visibleLogs} projects={projects} loading={loading || !projectsReady} keyword={keyword} setKeyword={setKeyword} projectFilter={projectFilter} setProjectFilter={setProjectFilter} typeFilter={typeFilter} setTypeFilter={setTypeFilter} followUps={followUps} onEdit={openEditor} onSave={save} onDelete={async (id: number) => { await deleteWorkLog(id); load(); }} onToggle={async (id: number, done: boolean) => { await toggleWorkLogDone(id, done); load(); }} onSummary={startSummary} onRefresh={load} />}
+    {tab === 'project' && <ProjectTrail logs={logs} projects={projects} selected={selectedProject} setSelected={setSelectedProject} onSummary={() => { setSummaryProject(selectedProject); setSummaryType('project_review'); setSummaryRange([dayjs().subtract(90, 'day'), dayjs()]); setTab('summary'); }} />}
+    {tab === 'summary' && <SummaryPanel summaries={summaries} summaryType={summaryType} setSummaryType={(v: string) => { setSummaryType(v); if (v === 'week' || v === 'month') setSummaryRange(dateRange(v)); }} summaryRange={summaryRange} setSummaryRange={(v: [Dayjs, Dayjs] | null) => v && setSummaryRange(v)} summaryProject={summaryProject} setSummaryProject={(v: number | '') => setSummaryProject(v)} projects={projects} summaryModel={summaryModel} setSummaryModel={async (v: string) => { setSummaryModel(v); await setSetting('local_ai_summary_model', v); }} summaryText={summaryText} summarizing={summarizing} onGenerate={generateSummary} onSave={saveSummary} onView={viewEvidence} onDelete={async (id: number) => { await deleteWorkSummary(id); setSummaries(await getWorkSummaries()); }} />}
+    <Modal open={!!editing} title={editing?.id ? '编辑工作记录' : '写一条手账'} onCancel={() => setEditing(null)} footer={null} width={720}><Editor value={editing || {}} projects={projects} onChange={setEditing} onSave={save} /></Modal><Modal open={!!viewingSummary} title={viewingSummary?.title || '总结全文'} onCancel={() => setViewingSummary(null)} footer={null} width={820}>{viewingSummary && <><div className="summary-viewer">{viewingSummary.content}</div><div className="evidence-index"><b>原始记录证据（{sourceRows.length} 条）</b>{sourceRows.map(r => <div key={r.id}><Tag>[记录#{r.id}]</Tag>{r.title || r.content.slice(0, 80)}</div>)}</div></>}</Modal>
+  </div>;
 }
+
+function Records({ allLogs, logs, projects, loading, keyword, setKeyword, projectFilter, setProjectFilter, typeFilter, setTypeFilter, followUps, onEdit, onSave, onDelete, onToggle, onSummary, onRefresh }: any) {
+  const [journalMode, setJournalMode] = useState<'albums' | 'board' | 'list'>('albums');
+  const [costEntryOpen, setCostEntryOpen] = useState(false);
+  const [targetOpen, setTargetOpen] = useState(false);
+  const [annualTarget, setAnnualTarget] = useState<number | null>(null);
+  const savingYear = dayjs().year();
+  const costProgressLogs = useMemo(() => logs.filter((l: WorkLogRecord) => l.record_type === 'cost_progress'), [logs]);
+  useEffect(() => { if (targetOpen) getSetting(`production_cost_target_${savingYear}`, '0').then(value => setAnnualTarget(Number(value) || null)).catch(() => {}); }, [targetOpen, savingYear]);
+  const saveAnnualTarget = async () => { if (!annualTarget || annualTarget <= 0) { message.warning('请输入大于 0 的全年总目标'); return; } await setSetting(`production_cost_target_${savingYear}`, String(annualTarget)); window.dispatchEvent(new Event('costhub-production-target-updated')); setTargetOpen(false); message.success(`已设置 ${savingYear} 年全年总降本目标`); };
+  const [bookCatalog, setBookCatalog] = useState<{ key: string; name: string }[] | null>(null);
+  const [catalogReady, setCatalogReady] = useState(false);
+  const [bookEditor, setBookEditor] = useState<{ key: string; name: string; existing: boolean } | null>(null);
+  const [savingBook, setSavingBook] = useState(false);
+  useEffect(() => { getSetting('worklog_books', '').then(raw => {
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed) || parsed.some(book => !book || typeof book.key !== 'string' || typeof book.name !== 'string')) throw new Error('书册数据格式无效');
+      setBookCatalog(parsed);
+    }
+    setCatalogReady(true);
+  }).catch(() => message.error('书册加载失败，请重新进入手账')); }, []);
+  const persistBooks = async (next: { key: string; name: string }[]) => {
+    if (!catalogReady) throw new Error('书册尚未加载完成');
+    await setSetting('worklog_books', JSON.stringify(next));
+    setBookCatalog(next);
+  };
+  const [selectedBook, setSelectedBook] = useState<string>('memo');
+  const [readingId, setReadingId] = useState<number | null>(null);
+  const [readingBookKey, setReadingBookKey] = useState<string | null>(null);
+  const [bookCategories, setBookCategories] = useState<Record<string, string>>({});
+  const [categoriesReady, setCategoriesReady] = useState(false);
+  useEffect(() => { getSetting('worklog_book_categories', '{}').then(raw => {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) setBookCategories(Object.fromEntries(Object.entries(parsed).filter(([, value]) => typeof value === 'string' && value.trim())) as Record<string, string>);
+    setCategoriesReady(true);
+  }).catch(() => message.error('书册分类加载失败，请重新进入手账后再调整分类')); }, []);
+  const saveBookCategory = async (key: string, category: string) => {
+    if (!categoriesReady) throw new Error('分类尚未加载完成');
+    const updated = { ...bookCategories, [key]: category };
+    await setSetting('worklog_book_categories', JSON.stringify(updated));
+    setBookCategories(updated);
+  };
+  const grouped = new Map<string, WorkLogRecord[]>();
+  logs.forEach((l: WorkLogRecord) => grouped.set(String(l.log_date).slice(0, 10), [...(grouped.get(String(l.log_date).slice(0, 10)) || []), l]));
+  const knownProjectIds = new Set(projects.map((p: any) => Number(p.id)));
+  const bookKeyForLog = (log: WorkLogRecord) => log.project_id && knownProjectIds.has(Number(log.project_id)) ? String(log.project_id) : log.work_project?.trim() ? `manual:${log.work_project.trim()}` : 'memo';
+  const chronological = (rows: WorkLogRecord[]) => [...rows].sort((a, b) => String(a.log_date).localeCompare(String(b.log_date)) || a.id - b.id);
+  const manualProjectNames = [...new Set<string>(allLogs.filter((l: WorkLogRecord) => bookKeyForLog(l).startsWith('manual:')).map((l: WorkLogRecord) => l.work_project.trim()))];
+  const memoRows = allLogs.filter((l: WorkLogRecord) => bookKeyForLog(l) === 'memo');
+  const sourceBooks = [
+    ...projects.map((p: any) => ({ key: String(p.id), code: p.code || `P-${p.id}`, name: p.name || '未命名项目', sub: p.category || '项目记录', category: bookCategories[String(p.id)] || p.category || '未分类', rows: chronological(allLogs.filter((l: WorkLogRecord) => Number(l.project_id) === Number(p.id))) })),
+    ...manualProjectNames.map(name => ({ key: `manual:${name}`, code: 'MANUAL', name, sub: '手动关联项目', category: bookCategories[`manual:${name}`] || '未分类', rows: chronological(allLogs.filter((l: WorkLogRecord) => bookKeyForLog(l) === `manual:${name}`)) })),
+    ...(memoRows.length || !projects.length ? [{ key: 'memo', code: 'MEMO', name: '工作备忘', sub: '未关联项目的记录', category: bookCategories.memo || '其他', rows: chronological(memoRows) }] : []),
+  ];
+  // Existing recorded notebooks remain available; empty projects never become books automatically.
+  const catalogInitializing = useRef(false);
+  const catalog = bookCatalog ?? sourceBooks.filter(book => book.rows.length > 0).map(({ key, name }) => ({ key, name }));
+  useEffect(() => {
+    if (!catalogReady || loading || bookCatalog !== null || catalogInitializing.current) return;
+    catalogInitializing.current = true;
+    void persistBooks(catalog).catch(error => { setCatalogReady(false); message.error(`书册初始化失败：${String(error)}`); });
+  }, [catalogReady, loading, bookCatalog, catalog]);
+  const books = catalog.map(entry => ({ ...(sourceBooks.find(book => book.key === entry.key) || { key: entry.key, code: 'MANUAL', sub: '独立书册', category: '其他', rows: [] as WorkLogRecord[] }), ...entry, category: bookCategories[entry.key] || sourceBooks.find(book => book.key === entry.key)?.category || '其他' }));
+  const saveBook = async () => {
+    if (!bookEditor || savingBook) return;
+    const name = bookEditor.name.trim();
+    if (!name) { message.warning('请输入书册名称'); return; }
+    const key = bookEditor.key || `manual:${name}`;
+    if (!bookEditor.existing && catalog.some(book => book.key === key)) { message.warning('该项目或名称已有书册，请编辑已有书册'); return; }
+    setSavingBook(true);
+    try { await persistBooks(bookEditor.existing ? catalog.map(book => book.key === key ? { key, name } : book) : [...catalog, { key, name }]); setSelectedBook(key); setBookEditor(null); message.success('书册已保存'); }
+    catch (error) { message.error(`书册保存失败：${String(error)}`); }
+    finally { setSavingBook(false); }
+  };
+  const removeBook = (key: string) => Modal.confirm({ title: '删除这本书册？', content: '从书架移除，原始工作记录仍保留在“记录列表”中。需要时可重新创建关联书册。', okText: '删除书册', okButtonProps: { danger: true }, cancelText: '取消', onOk: async () => { try { await persistBooks(catalog.filter(book => book.key !== key)); if (readingBookKey === key) setReadingBookKey(null); } catch (error) { message.error(`删除失败：${String(error)}`); throw error; } } });
+  const shelfBooks = books.filter(book => (!projectFilter || book.key === String(projectFilter)) && ((!keyword && !typeFilter) || logs.some((log: WorkLogRecord) => bookKeyForLog(log) === book.key)));
+  const activeBook = shelfBooks.find(book => book.key === selectedBook) || shelfBooks[0];
+  const activeRows: WorkLogRecord[] = activeBook?.rows || [];
+  const readingBook = books.find(book => book.key === readingBookKey) || sourceBooks.find(book => book.key === readingBookKey);
+  const readingRows: WorkLogRecord[] = readingBook?.rows || [];
+  const readingLog = readingRows.find(log => log.id === readingId) || readingRows.at(-1) || null;
+  const openBook = (key: string) => { setSelectedBook(key); setReadingBookKey(key); setReadingId(books.find(book => book.key === key)?.rows.at(-1)?.id || null); };
+  const openLog = (log: WorkLogRecord) => { const key = bookKeyForLog(log); setSelectedBook(key); setReadingBookKey(key); setReadingId(log.id); };
+  const journalContent = journalMode === 'albums' ? <>
+    <div className="journal-book-actions"><Button type="primary" disabled={bookCatalog === null || !catalogReady} onClick={() => setBookEditor({ key: '', name: '', existing: false })}>新建书册</Button><Button disabled={bookCatalog === null || !catalogReady || !activeBook} onClick={() => activeBook && setBookEditor({ key: activeBook.key, name: activeBook.name, existing: true })}>编辑书册</Button><Button danger disabled={bookCatalog === null || !catalogReady || !activeBook} onClick={() => activeBook && removeBook(activeBook.key)}>删除书册</Button></div>
+    <Modal open={!!bookEditor} title={bookEditor?.existing ? '编辑书册' : '新建书册'} onCancel={() => { if (!savingBook) setBookEditor(null); }} onOk={saveBook} confirmLoading={savingBook} okText="保存书册" cancelText="取消"><Form layout="vertical"><Form.Item label="书册名称" required><Input aria-label="书册名称" maxLength={80} value={bookEditor?.name || ''} onChange={event => setBookEditor(value => value && { ...value, name: event.target.value })} /></Form.Item>{!bookEditor?.existing && <Form.Item label="关联项目（可选）"><Select aria-label="书册关联项目" allowClear placeholder="不关联项目，创建独立书册" value={bookEditor?.key || undefined} onChange={key => setBookEditor(value => value && { ...value, key: key || '', name: value.name || sourceBooks.find(book => book.key === key)?.name || '' })} options={sourceBooks.filter(book => !catalog.some(entry => entry.key === book.key)).map(book => ({ value: book.key, label: `${book.code} · ${book.name}` }))} /></Form.Item>}<p>书册名称可自行修改；历史记录的项目归属保持不变。</p></Form></Modal>
+    <JournalShelf books={shelfBooks} selected={activeBook?.key} onSelect={setSelectedBook} onOpen={openBook} onCategoryChange={saveBookCategory} />
+    <section className="journal-below">
+      <div className="content-card journal-current"><div className="journal-current-title"><div><span className="eyebrow">CURRENT NOTEBOOK</span><h2>{activeBook?.code || 'MEMO'} · {activeBook?.name || '工作备忘'}</h2><p>{activeBook?.sub || '先写下今天的判断，再慢慢补齐上下文。'}</p></div><Button type="primary" disabled={!activeBook} onClick={() => openBook(activeBook.key)}>展开手账</Button></div>{activeRows.slice(-3).reverse().map((log: WorkLogRecord) => <button type="button" className="journal-entry-preview" key={log.id} onClick={() => openLog(log)}><span className="journal-date-block">{String(log.log_date).slice(8, 10)}<small>{dayjs(log.log_date).format('MMM YYYY').toUpperCase()}</small></span><span><strong>{log.title || TYPE_LABEL[log.record_type] || '工作记录'}</strong><p>{TYPE_LABEL[log.record_type] || '工作记录'} · {log.evidence?.length ? '已关联证据' : '暂无关联证据'}</p></span><span aria-hidden="true">→</span></button>)}{!activeRows.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="这本手账还没有记录" />}</div>
+      <aside className="journal-sticky"><h3>下一步，记在这里。</h3>{followUps[0] ? <label><input type="checkbox" checked={!!followUps[0].done} onChange={e => onToggle(followUps[0].id, e.target.checked)} />{followUps[0].content}</label> : <p>把下一次需要验证的判断写下来，回到这里继续。</p>}<small>{followUps[0]?.work_project || '工作备忘'} · {followUps[0]?.due_at || '待安排'}</small></aside>
+    </section>
+    <section className="content-card journal-cost-progress"><div className="journal-cost-progress-head"><div><span className="eyebrow">COST PROGRESS</span><h2>关键成本进展</h2><p>记录不同器件的单台降本、原因和年发货量，收益会汇总到工作台。</p></div><div className="journal-cost-progress-actions"><Button onClick={() => setTargetOpen(true)}>设置年度总目标</Button><Button type="primary" onClick={() => setCostEntryOpen(true)}>录入关键成本</Button></div></div>{costProgressLogs.slice(0, 3).map((log: WorkLogRecord) => <button type="button" className="journal-cost-progress-row" key={log.id} onClick={() => openLog(log)}><time>{String(log.log_date).slice(0, 10)}</time><span><strong>{log.work_project || '未关联项目'}</strong><small>{log.title || '关键成本进展'}</small></span><p>{log.content}</p><span aria-hidden="true">→</span></button>)}{!costProgressLogs.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有关键成本进展，从这里录入第一条" />}</section><CostProgressEntry open={costEntryOpen} projects={projects} onClose={() => setCostEntryOpen(false)} onSaved={async () => { setCostEntryOpen(false); await onRefresh?.(); }} /><Modal open={targetOpen} title={`设置 ${savingYear} 年全年总降本目标`} onCancel={() => setTargetOpen(false)} onOk={() => void saveAnnualTarget()} okText="保存年度目标" cancelText="取消"><p className="journal-cost-entry-hint">这是所有器件和项目降本收益的汇总目标，不属于某一条关键成本记录。</p><InputNumber autoFocus min={0.01} precision={0} value={annualTarget ?? undefined} onChange={value => setAnnualTarget(typeof value === 'number' ? value : null)} addonBefore="¥" addonAfter="全年总目标" style={{ width: '100%' }} /></Modal>
+  </> : journalMode === 'board' ? <div className="journal-note-board">{logs.map((log: WorkLogRecord, index: number) => <button type="button" className="journal-note" style={{ '--note-angle': `${index % 2 ? -1 : 1}deg` } as React.CSSProperties} key={log.id} onClick={() => openLog(log)}><small>{log.work_project || 'MEMO'} / {TYPE_LABEL[log.record_type] || '工作进展'}</small><h3>{log.title || TYPE_LABEL[log.record_type] || '工作记录'}</h3><p>{log.content}</p><small>{String(log.log_date).slice(0, 10)} · 打开记录 →</small></button>)}{!logs.length && <div className="content-card worklog-empty"><Empty description="没有匹配记录" /></div>}</div> : <div className="journal-list content-card">{[...grouped].map(([date, rows]) => <section className="journal-list-day" key={date}><h2>{date === dayjs().format('YYYY-MM-DD') ? '今天' : date}<small>{rows.length} 条</small></h2>{rows.map(log => <div className="journal-list-record" key={log.id}><button type="button" onClick={() => openLog(log)}><strong>{log.title || TYPE_LABEL[log.record_type] || '工作记录'}</strong><p>{log.work_project || 'MEMO'} · {TYPE_LABEL[log.record_type] || '工作进展'} · {log.evidence?.length ? '已关联证据' : '暂无证据'}</p></button><time>{String(log.log_date).slice(11, 16)}</time><Button type="text" aria-label="编辑记录" icon={<EditOutlined />} onClick={() => onEdit(log)} /><Button type="text" danger aria-label="删除记录" icon={<DeleteOutlined />} onClick={() => onDelete(log.id)} /></div>)}</section>)}{!logs.length && <Empty description="没有匹配记录" />}</div>;
+  return <><div className="worklog-layout"><main><div className="journal-toolbar"><div className="journal-mode-tabs" role="tablist" aria-label="手账视图">{[['albums', '手账册'], ['board', '便签'], ['list', '记录列表']].map(([key, label]) => <button type="button" role="tab" aria-selected={journalMode === key} className={journalMode === key ? 'is-active' : ''} key={key} onClick={() => setJournalMode(key as 'albums' | 'board' | 'list')}>{label}</button>)}</div><Input allowClear prefix={<SearchOutlined />} placeholder="搜索标题、内容或项目" value={keyword} onChange={e => setKeyword(e.target.value)} /><Select allowClear placeholder="记录类型" value={typeFilter || undefined} onChange={setTypeFilter} options={WORK_LOG_TYPES.map(t => ({ value: t, label: TYPE_LABEL[t] }))} /><Select allowClear placeholder="关联项目" value={projectFilter || undefined} onChange={v => setProjectFilter(v || '')} options={projects.map((p: any) => ({ value: p.id, label: `[${p.code}] ${p.name}` }))} /></div>{loading ? <div className="content-card worklog-loading"><Spin /></div> : journalContent}</main><aside className="worklog-side"><section className="content-card"><div className="section-heading"><h2>今日跟进</h2><span>{followUps.length}</span></div>{followUps.slice(0, 5).map((r: WorkLogRecord) => <label className="follow-row" key={r.id}><input type="checkbox" checked={!!r.done} onChange={e => onToggle(r.id, e.target.checked)} /><span>{r.content}</span><small>{r.due_at || '待安排'}</small></label>)}{!followUps.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无待跟进" />}</section><section className="content-card"><div className="section-heading"><h2>AI 总结</h2><RobotOutlined /></div><p>按本周、本月、项目或季度记录生成，所有引用来自手账原始记录。</p><Button block onClick={() => onSummary('week')}>生成本周总结</Button></section></aside></div>{readingBook && <JournalReader key={readingBook.key} log={readingLog} rows={readingRows} book={readingBook} projects={projects} onClose={() => setReadingBookKey(null)} onSelect={setReadingId} onSave={onSave} />}</>; }
+
+function CostProgressEntry({ open, projects, onClose, onSaved }: { open: boolean; projects: any[]; onClose: () => void; onSaved: () => void | Promise<void> }) {
+  const [form] = Form.useForm();
+  const selectedProjectRef = Form.useWatch('project_ref', form);
+  const [boms, setBoms] = useState<any[]>([]);
+  const projectLabel = (project: any) => `[${project.code || `P-${project.id}`}] ${project.name || '未命名项目'}`;
+  const bomLabel = (row: any) => `${row.module_name || '未分模块'} / ${row.part_name || '未命名器件'}${row.part_model ? ` · ${row.part_model}` : ''}`;
+  const selectedProject = projects.find(project => projectLabel(project) === selectedProjectRef);
+  useEffect(() => {
+    if (!open) return;
+    form.resetFields();
+    form.setFieldsValue({ project_ref: projects[0] ? projectLabel(projects[0]) : '', saving_year: dayjs().year() });
+  }, [open, projects, form]);
+  useEffect(() => {
+    if (!selectedProject?.id) { setBoms([]); form.setFieldValue('part_ref', undefined); return; }
+    getProjectBOMs(Number(selectedProject.id)).then(setBoms).catch(() => setBoms([]));
+    form.setFieldValue('part_ref', undefined);
+  }, [selectedProject?.id, form]);
+  const submit = async () => {
+    try {
+      const value = await form.validateFields();
+      const bom = boms.find(row => bomLabel(row) === value.part_ref);
+      const projectName = selectedProject?.name || String(value.project_ref || '').trim();
+      const projectCode = selectedProject?.code || '';
+      await saveProductionCostSaving({
+        project_id: Number(selectedProject?.id || 0), project_code: projectCode, project_name: projectName,
+        project_bom_id: Number(bom?.id || 0), part_id: Number(bom?.part_id || 0),
+        part_name: bom?.part_name || String(value.part_ref || '').trim(), part_model: bom?.part_model || '', module_name: bom?.module_name || '',
+        saving_year: Number(value.saving_year), unit_saving: Number(value.unit_saving), annual_shipments: Number(value.annual_shipments), note: String(value.note || '').trim(),
+      });
+      window.dispatchEvent(new Event('costhub-production-saving-updated'));
+      message.success('关键成本进展已保存，并同步到年度收益看板');
+      await onSaved();
+    } catch (e: any) {
+      if (e?.errorFields) return;
+      message.error(`保存失败：${e?.message || e}`);
+    }
+  };
+  return <Modal open={open} title="录入关键成本进展" width={650} onCancel={onClose} onOk={() => void submit()} okText="保存到手账与收益看板" cancelText="取消">
+    <p className="journal-cost-entry-hint">项目和器件都支持下拉选择或直接手写；这里只记录单项器件的降本事实，全年总目标请在手账的“设置年度总目标”中单独维护。</p>
+    <Form form={form} layout="vertical">
+      <div className="journal-cost-entry-grid"><Form.Item label="项目" name="project_ref" rules={[{ required: true, message: '请选择或填写项目' }]}><AutoComplete allowClear options={projects.map(project => ({ value: projectLabel(project) }))} placeholder="选择项目或手写项目名称" /></Form.Item><Form.Item label="项目器件" name="part_ref" rules={[{ required: true, message: '请选择或填写项目器件' }]}><AutoComplete allowClear options={boms.map(row => ({ value: bomLabel(row) }))} placeholder={selectedProject ? '选择项目 BOM 器件或手写' : '手写项目器件名称'} /></Form.Item></div>
+      <div className="journal-cost-entry-grid"><Form.Item label="年度" name="saving_year" rules={[{ required: true }]}><InputNumber min={2000} max={2100} precision={0} style={{ width: '100%' }} /></Form.Item><Form.Item label="单台降本幅度（¥/台）" name="unit_saving" rules={[{ required: true, type: 'number', min: 0.01, message: '请输入大于 0 的降本幅度' }]}><InputNumber min={0.01} precision={2} style={{ width: '100%' }} /></Form.Item></div>
+      <Form.Item label="年发货量（台）" name="annual_shipments" rules={[{ required: true, type: 'number', min: 1, message: '请输入大于 0 的发货量' }]}><InputNumber min={1} precision={0} style={{ width: '100%' }} /></Form.Item>
+      <Form.Item label="降本原因" name="note" rules={[{ required: true, message: '请填写降本原因' }]}><Input.TextArea rows={4} placeholder="如：二供导入、结构件改版、供应商议价或规格优化" /></Form.Item>
+    </Form>
+  </Modal>;
+}
+
+function JournalEntryContent({ log }: { log: WorkLogRecord }) {
+  return <div className="journal-entry-copy"><div className="journal-entry-date"><span>{TYPE_LABEL[log.record_type] || '工作进展'}</span><time>{String(log.log_date).slice(0, 16)}</time></div><span className="journal-entry-type">{log.stage || '工作进展'}</span><h1>{log.title || TYPE_LABEL[log.record_type] || '工作记录'}</h1><div className="journal-entry-body">{log.content}</div>{log.next_action && <div className="journal-entry-next">下一步<br />{log.next_action}</div>}<div className="journal-entry-source">{log.evidence?.length ? <><LinkOutlined /> 已关联 {log.evidence.length} 条证据</> : '暂无关联证据'}</div></div>;
+}
+
+function JournalReader({ log, rows, book, projects, onClose, onSelect, onSave }: { log: WorkLogRecord | null; rows: WorkLogRecord[]; book: any; projects: any[]; onClose: () => void; onSelect: (id: number) => void; onSave: (value: EditorValue) => Promise<number | false> }) {
+  const index = rows.findIndex(row => row.id === log?.id);
+  const [inlineValue, setInlineValue] = useState<EditorValue | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(journalMotionEnabled);
+  const [turn, setTurn] = useState<{ target: number; backward: boolean; from: WorkLogRecord } | null>(null);
+  const turnTarget = useRef<number | null>(null);
+  const finishTurn = useCallback(() => {
+    const target = turnTarget.current;
+    if (target === null) return;
+    turnTarget.current = null;
+    onSelect(target);
+    setTurn(null);
+  }, [onSelect]);
+  useEffect(() => { if (!coverOpen) return; const timer = window.setTimeout(() => setCoverOpen(false), 1450); return () => window.clearTimeout(timer); }, [coverOpen]);
+  useEffect(() => {
+    if (!turn) return;
+    // Animation end is primary; fallback also completes when motion is switched off mid-turn.
+    const timer = window.setTimeout(finishTurn, 1750);
+    return () => window.clearTimeout(timer);
+  }, [turn, finishTurn]);
+  const turnPage = useCallback((id: number) => {
+    if (!log || id === log.id || turnTarget.current !== null || inlineValue || coverOpen) return;
+    if (!journalMotionEnabled()) { onSelect(id); return; }
+    turnTarget.current = id;
+    setTurn({ target: id, backward: rows.findIndex(row => row.id === id) < index, from: log });
+  }, [log, inlineValue, coverOpen, onSelect, rows, index]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (/INPUT|TEXTAREA|SELECT/.test((event.target as HTMLElement)?.tagName || '') || (event.target as HTMLElement)?.isContentEditable) return;
+      if (event.key === 'ArrowLeft' && rows[index - 1]) { event.preventDefault(); turnPage(rows[index - 1].id); }
+      if (event.key === 'ArrowRight' && rows[index + 1]) { event.preventDefault(); turnPage(rows[index + 1].id); }
+    };
+    window.addEventListener('keydown', onKeyDown); return () => window.removeEventListener('keydown', onKeyDown);
+  }, [index, rows, turnPage]);
+  const startNew = () => setInlineValue(newJournalEntry(Number(book.key) || 0, book.key.startsWith('manual:') ? book.key.slice(7) : book.key === 'memo' ? '' : (projects.find(project => String(project.id) === book.key)?.name || book.name)));
+  const startEdit = () => { if (log) setInlineValue({ ...log, evidence_json: JSON.stringify(log.evidence || []) }); };
+  const saveInline = async (value: EditorValue) => {
+    setSaving(true);
+    try { const id = await onSave(value); if (id) { setInlineValue(null); onSelect(id); } return id; }
+    finally { setSaving(false); }
+  };
+  const close = () => {
+    if (saving) return;
+    if (inlineValue) { Modal.confirm({ title:'离开未保存的记录？', content:'当前输入尚未保存，继续留在这里可以完成记录。', okText:'放弃并合上', cancelText:'继续记录', onOk:onClose }); }
+    else onClose();
+  };
+  const busy = !!inlineValue || !!turn || coverOpen;
+  return <Modal open title={null} footer={null} width={1080} centered className="journal-reader-modal" onCancel={close} maskClosable={!inlineValue} keyboard={!inlineValue}>
+    <div className="journal-reader-toolbar"><div><span className="eyebrow">工作手账 / {book.category || '未分类'}</span><h2>{book.code} · {book.name}</h2><p className="journal-reader-mode-hint">一本项目手账 · {rows.length} 条记录 · 按时间排列</p></div><div className="journal-reader-actions"><Button disabled={!log || busy} onClick={startEdit} icon={<EditOutlined />}>修改本条</Button><Button type="primary" disabled={busy} onClick={startNew}>继续记录</Button></div></div>
+    <div style={bookAppearance(book.key)} className={`journal-open-book journal-bound ${turn ? 'is-turning' : ''}`}>
+      <aside className="journal-left-leaf"><div className="journal-leaf-top"><span>{book.code}</span><span>记录目录</span></div><h3>{book.category || '项目记录'}</h3><p>继续记录会新增一页，已写内容始终保留。</p><div className="journal-toc">{rows.map((row, rowIndex) => <button type="button" disabled={busy} className={row.id === log?.id ? 'is-active' : ''} aria-current={row.id === log?.id ? 'page' : undefined} key={row.id} onClick={() => turnPage(row.id)}><span>{String(rowIndex + 1).padStart(2, '0')}</span><span className="journal-toc-title">{row.title || TYPE_LABEL[row.record_type] || '工作记录'}<small>{String(row.log_date).slice(0, 16)}</small></span></button>)}</div><small className="journal-leaf-footer">CostHub · 每一次记录，都是新的一页</small></aside>
+      <article className={`journal-right-leaf ${inlineValue ? 'is-editing' : ''}`}>
+        {inlineValue ? <div className="journal-inline-editor"><div className="journal-inline-editor-head"><div><span className="eyebrow">{inlineValue.id ? 'EDIT THIS ENTRY' : 'NEW ENTRY'}</span><h1>{inlineValue.id ? '修改本条记录' : '继续记录 · 新的一页'}</h1><p className="journal-reader-mode-hint">{inlineValue.id ? '保存后仅更新当前这一条记录。' : '保存为新记录，不会覆盖前面的内容。'}</p></div><Button type="text" disabled={saving} onClick={() => setInlineValue(null)}>取消</Button></div><Editor value={inlineValue} projectLocked projects={projects} onChange={setInlineValue} onSave={saveInline} /></div>
+          : log ? <div className={turn ? '' : 'journal-page-arrival'} key={log.id}><JournalEntryContent log={log} /></div>
+          : <Empty description="这本书还没有记录"><Button type="primary" disabled={coverOpen} onClick={startNew}>写下第一条记录</Button></Empty>}
+      </article>
+      <span className="journal-binding" aria-hidden="true" />
+      {(coverOpen || turn) && <div className="bound-layers" aria-hidden="true">
+        {coverOpen && <div className="bound-cover" onAnimationEnd={event => { if (event.target === event.currentTarget) setCoverOpen(false); }}><div className="bound-cover-front"><small>COSTHUB / {book.code}</small><strong>{book.name}</strong><span>工作手账 · {rows.length} 条记录</span></div><div className="bound-cover-back" /></div>}
+        {turn && <JournalTurningPage backward={turn.backward} onFinish={finishTurn}><JournalEntryContent log={turn.from} /></JournalTurningPage>}
+      </div>}
+    </div>
+    <div className="journal-reader-controls"><span aria-live="polite">{Math.max(0, index + 1)} / {rows.length} 条记录</span><div><Button disabled={!rows[index - 1] || busy} onClick={() => turnPage(rows[index - 1].id)}>上一页</Button><Button disabled={!rows[index + 1] || busy} onClick={() => turnPage(rows[index + 1].id)}>下一页</Button></div><span>{turn ? '翻页中…' : '方向键翻阅 · Esc 合上'}</span></div>
+  </Modal>;
+}
+function ProjectTrail({ logs, projects, selected, setSelected, onSummary }: any) { const rows = logs.filter((l: WorkLogRecord) => l.project_id === Number(selected)); const stageFor = (r: WorkLogRecord) => PROJECT_STAGES.includes(r.stage) ? r.stage : r.record_type === 'outcome' ? '量产后降本' : r.record_type === 'decision' ? 'CDCP' : r.record_type === 'risk' ? 'PDCP' : 'Charter'; return <div className="project-trail"><section className="content-card project-trail-head"><div><span className="eyebrow">PROJECT THREAD</span><h2>项目脉络</h2><p>按 Charter、CDCP、PDCP、ADCP 和量产后降本组织同一项目的判断与结果。</p></div><Select showSearch value={selected || undefined} placeholder="选择项目" onChange={setSelected} options={projects.map((p: any) => ({ value: p.id, label: `[${p.code}] ${p.name}` }))} /><Button type="primary" onClick={onSummary} disabled={!selected}>生成项目复盘</Button></section>{selected && <section className="content-card project-stage"><div className="stage-line">{PROJECT_STAGES.map((s, i) => <span className={rows.some((r: WorkLogRecord) => stageFor(r) === s) ? 'has-data' : ''} key={s}><i>{i + 1}</i>{s}</span>)}</div></section>}<section className="content-card project-trail-list">{rows.map((r: WorkLogRecord) => <div className="trail-row" key={r.id}><time>{String(r.log_date).slice(0, 16)}</time><Tag>{stageFor(r)}</Tag><div><b>{TYPE_LABEL[r.record_type]}</b><p>{r.content}</p><small>[记录#{r.id}] {r.impact || r.next_action || '暂无结果/影响'}</small></div></div>)}{!rows.length && <Empty description={selected ? '该项目还没有手账记录' : '请选择项目'} />}</section></div>; }
+function SummaryPanel({ summaries, summaryType, setSummaryType, summaryRange, setSummaryRange, summaryProject, setSummaryProject, projects, summaryModel, setSummaryModel, summaryText, summarizing, onGenerate, onSave, onView, onDelete }: any) { return <div className="summary-page"><section className="content-card summary-controls"><div className="section-heading"><div><span className="eyebrow">EVIDENCE-BASED WRITING</span><h2>AI 总结</h2></div><span>引用手账记录和项目系统事件，来源可回看</span></div><div className="summary-control-row"><Select value={summaryType} onChange={setSummaryType} options={Object.entries(SUMMARY_LABEL).map(([value, label]) => ({ value, label }))} /><DatePicker.RangePicker value={summaryRange} onChange={setSummaryRange} /><Select allowClear placeholder="全部项目" value={summaryProject || undefined} onChange={v => setSummaryProject(v || '')} options={projects.map((p: any) => ({ value: p.id, label: `[${p.code}] ${p.name}` }))} /><Input placeholder="总结模型（默认对话模型）" value={summaryModel} onChange={e => setSummaryModel(e.target.value)} onBlur={() => setSummaryModel(summaryModel)} /><Button type="primary" icon={<RobotOutlined />} loading={summarizing} onClick={onGenerate}>生成总结</Button></div><p className="summary-safety-note">数字、金额、项目结论必须能回到原始记录；资料不足时模型会标记“记录中未明确”。</p></section><section className="summary-result content-card">{summaryText ? <><div className="summary-viewer">{summaryText}</div><div className="summary-actions"><Button icon={<SaveOutlined />} onClick={onSave}>保存总结</Button></div></> : <Empty description={summarizing ? '正在读取记录并流式生成…' : '选择范围和总结类型后开始生成'} />}</section><section className="content-card saved-summary-list"><div className="section-heading"><h2>已保存总结</h2><span>{summaries.length} 份</span></div>{summaries.map((s: any) => <div className="saved-summary-row" key={s.id}><div><b>{s.title}</b><small>{SUMMARY_LABEL[s.summary_type] || '工作总结'} · {s.start_date} ~ {s.end_date} · 引用 {s.source_log_ids?.length || 0} 条记录</small></div><Button size="small" icon={<SearchOutlined />} onClick={() => onView(s)}>查看原始记录</Button><Button size="small" danger type="text" aria-label="删除总结" icon={<DeleteOutlined />} onClick={() => onDelete(s.id)} /></div>)}</section></div>; }
+function Editor({ value, projects, onChange, onSave, projectLocked = false }: { value: EditorValue; projects: any[]; onChange: (v: EditorValue) => void; onSave: (value: EditorValue) => void | Promise<number | boolean>; projectLocked?: boolean }) { const [saving, setSaving] = useState(false); const patch = (p: Partial<EditorValue>) => onChange({ ...value, ...p }); return <div className="worklog-editor"><div className="editor-grid"><Select value={value.record_type || 'work_progress'} onChange={(v: string) => patch({ record_type: v })} options={WORK_LOG_TYPES.map(t => ({ value: t, label: TYPE_LABEL[t] }))} /><Select value={value.stage || 'Charter'} onChange={(v: string) => patch({ stage: v })} options={PROJECT_STAGES.map(stage => ({ value: stage, label: stage }))} /><DatePicker showTime value={value.log_date ? dayjs(value.log_date) : dayjs()} onChange={(v: Dayjs | null) => v && patch({ log_date: v.format('YYYY-MM-DD HH:mm') })} />{projectLocked ? <Input readOnly aria-label="当前书册项目" value={value.work_project || '工作备忘'} /> : <AutoComplete allowClear showSearch placeholder="关联项目（可选择或手写）" value={value.work_project || undefined} onChange={(v: string) => { const p = projects.find((row: any) => row.name === v || row.code === v); patch({ work_project: v || '', project_id: p?.id || 0 }); }} options={projects.map((p: any) => ({ value: p.name, label: p.name }))} />}</div><Input placeholder="标题（可选）" value={value.title || ''} onChange={e => patch({ title: e.target.value })} /><Input.TextArea autoSize={{ minRows: 5, maxRows: 10 }} placeholder="今天做了什么？判断是什么？结果或影响如何？" value={value.content || ''} onChange={e => patch({ content: e.target.value })} /><div className="editor-grid"><Input placeholder="结果或影响（可选）" value={value.impact || ''} onChange={e => patch({ impact: e.target.value })} /><Input placeholder="下一步（可选）" value={value.next_action || ''} onChange={e => patch({ next_action: e.target.value })} /><Input placeholder="到期时间（可选）" value={value.due_at || ''} onChange={e => patch({ due_at: e.target.value })} /></div><Input prefix={<LinkOutlined />} placeholder="证据链接（可选，多个用换行分隔）" value={value.evidence_json && value.evidence_json !== '[]' ? String(value.evidence_json) : ''} onChange={e => patch({ evidence_json: JSON.stringify(e.target.value.split(/\n|,/).map((x: string) => x.trim()).filter(Boolean)) })} /><Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={async () => { if (saving) return; setSaving(true); try { await onSave(value); } finally { setSaving(false); } }}>{value.id ? '保存本条修改' : '保存为新记录'}</Button></div>; }

@@ -5,6 +5,7 @@ import { Tag } from 'antd';
 import { BulbOutlined, ArrowRightOutlined } from '@ant-design/icons';
 import type { InsightPlanItem } from '../autoInsight';
 import { buildMaterialSuggestion } from '../autoInsight';
+import { openMaterialInsightDraft } from '../materialInsight';
 
 const DIRECTION_META: Record<string, { text: string; color: string }> = {
   上涨: { text: '↑ 上涨', color: '#DC2626' },
@@ -63,7 +64,7 @@ export default function KeyMaterialInsights({ onNavigate, compact }: { onNavigat
         <b style={{ fontSize: 13 }}>关键物料洞察</b>
         <Tag style={{ margin: 0, fontSize: 10.5, lineHeight: '18px' }} color="orange">按子类 · 30 天周期</Tag>
         <span style={{ flex: 1 }} />
-        <a style={{ fontSize: 12 }} onClick={() => onNavigate?.('decomposition')}>全部洞察 <ArrowRightOutlined /></a>
+        <a style={{ fontSize: 12 }} onClick={() => { openMaterialInsightDraft({ material: plan[0]?.aggregate.name || '', projectCode: plan[0]?.aggregate.projects?.[0]?.projectCode }); onNavigate?.('decomposition'); }}>全部洞察 <ArrowRightOutlined /></a>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {plan.slice(0, expanded ? plan.length : 2).map((item, i) => {

@@ -5,6 +5,8 @@
 import { getProjects, getProjectBOMs, getSetting } from './db';
 import { getDb } from './db/core';
 import { materialKey } from './db/advisor';
+import { requestCloudConfirm } from './cloudConfirm';
+import { bomExtendedCostStrict } from './ai/contracts';
 
 // ==================== ① 关键物料识别（纯本地规则，按子类聚合） ====================
 // 2026-08-16（用户要求）：洞察对象从"具体物料"改为"子类"——子类一般是物料的通用名称（如"液晶面板"），
@@ -35,9 +37,9 @@ export function identifyKeyMaterials(
   const out: KeyMaterial[] = [];
   for (const p of projects) {
     const boms = (bomsByProject[p.id] || []).filter(
-      (b: any) => !b.is_deleted && b.part_id && (b.quantity ?? 0) > 0
+      (b: any) => !b.is_deleted && b.part_id && (b.quantity ?? 0) > 0 && bomExtendedCostStrict(b) !== null
     );
-    const cost = (b: any) => (b.part_cost ?? b.cost ?? 0) * (b.quantity ?? 1);
+    const cost = (b: any) => bomExtendedCostStrict(b) ?? 0;
     // 按子类分组
     const groups = new Map<string, { rows: any[]; subtotal: number; category: string }>();
     for (const b of boms) {
@@ -333,19 +335,24 @@ export async function runAutoInsight(opts?: {
     for (const item of todo.slice(0, limit)) {
       try {
         // ⚠️ 发送前确认（2026-08-16 起：preview 模式拦截；2026-08-17 重构为非打断式队列，确认后 costhub-insight-request 继续）
-        const { requestCloudConfirm } = await import("./cloudConfirm");
+        const { getSearchApprovalEndpoint, PUBLIC_TREND_QUESTION } = await import('./trendService');
         const ok = await requestCloudConfirm({
           material: item.aggregate.name,
           category: item.aggregate.category,
+          question: PUBLIC_TREND_QUESTION,
+          requestUrl: await getSearchApprovalEndpoint(),
+          sourceType: 'background_task',
+          requirementKind: 'background_insight',
+          requirementTitle: '关键物料洞察 · ' + String(item.aggregate.name || ''),
         });
         if (!ok) { failed++; continue; }
         opts?.onProgress?.("关键物料洞察：" + item.aggregate.name + "…"); // 确认放行后才广播任务（被拦截轮次不打扰）
         const { saveQuickTrendItem } = await import("./db");
-        const { agentSearchLoop } = await import("./trendService");
         const trendItemId = await saveQuickTrendItem({
           material_name: item.aggregate.name,
           category_type: item.aggregate.category,
         });
+        const { agentSearchLoop } = await import('./trendService');
         const r = await agentSearchLoop(
           item.aggregate.name,
           item.aggregate.category,
@@ -364,6 +371,17 @@ export async function runAutoInsight(opts?: {
           magnitude_max: r.magnitude_max,
           magnitude_reference: r.magnitude_reference,
         });
+        // 把本次搜索的来源一并落库（否则洞察结果永远显示"0 条可点击来源"）
+        try {
+          const { clearTrendSources, saveTrendSource } = await import("./db");
+          const usable = (r.allSources || []).filter(source => /^https?:\/\//i.test(String(source.url || '').trim()));
+          if (usable.length) {
+            await clearTrendSources(trendItemId);
+            for (const source of usable) {
+              await saveTrendSource({ trend_item_id: trendItemId, source_title: source.title, source_url: source.url, excerpt: source.snippet });
+            }
+          }
+        } catch { /* 来源落库失败不影响洞察本身 */ }
         insights++;
       } catch { failed++; }
     }

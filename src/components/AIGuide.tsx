@@ -22,7 +22,7 @@ export default function AIGuide({ open, onClose, onOpenSettings }: Props) {
     (async () => {
       try {
         const providers = await getAllApiProviders();
-        const active = providers.find((p: any) => p.provider_type === 'llm' && p.is_active && p.api_key);
+        const active = providers.find((p: any) => p.provider_type === 'llm' && p.is_active && p.credential_configured);
         setLlmReady(!!active);
         setLlmName(active?.provider_name || '');
         setLocalModel(await getSetting('local_ai_model', ''));

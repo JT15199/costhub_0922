@@ -1,0 +1,15 @@
+PASS: non-port blur preserves external endpoint; unrelated option does not save temperature
+PASS: stale model probe result rejected
+late health after stop: WRONG: ready after stop
+AssertionError [ERR_ASSERTION]: A stopped server must not become ready from a late health response
+
+true !== false
+
+    at D:\AI coding folder\costhub\docs\check-local-settings-acceptance.cjs:55:12 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: true,
+  expected: false,
+  operator: 'strictEqual',
+  diff: 'simple'
+}

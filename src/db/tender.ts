@@ -28,6 +28,7 @@ export interface ImportTenderQuoteInput {
   currency?: string;
   tax_mode?: string;
   pricing_mode?: string;
+  round_id?: number;
   lines: TenderQuoteLineInput[];
 }
 
@@ -46,6 +47,8 @@ export interface TenderOffer {
   rawModel: string;
   rawSpecs: string;
   remark: string;
+  duplicateCount?: number;
+  sourceOffers?: TenderOffer[];
 }
 
 export interface TenderMatrixRow {
@@ -94,6 +97,7 @@ export interface TenderOverview {
     bestFullQuote: number;
     opportunity: number;
   };
+  rounds: Array<{ id: number; roundNo: number; name: string; stage: string; specBaselineId: number; batchCount: number; supplierCount: number; lineCount: number; totalAmount: number; diff?: { added: number; removed: number; priceChanged: number; quantityChanged: number; specChanged: number } }>;
   events: Array<{ id: number; eventType: string; summary: string; detail: string; actor: string; createdAt: string }>;
 }
 
@@ -140,8 +144,8 @@ function numberValue(value: unknown, fallback = 0): number {
 function normalize(value: unknown): string {
   return text(value).toLowerCase().replace(/[\s\u3000\-_\/\\.,，。:：()（）\[\]【】]/g, '');
 }
-export function makeTenderCanonicalKey(name: string, specs = '') {
-  return `${normalize(name)}|${normalize(specs)}`;
+export function makeTenderCanonicalKey(name: string, specs = '', model = '', moduleName = '') {
+  return `${normalize(name)}|${normalize(specs)}|${normalize(model)}|${normalize(moduleName)}`;
 }
 function projectSpec(project: any): Record<string, string> {
   return {
@@ -159,7 +163,13 @@ function fingerprintSpec(spec: Record<string, string>): string {
 
 async function ensureSpecBaseline(d: any, projectId: number, stage: string) {
   const projectRows = await d.select('SELECT * FROM projects WHERE id=?', [projectId]);
-  const spec = projectSpec(projectRows[0] || {});
+  const project = projectRows[0] || {};
+  let spec = projectSpec(project);
+  // 报价基线优先读取品类规格值；旧项目没有新字段时继续使用兼容列。
+  try {
+    const profile = await import('./architecture').then(module => module.getProjectSpecProfile(projectId, project.category || '显示器'));
+    if (profile.length) spec = Object.fromEntries(profile.map(field => [field.field_key, text(field.value_text)]));
+  } catch { /* 旧库/开发环境没有规格扩展时回退到旧字段 */ }
   const fingerprint = fingerprintSpec(spec);
   const latest = (await d.select('SELECT * FROM project_spec_baselines WHERE project_id=? ORDER BY id DESC LIMIT 1', [projectId]))[0] as any;
   if (latest?.fingerprint === fingerprint) return latest;
@@ -174,7 +184,11 @@ async function ensureSpecBaseline(d: any, projectId: number, stage: string) {
   return { id: result.lastInsertId, project_id: projectId, version_no: versionNo, fingerprint, spec_json: JSON.stringify(spec), changed_fields_json: JSON.stringify(changedFields), created_at: localNow() };
 }
 
-async function ensureRound(d: any, projectId: number, baseline: any, stage: string) {
+async function ensureRound(d: any, projectId: number, baseline: any, stage: string, roundId = 0) {
+  if (roundId > 0) {
+    const selected = (await d.select('SELECT * FROM tender_rounds WHERE id=? AND project_id=?', [roundId, projectId]))[0] as any;
+    if (selected) return selected;
+  }
   const latest = (await d.select('SELECT * FROM tender_rounds WHERE project_id=? ORDER BY id DESC LIMIT 1', [projectId]))[0] as any;
   if (latest && latest.spec_baseline_id === baseline.id && latest.stage === stage) return latest;
   const roundNo = numberValue(latest?.round_no, 0) + 1;
@@ -202,36 +216,57 @@ export async function importTenderQuoteBatch(input: ImportTenderQuoteInput) {
   if (duplicate) {
     return { batchId: duplicate.id as number, roundId: 0, specBaselineId: 0, duplicate: true, importedLines: 0, roundLabel: '已导入' };
   }
-  const stage = text(input.stage) || '摸底报价';
-  const baseline = await ensureSpecBaseline(d, input.project_id, stage);
-  const round = await ensureRound(d, input.project_id, baseline, stage);
-  const previous = await d.select<any[]>('SELECT l.canonical_key, l.raw_model, b.supplier_name FROM supplier_quote_lines l JOIN supplier_quote_batches b ON b.id=l.batch_id WHERE l.canonical_key<>?', ['']);
-  // 只有跨供应商的相同键才自动标记 exact；同一供应商重复行不能制造“可比价”。
-  const previousOtherSupplier = new Set(previous.filter(row => text(row.canonical_key) && text(row.supplier_name) !== text(input.supplier_name)).map(row => `${row.canonical_key}|${normalize(row.raw_model)}`));
-  const batchNo = numberValue((await d.select<any[]>('SELECT MAX(batch_no) as max_no FROM supplier_quote_batches WHERE project_id=? AND supplier_name=?', [input.project_id, input.supplier_name]))[0]?.max_no, 0) + 1;
-  const batchResult = await d.execute(
-    'INSERT INTO supplier_quote_batches (project_id, tender_round_id, supplier_name, batch_no, source_file_name, source_file_hash, quoted_at, currency, tax_mode, pricing_mode, total_amount) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-    [input.project_id, round.id, text(input.supplier_name), batchNo, text(input.source_file_name), text(input.source_file_hash), text(input.quoted_at) || localNow(), text(input.currency) || 'CNY', text(input.tax_mode) || 'exclusive', text(input.pricing_mode) || 'one_time', numberValue(input.total_amount)]
-  );
-  let importedLines = 0;
-  for (const line of input.lines || []) {
-    const name = text(line.raw_name);
-    if (!name) continue;
-    const quantity = numberValue(line.quantity, 1) || 1;
-    const unitPrice = numberValue(line.unit_price);
-    const lineTotal = numberValue(line.line_total, unitPrice * quantity);
-    const canonicalKey = text(line.canonical_key) || makeTenderCanonicalKey(name, line.raw_specs);
-    const relation: MatchRelation = previousOtherSupplier.has(`${canonicalKey}|${normalize(line.raw_model)}`) ? 'exact' : 'unmatched';
-    const confidence = relation === 'exact' ? 0.98 : 0;
-    const lineResult = await d.execute(
-      'INSERT INTO supplier_quote_lines (batch_id, source_row, raw_name, raw_model, raw_specs, module_name, quantity, unit_price, line_total, remark, raw_json, canonical_key, relation_type, match_confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [batchResult.lastInsertId, numberValue(line.source_row, importedLines + 1), name, text(line.raw_model), text(line.raw_specs), text(line.module_name), quantity, unitPrice, lineTotal, text(line.remark), text(line.raw_json) || JSON.stringify(line), canonicalKey, relation, confidence]
+  await d.execute('BEGIN');
+  try {
+    const stage = text(input.stage) || '摸底报价';
+    const baseline = await ensureSpecBaseline(d, input.project_id, stage);
+    const round = await ensureRound(d, input.project_id, baseline, stage, numberValue(input.round_id));
+    const previous = await d.select<any[]>('SELECT l.canonical_key, l.raw_model, l.module_name, b.supplier_name FROM supplier_quote_lines l JOIN supplier_quote_batches b ON b.id=l.batch_id WHERE l.canonical_key<>?', ['']);
+    // 只有跨供应商的相同键才自动标记 exact；同一供应商重复行不能制造“可比价”。
+    const previousOtherSupplier = new Set(previous.filter(row => text(row.canonical_key) && text(row.supplier_name) !== text(input.supplier_name)).map(row => `${row.canonical_key}|${normalize(row.raw_model)}|${normalize(row.module_name)}`));
+    const batchNo = numberValue((await d.select<any[]>('SELECT MAX(batch_no) as max_no FROM supplier_quote_batches WHERE project_id=? AND supplier_name=?', [input.project_id, input.supplier_name]))[0]?.max_no, 0) + 1;
+    const batchResult = await d.execute(
+      'INSERT INTO supplier_quote_batches (project_id, tender_round_id, supplier_name, batch_no, source_file_name, source_file_hash, quoted_at, status, currency, tax_mode, pricing_mode, total_amount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      [input.project_id, round.id, text(input.supplier_name), batchNo, text(input.source_file_name), text(input.source_file_hash), text(input.quoted_at) || localNow(), 'frozen', text(input.currency) || 'CNY', text(input.tax_mode) || 'exclusive', text(input.pricing_mode) || 'one_time', numberValue(input.total_amount)]
     );
-    await d.execute('INSERT INTO quote_line_matches (quote_line_id, relation_type, confidence, source, remark) VALUES (?,?,?,?,?)', [lineResult.lastInsertId, relation, confidence, 'rule', relation === 'exact' ? '名称+规格+型号标准化键一致' : '等待人工确认']);
-    importedLines += 1;
+    let importedLines = 0;
+    for (const line of input.lines || []) {
+      const name = text(line.raw_name);
+      if (!name) continue;
+      const quantity = line.quantity == null ? 1 : numberValue(line.quantity, 0);
+      if (quantity < 0) continue;
+      const unitPrice = numberValue(line.unit_price);
+      const lineTotal = numberValue(line.line_total, unitPrice * quantity);
+      const canonicalKey = text(line.canonical_key) || makeTenderCanonicalKey(name, line.raw_specs, line.raw_model, line.module_name);
+      const relation: MatchRelation = previousOtherSupplier.has(`${canonicalKey}|${normalize(line.raw_model)}|${normalize(line.module_name)}`) ? 'exact' : 'unmatched';
+      const confidence = relation === 'exact' ? 0.98 : 0;
+      const lineResult = await d.execute(
+        'INSERT INTO supplier_quote_lines (batch_id, source_row, raw_name, raw_model, raw_specs, module_name, quantity, unit_price, line_total, remark, raw_json, canonical_key, relation_type, match_confidence) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        [batchResult.lastInsertId, numberValue(line.source_row, importedLines + 1), name, text(line.raw_model), text(line.raw_specs), text(line.module_name), quantity, unitPrice, lineTotal, text(line.remark), text(line.raw_json) || JSON.stringify(line), canonicalKey, relation, confidence]
+      );
+      await d.execute('INSERT INTO quote_line_matches (quote_line_id, relation_type, confidence, source, remark) VALUES (?,?,?,?,?)', [lineResult.lastInsertId, relation, confidence, 'rule', relation === 'exact' ? '名称+规格+型号标准化键一致' : '等待人工确认']);
+      importedLines += 1;
+    }
+    await recordTenderEventWithDb(d, input.project_id, 'quote_imported', `${input.supplier_name} 第${batchNo}份报价已导入`, JSON.stringify({ batchId: batchResult.lastInsertId, supplierName: input.supplier_name, importedLines, sourceFileName: input.source_file_name }));
+    await d.execute('COMMIT');
+    void import('./worklog').then(({ recordSystemWorkLog }) => recordSystemWorkLog(input.project_id, 'PDCP', '供应商报价导入', `${input.supplier_name} 第${batchNo}份报价已导入，共 ${importedLines} 行，批次总额 ${numberValue(input.total_amount).toFixed(2)} 元。`, [`supplier_quote_batches#${batchResult.lastInsertId}`])).catch(() => { });
+    return { batchId: batchResult.lastInsertId as number, roundId: round.id as number, specBaselineId: baseline.id as number, duplicate: false, importedLines, roundLabel: `第${round.round_no}轮 · ${round.name}` };
+  } catch (error) {
+    await d.execute('ROLLBACK').catch(() => { });
+    throw error;
   }
-  await recordTenderEventWithDb(d, input.project_id, 'quote_imported', `${input.supplier_name} 第${batchNo}份报价已导入`, JSON.stringify({ batchId: batchResult.lastInsertId, supplierName: input.supplier_name, importedLines, sourceFileName: input.source_file_name }));
-  return { batchId: batchResult.lastInsertId as number, roundId: round.id as number, specBaselineId: baseline.id as number, duplicate: false, importedLines, roundLabel: `第${round.round_no}轮 · ${round.name}` };
+}
+
+/** 显式开启一轮报价；相同阶段也允许重新开轮，避免把第二次报价覆盖到上一轮。 */
+export async function createTenderRound(projectId: number, stage = '摸底报价', name = '') {
+  const d = await getDb();
+  const baseline = await ensureSpecBaseline(d, projectId, text(stage) || '摸底报价');
+  const latest = (await d.select<any[]>('SELECT round_no FROM tender_rounds WHERE project_id=? ORDER BY round_no DESC, id DESC LIMIT 1', [projectId]))[0];
+  const roundNo = numberValue(latest?.round_no) + 1;
+  const label = text(name) || text(stage) || '摸底报价';
+  const result = await d.execute('INSERT INTO tender_rounds (project_id, round_no, name, stage, spec_baseline_id) VALUES (?,?,?,?,?)', [projectId, roundNo, label, text(stage) || '摸底报价', baseline.id]);
+  await recordTenderEventWithDb(d, projectId, 'tender_round_created', `已手动创建第${roundNo}轮${label}`, JSON.stringify({ roundNo, stage, specBaselineId: baseline.id }));
+  return { id: Number(result.lastInsertId), roundNo, name: label, stage: text(stage) || '摸底报价', specBaselineId: Number(baseline.id) };
 }
 
 function mapBatch(row: any): QuoteBatch {
@@ -261,10 +296,16 @@ export async function getTenderMatrix(projectId: number): Promise<TenderMatrixRo
     WHERE l.batch_id IN (${placeholders}) ORDER BY l.module_name, l.id`, selected.map(batch => batch.id));
   const groups = new Map<string, TenderMatrixRow>();
   for (const row of rows) {
-    const key = text(row.canonical_key) || makeTenderCanonicalKey(row.raw_name, row.raw_specs);
+    const key = `${text(row.canonical_key) || makeTenderCanonicalKey(row.raw_name, row.raw_specs, row.raw_model, row.module_name)}|${normalize(row.raw_model)}|${normalize(row.module_name)}`;
     const existing = groups.get(key) || { key, moduleName: text(row.module_name), materialName: text(row.raw_name), model: text(row.raw_model), specs: text(row.raw_specs), quantity: numberValue(row.quantity, 1), offers: {}, opportunity: 0 };
     const offer: TenderOffer = { quoteLineId: row.id, batchId: row.batch_id, supplierName: text(row.supplier_name), unitPrice: numberValue(row.unit_price), lineTotal: numberValue(row.line_total), quantity: numberValue(row.quantity, 1), relationType: (text(row.relation_type) || 'unmatched') as MatchRelation, confidence: numberValue(row.match_confidence), roundNo: numberValue(row.round_no), quotedAt: text(row.quoted_at), sourceFileName: text(row.source_file_name), rawModel: text(row.raw_model), rawSpecs: text(row.raw_specs), remark: text(row.remark) };
-    existing.offers[offer.supplierName] = offer;
+    const prior = existing.offers[offer.supplierName];
+    if (!prior) existing.offers[offer.supplierName] = offer;
+    else {
+      const sourceOffers = [...(prior.sourceOffers || [prior]), offer];
+      const quantity = sourceOffers.reduce((sum, item) => sum + item.quantity, 0);
+      existing.offers[offer.supplierName] = { ...prior, quoteLineId: sourceOffers[0].quoteLineId, unitPrice: quantity ? sourceOffers.reduce((sum, item) => sum + item.lineTotal, 0) / quantity : 0, lineTotal: sourceOffers.reduce((sum, item) => sum + item.lineTotal, 0), quantity, relationType: sourceOffers.some(item => item.relationType === 'unmatched') ? 'unmatched' : sourceOffers.every(item => item.relationType === 'exact') ? 'exact' : 'equivalent', confidence: Math.min(...sourceOffers.map(item => item.confidence)), duplicateCount: sourceOffers.length, sourceOffers };
+    }
     if (!existing.moduleName) existing.moduleName = text(row.module_name);
     if (!existing.model) existing.model = text(row.raw_model);
     if (!existing.specs) existing.specs = text(row.raw_specs);
@@ -307,11 +348,35 @@ export async function getTenderOverview(projectId: number): Promise<TenderOvervi
   const fullQuotes = currentBatches.map(batch => batch.totalAmount).filter(value => value > 0);
   const bestFullQuote = fullQuotes.length ? Math.min(...fullQuotes) : 0;
   const opportunity = matrix.reduce((sum, row) => sum + row.opportunity, 0);
+  const roundRows = await d.select<any[]>('SELECT id, round_no, name, stage, spec_baseline_id FROM tender_rounds WHERE project_id=? ORDER BY round_no, id', [projectId]);
+  const allLines = await d.select<any[]>(`SELECT l.canonical_key, l.raw_model, l.raw_specs, l.quantity, l.unit_price, b.supplier_name, b.tender_round_id
+    FROM supplier_quote_lines l JOIN supplier_quote_batches b ON b.id=l.batch_id WHERE b.project_id=?`, [projectId]);
+  const rounds = roundRows.map((round, index) => {
+    const roundBatches = batches.filter(batch => batch.roundId === round.id);
+    const roundLines = allLines.filter(line => Number(line.tender_round_id) === Number(round.id));
+    const diff = { added: 0, removed: 0, priceChanged: 0, quantityChanged: 0, specChanged: 0 };
+    if (index > 0) {
+      const previousLines = allLines.filter(line => Number(line.tender_round_id) === Number(roundRows[index - 1].id));
+      const before = new Map(previousLines.map(line => [`${line.supplier_name}|${line.canonical_key}`, line]));
+      const seen = new Set<string>();
+      for (const line of roundLines) {
+        const key = `${line.supplier_name}|${line.canonical_key}`;
+        const old = before.get(key);
+        if (!old) { diff.added += 1; continue; }
+        seen.add(key);
+        if (Math.abs(numberValue(line.unit_price) - numberValue(old.unit_price)) > 0.000001) diff.priceChanged += 1;
+        if (Math.abs(numberValue(line.quantity, 1) - numberValue(old.quantity, 1)) > 0.000001) diff.quantityChanged += 1;
+        if (text(line.raw_model) !== text(old.raw_model) || text(line.raw_specs) !== text(old.raw_specs)) diff.specChanged += 1;
+      }
+      diff.removed = [...before.keys()].filter(key => !seen.has(key) && !roundLines.some(line => `${line.supplier_name}|${line.canonical_key}` === key)).length;
+    }
+    return { id: Number(round.id), roundNo: numberValue(round.round_no), name: text(round.name), stage: text(round.stage), specBaselineId: Number(round.spec_baseline_id), batchCount: roundBatches.length, supplierCount: new Set(roundBatches.map(batch => batch.supplierName)).size, lineCount: roundLines.length, totalAmount: roundBatches.reduce((sum, batch) => sum + batch.totalAmount, 0), diff };
+  });
   const events = await d.select<any[]>('SELECT id, event_type, summary, detail, actor, created_at FROM project_process_events WHERE project_id=? ORDER BY id DESC LIMIT 30', [projectId]);
   return {
     currentSpec: specRow ? { id: specRow.id, versionNo: specRow.version_no, fingerprint: specRow.fingerprint, changedFields: jsonObject(specRow.changed_fields_json, []), createdAt: specRow.created_at, spec: jsonObject(specRow.spec_json, {}) } : undefined,
     currentRound: roundRow ? { id: roundRow.id, roundNo: roundRow.round_no, name: roundRow.name, stage: roundRow.stage, specBaselineId: roundRow.spec_baseline_id, createdAt: roundRow.created_at } : undefined,
-    batches, summary: { supplierCount: new Set(currentBatches.map(batch => batch.supplierName)).size, lineCount: offers.length, comparableCount, referenceCount, unmatchedCount, comparableCoverage: offers.length ? comparableCount / offers.length : 0, theoreticalLow, bestFullQuote, opportunity },
+    batches, summary: { supplierCount: new Set(currentBatches.map(batch => batch.supplierName)).size, lineCount: offers.length, comparableCount, referenceCount, unmatchedCount, comparableCoverage: offers.length ? comparableCount / offers.length : 0, theoreticalLow, bestFullQuote, opportunity }, rounds,
     events: events.map(row => ({ id: row.id, eventType: row.event_type, summary: row.summary, detail: row.detail, actor: row.actor, createdAt: row.created_at })),
   };
 }
@@ -363,8 +428,10 @@ export async function saveTenderDecision(projectId: number, input: TenderDecisio
   } else {
     const result = await d.execute('INSERT INTO tender_decisions (project_id, selected_supplier, final_quote, status, rationale, review_summary, decided_at) VALUES (?,?,?,?,?,?,?)', [projectId, ...values]);
     await recordTenderEventWithDb(d, projectId, 'tender_decision_saved', `已保存定点/复盘记录（${values[0] || '供应商待定'}）`, JSON.stringify({ decisionId: result.lastInsertId, status: values[2] }));
+    void import('./worklog').then(({ recordSystemWorkLog }) => recordSystemWorkLog(projectId, 'ADCP', '供应商定点记录', `已记录定点供应商：${values[0] || '待定'}，最终报价 ${numberValue(input.finalQuote).toFixed(2)} 元。`, [`tender_decisions#${result.lastInsertId}`])).catch(() => { });
     return result.lastInsertId as number;
   }
   await recordTenderEventWithDb(d, projectId, 'tender_decision_saved', `已更新定点/复盘记录（${values[0] || '供应商待定'}）`, JSON.stringify({ decisionId: existing.id, status: values[2] }));
+  void import('./worklog').then(({ recordSystemWorkLog }) => recordSystemWorkLog(projectId, 'ADCP', '供应商定点记录更新', `已更新定点供应商：${values[0] || '待定'}，最终报价 ${numberValue(input.finalQuote).toFixed(2)} 元。`, [`tender_decisions#${existing.id}`])).catch(() => { });
   return existing.id as number;
 }

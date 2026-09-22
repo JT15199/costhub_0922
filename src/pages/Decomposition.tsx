@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { EmojiIcon } from '../iconMap';
 import {
-  Table, Button, Input, Select, Space, Modal, Form, Tag, message,
-  Popconfirm, Spin, Empty, Tooltip, Progress, Radio, List, Card, Row, Col, Typography, Alert, Timeline,
+  Table, Button, Input, Select, Space, Modal, Form, Tag, message, Checkbox, Pagination,
+  Popconfirm, Spin, Empty, Tooltip, Progress, Radio, List, Typography, Alert, Timeline,
 } from 'antd';
 import { CloseOutlined,
   PlusOutlined, EditOutlined, DeleteOutlined, ThunderboltOutlined,
@@ -12,6 +12,7 @@ import { CloseOutlined,
   RiseOutlined, FallOutlined, MinusOutlined,
   BarsOutlined, BarChartOutlined, ClockCircleOutlined, HistoryOutlined, InboxOutlined,
   LinkOutlined, BulbOutlined, SignalFilled, CheckSquareFilled, BorderOutlined, WarningOutlined,
+  PauseCircleOutlined, PlayCircleOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import {
   ReactFlow, MiniMap, Controls, Background, Panel, useNodesState, useEdgesState,
@@ -21,7 +22,7 @@ import type { Edge, Node } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
   getAllDecompositionNodes, getDecompositionNode, saveDecompositionNode,
-  deleteDecompositionNode, searchDecompositionNodes, getDecompositionHistory,
+  deleteDecompositionNode, searchDecompositionNodes, getDecompositionHistory, getDecompositionTree,
   getTrendItemsWithDetails, getLatestTrendSnapshot, getTrendItemByCategory,
   saveTrendItem, saveTrendSnapshot, getTrendSnapshots,
   getTrendConversations,
@@ -29,19 +30,40 @@ import {
   getTrendSources,
   saveRollupContribution, getRollupContributions, saveRollupFeedback, getAllRollupFeedback,
   getTrendInsightDimensions, saveTrendInsightDimensions, saveTrendKeyEvent,
-  getParts,
+  getParts, getMaterialInsightSubjects, getDirectTrendItemByCategory, getTrendProjectContext, updateMaterialInsightSubjectMeta,
+  deleteMaterialInsightSubjects,
+  type MaterialInsightSubject,
 } from '../db';
 import { hasLLMConfig } from '../apiConfig';
 import { agentSearchLoop, askLLM, createStructuredInsight, BUILTIN_SKILLS, extractLLMJson, getActiveSkills, getSkill } from '../trendService';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { getCategoryColor } from '../constants';
+import { openUrl } from '@tauri-apps/plugin-opener';
+import { buildDecompositionContributionData, filterInsightTreeNodes, filterMaterialInsightSubjects, getMaterialInsightModeMeta, getMaterialInsightPreviewNodes, getSelectableInsightNodeIds, normalizeMaterialInsightLink, parseMaterialInsightResult, resolveMaterialInsightMode, safeHttpUrl, suggestMaterialInsightMode, type ExplicitMaterialInsightMode, type InsightTreeFilter } from '../materialInsight';
+import MaterialInsightResultView from '../components/MaterialInsightResultView';
+import { buildInsightLocalContext } from '../ai/insightLocalContext';
+import { findDimension } from '../ai/skillDimensions';
 
 // 统一时间格式化：兼容本地时间（YYYY-MM-DD HH:MM:SS）与旧 ISO UTC（带 T）两种格式
 function formatTime(t: string): string {
   if (!t) return '未知时间';
   const s = String(t);
   return s.length >= 16 ? s.slice(0, 16).replace('T', ' ') : s;
+}
+
+function estimateProjectImpacts(rows: any[], insight: any, asOf: string) {
+  const min = Number(insight?.magnitude_min);
+  const max = Number(insight?.magnitude_max);
+  if (!rows.length || !Number.isFinite(min) || !Number.isFinite(max)) return [];
+  const byProject = new Map<string, { projectId: number | null; projectName: string; baseline: number }>();
+  rows.forEach(row => {
+    const key = String(row.project_id || row.project_code || row.project_name || '');
+    const current = byProject.get(key) || { projectId: Number(row.project_id) || null, projectName: String(row.project_code || row.project_name || '未命名项目'), baseline: 0 };
+    current.baseline += Number(row.line_cost) || 0;
+    byProject.set(key, current);
+  });
+  const rate = (min + max) / 2 / 100;
+  return [...byProject.values()].map(project => ({ project_id: project.projectId, project_name: project.projectName, value: project.baseline * rate, baseline: project.baseline, target: null, unit: '元/BOM（按幅度中位数）', as_of: asOf }));
 }
 
 const ROLLUP_SKILL = `# 层级趋势汇总（Rollup）Skill
@@ -87,11 +109,9 @@ function parseDecompositionItems(response: string): any[] {
 }
 
 async function openExternal(url: string) {
-  if (!url) return;
-  try {
-    await navigator.clipboard.writeText(url);
-    message.info('机密模式禁止应用访问外网，来源地址已复制；如需查看请在独立浏览器中手动打开');
-  } catch { message.warning('机密模式禁止应用访问外网'); }
+  const safeUrl = safeHttpUrl(url);
+  if (!safeUrl) { message.warning('来源链接不是安全的 HTTP/HTTPS 地址'); return; }
+  try { await openUrl(safeUrl); } catch { message.error('无法打开来源链接'); }
 }
 
 const TREND_COLORS: Record<string, string> = { '上涨': '#EF4444', '下降': '#10B981', '震荡': '#F59E0B', '信号不明确': '#94A3B8' };
@@ -105,14 +125,12 @@ const DIRECTION_VALUES: Record<string, number> = { '上涨': 1, '下降': -1, '�
 
 // ====== 自定义 React Flow 节点 ======
 // 通过 window 级回调让节点组件触发勾选，避免模块级组件无法访问 React state
-let checkToggleFn: ((dbId: number, ctrlKey: boolean) => void) | null = null;
-let nodeActionFn: ((dbId: number, action: 'decompose' | 'insight') => void) | null = null;
+let checkToggleFn: ((dbId: number, ctrlKey?: boolean, shiftKey?: boolean) => void) | null = null;
 
 function DecompNode({ data, selected }: any) {
   const trendColor = data.trendColor || '#94A3B8';
   const isDraft = data.sourceType === 'ai_draft';
   const isChecked = data.isChecked;
-  const isTerminal = data.nodeType === 'terminal';
   const isQueried = data.insightStatus === 'queried';
   const ratio = data.costRatio != null ? Number(data.costRatio) : 0;
   const isBig = ratio >= 15; // 成本大头（≥15%）
@@ -126,20 +144,22 @@ function DecompNode({ data, selected }: any) {
   const heat = isDraft ? 0 : Math.min(0.12, 0.02 + (ratio / 100) * 0.10);
   return (
     <div
+      className={`material-insight-flow-node${selected ? ' is-selected' : ''}${isDraft ? ' is-draft' : ''}`}
       style={{
         background: isDraft
-          ? 'linear-gradient(135deg, #F8FAFC, #F1F5F9)'
-          : `linear-gradient(180deg, rgba(0,122,255,${heat.toFixed(3)}), rgba(0,122,255,0) 70%), var(--card-bg, #FFF)`,
+          ? 'linear-gradient(135deg, rgba(248,252,255,.88), rgba(231,240,248,.76))'
+          : `linear-gradient(180deg, rgba(80,153,213,${Math.max(.05, heat).toFixed(3)}), rgba(0,122,255,0) 70%), color-mix(in srgb, var(--card-bg, #FFF) 78%, transparent)`,
         border: `2px solid ${selected ? 'var(--brand, #6366F1)' : trendColor}`,
         borderRadius: 12,
         padding: '9px 12px 8px 30px',
         minWidth: 164,
         maxWidth: 220,
-        boxShadow: selected ? '0 10px 24px rgba(99,102,241,0.22)' : '0 4px 12px rgba(15,23,42,0.10)',
+        boxShadow: selected ? '0 12px 28px rgba(67,126,177,0.22), inset 0 1px 0 rgba(255,255,255,.8)' : '0 7px 18px rgba(46,83,115,0.12), inset 0 1px 0 rgba(255,255,255,.7)',
         opacity: isDraft ? 0.78 : 1,
         cursor: 'pointer',
         fontSize: 12,
         position: 'relative',
+        backdropFilter: 'blur(14px)',
         transition: 'box-shadow 180ms ease, transform 180ms ease, border-color 180ms ease',
         transform: selected ? 'translateY(-2px)' : 'translateY(0)',
       }}
@@ -154,29 +174,17 @@ function DecompNode({ data, selected }: any) {
       <span
         title="勾选后可批量操作；Ctrl/Cmd 点击可级联勾选"
         style={{ position: 'absolute', left: 7, top: 8, fontSize: 14, cursor: 'pointer', color: isChecked ? 'var(--brand, #6366F1)' : '#94A3B8', userSelect: 'none' }}
-        onClick={(e) => { e.stopPropagation(); if (checkToggleFn && data.dbId) checkToggleFn(data.dbId, false); }}
+        onClick={(e) => { e.stopPropagation(); if (checkToggleFn && data.dbId) checkToggleFn(data.dbId, false, e.shiftKey); }}
       >
         {isChecked ? <CheckSquareFilled style={{ fontSize: 14 }} /> : <BorderOutlined style={{ fontSize: 14 }} />}
       </span>
       <div style={{ fontWeight: 700, color: 'var(--text-primary, #1E293B)', marginBottom: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
         {statusDot}{data.trendIcon && <span>{data.trendIcon}</span>}<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{data.label}</span>
       </div>
-      <div style={{ display: 'flex', gap: 5, alignItems: 'center', fontSize: 10, marginBottom: 7 }}>
-        <Tag color={isTerminal ? 'orange' : 'blue'} style={{ fontSize: 9, margin: 0, padding: '0 5px', lineHeight: '16px' }}>{isTerminal ? '终端物料' : '结构节点'}</Tag>
-        {data.costRatio != null && <span style={{ color: isBig && !isQueried ? '#C93400' : 'var(--text-muted, #64748B)', fontWeight: isBig && !isQueried ? 700 : 400 }}>占比 {data.costRatio}%{isBig && !isQueried ? ' · 优先' : ''}</span>}
+      <div style={{ display: 'flex', gap: 5, alignItems: 'center', fontSize: 10 }}>
+        {data.costRatio != null && <span style={{ color: isBig && !isQueried ? '#C93400' : 'var(--text-muted, #64748B)', fontWeight: isBig && !isQueried ? 700 : 400 }}>占比 {data.costRatio}%</span>}
+        <Tag color={isQueried ? 'green' : isDraft ? 'default' : isBig ? 'orange' : 'gold'} style={{ fontSize: 9, margin: 0, padding: '0 5px', lineHeight: '16px' }}>{isQueried ? '已洞察' : isDraft ? '草稿' : '待洞察'}</Tag>
       </div>
-      {!isDraft && (
-        <Button
-          size="small"
-          type={isTerminal ? 'primary' : 'default'}
-          icon={isTerminal ? <RadarChartOutlined /> : <ThunderboltOutlined />}
-          style={{ width: '100%', fontSize: 11, height: 24 }}
-          onClick={(e) => { e.stopPropagation(); if (nodeActionFn && data.dbId) nodeActionFn(data.dbId, isTerminal ? 'insight' : 'decompose'); }}
-        >
-          {isTerminal ? (data.insightStatus === 'queried' ? '重新洞察行情' : 'AI 洞察行情') : 'AI 拆解子件'}
-        </Button>
-      )}
-      {isDraft && <div style={{ fontSize: 10, color: '#64748B' }}>AI 草稿 · 确认后可操作</div>}
       <Handle type="source" position={Position.Right} style={{ background: trendColor, width: 8, height: 8, border: '2px solid #fff' }} />
     </div>
   );
@@ -210,6 +218,7 @@ export default function Decomposition(_props: any) {
   const [trendSources, setTrendSources] = useState<any[]>([]);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [insightLoading, setInsightLoading] = useState(false);
+  // 手动洞察经过云端条件审批后，审批横幅会广播统一事件；记录原请求以便自动续跑。
   const [rollupLoading, setRollupLoading] = useState(false);
   const [insightDimensions, setInsightDimensions] = useState<any[]>([]);
   const [selectedHistoryTime, setSelectedHistoryTime] = useState<string | null>(null); // 选中的历史洞察时间
@@ -228,6 +237,26 @@ export default function Decomposition(_props: any) {
   const [batchDecomposeOpen, setBatchDecomposeOpen] = useState(false);
   const [batchInsightOpen, setBatchInsightOpen] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ done: 0, total: 0 });
+  const [insightSubjects, setInsightSubjects] = useState<MaterialInsightSubject[]>([]);
+  const [launcherMaterial, setLauncherMaterial] = useState('');
+  const [launcherContext, setLauncherContext] = useState('');
+  const [launcherMode, setLauncherMode] = useState<ExplicitMaterialInsightMode>('direct');
+  const [taskKeyword, setTaskKeyword] = useState('');
+  const [taskModeFilter, setTaskModeFilter] = useState<'all' | 'direct' | 'decomposition'>('all');
+  const [taskStatusFilter, setTaskStatusFilter] = useState<'all' | 'ready' | 'pending' | 'running' | 'completed' | 'partial' | 'failed'>('all');
+  const [taskPage, setTaskPage] = useState(1);
+  const [expandedSubjectKeys, setExpandedSubjectKeys] = useState<Set<string>>(new Set());
+  const [selectedSubjectKeys, setSelectedSubjectKeys] = useState<Set<string>>(new Set());
+  const [deletingSubjects, setDeletingSubjects] = useState(false);
+  const deletingSubjectsRef = useRef(false);
+  const [queueProgress, setQueueProgress] = useState({ done: 0, total: 0 });
+  const [queueStats, setQueueStats] = useState({ success: 0, failed: 0, skipped: 0 });
+  const [queueCurrent, setQueueCurrent] = useState('');
+  const [queueRunning, setQueueRunning] = useState(false);
+  const [queuePaused, setQueuePaused] = useState(false);
+  const queueRunningRef = useRef(false);
+  const queuePausedRef = useRef(false);
+  const pendingInsightRootRef = useRef<number | null>(null);
 
   // Rollup
   const [rollupResult, setRollupResult] = useState<any>(null);
@@ -243,16 +272,16 @@ export default function Decomposition(_props: any) {
   const [editingNode, setEditingNode] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // 清单页 - 批量选中顶层
-  const [listChecked, setListChecked] = useState<Set<number>>(new Set());
-  const [renameModalOpen, setRenameModalOpen] = useState(false);
-  const [renameValue, setRenameValue] = useState('');
-
   // React Flow 状态
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([] as any);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState([] as Edge[]);
   const [flowInstance, setFlowInstance] = useState<any>(null);
   const [canvasHintVisible, setCanvasHintVisible] = useState(true);
+  // 进入分解详情先展示可读的结构画布，树清单仍保留为可切换视图。
+  const [detailTreeView, setDetailTreeView] = useState<'tree' | 'graph'>('graph');
+  const [treeFilter, setTreeFilter] = useState<InsightTreeFilter>('all');
+  const [collapsedTreeIds, setCollapsedTreeIds] = useState<Set<number>>(new Set());
+  const lastCheckedIdRef = useRef<number | null>(null);
 
   // 关注物料列表
   const [watchedParts, setWatchedParts] = useState<any[]>([]);
@@ -270,9 +299,19 @@ export default function Decomposition(_props: any) {
 
   // 注册全局勾选回调（级联：勾选父节点→全选子孙）
   useEffect(() => {
-    checkToggleFn = (dbId: number) => {
+    checkToggleFn = (dbId: number, _ctrlKey = false, shiftKey = false) => {
       setCheckedIds(prev => {
         const next = new Set(prev);
+        const scope = rootNodeId ? [rootNodeId, ...getDescendantIds(rootNodeId)] : nodes.map(node => Number(node.id));
+        const ordered = nodes.filter(node => scope.includes(Number(node.id)));
+        const anchorIndex = lastCheckedIdRef.current == null ? -1 : ordered.findIndex(node => Number(node.id) === lastCheckedIdRef.current);
+        const targetIndex = ordered.findIndex(node => Number(node.id) === dbId);
+        if (shiftKey && anchorIndex >= 0 && targetIndex >= 0) {
+          const [start, end] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+          ordered.slice(start, end + 1).forEach(node => next.add(Number(node.id)));
+          lastCheckedIdRef.current = dbId;
+          return next;
+        }
         if (next.has(dbId)) {
           // 取消：取消自己 + 所有子孙
           next.delete(dbId);
@@ -298,27 +337,12 @@ export default function Decomposition(_props: any) {
             }
           }
         }
+        lastCheckedIdRef.current = dbId;
         return next;
       });
     };
     return () => { checkToggleFn = null; };
-  }, [nodes, getDescendantIds]);
-
-  useEffect(() => {
-    nodeActionFn = (dbId: number, action: 'decompose' | 'insight') => {
-      const node = nodes.find((item: any) => item.id === dbId);
-      if (!node) return;
-      if (action === 'decompose') {
-        setAiDraftParentId(node.id);
-        setAiDraftName(node.component_name);
-        setAiDraftResult([]);
-        setAiDraftOpen(true);
-      } else {
-        requestInsightWithPreview(node);
-      }
-    };
-    return () => { nodeActionFn = null; };
-  }, [nodes]);
+  }, [nodes, rootNodeId, getDescendantIds]);
 
   // 当 checkedIds 变化时，只更新已有 rfNodes 的 isChecked 状态，不重建布局
   useEffect(() => {
@@ -366,8 +390,9 @@ export default function Decomposition(_props: any) {
   const loadTree = useCallback(async () => {
     setLoading(true);
     try {
-      const all = await getAllDecompositionNodes();
+      const [all, subjects] = await Promise.all([getAllDecompositionNodes(), getMaterialInsightSubjects()]);
       setNodesData(all);
+      setInsightSubjects(subjects);
       const items = await getTrendItemsWithDetails();
       setTrendItems(items);
       const map: Record<number, any> = {};
@@ -393,7 +418,6 @@ export default function Decomposition(_props: any) {
 
   // ====== 快捷洞察（无需分解树，直接洞察单个物料行情） ======
   const [quickItems, setQuickItems] = useState<any[]>([]);
-  const [quickSnapMap, setQuickSnapMap] = useState<Record<number, any>>({});
   // 添加快捷洞察弹窗
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickAddName, setQuickAddName] = useState('');
@@ -420,7 +444,6 @@ export default function Decomposition(_props: any) {
       const hasLLM = await hasLLMConfig();
       if (!hasLLM) { message.warning('LLM 未配置'); setQuickAskLoading(false); return; }
 
-      const { agentSearchLoop, askLLM } = await import('../trendService');
       // 最新快照作为洞察上下文
       const ctxSnap = quickDetailSnaps[0];
 
@@ -520,23 +543,43 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
 
   const loadQuickItems = useCallback(async () => {
     try {
-      const { getQuickTrendItems, getLatestTrendSnapshot } = await import('../db');
+      const { getQuickTrendItems } = await import('../db');
       const items = await getQuickTrendItems();
       setQuickItems(items);
-      const map: Record<number, any> = {};
-      for (const item of items) {
-        const snap = await getLatestTrendSnapshot(item.id);
-        if (snap) map[item.id] = snap;
-      }
-      setQuickSnapMap(map);
     } catch (e) { console.error('加载快捷洞察失败:', e); }
   }, []);
+
+  const applyMaterialInsightLink = useCallback((value: unknown) => {
+    const link = normalizeMaterialInsightLink(value);
+    if (link.rootId) {
+      pendingInsightRootRef.current = link.rootId;
+      return;
+    }
+    if (!link.material) return;
+    setLauncherMaterial(link.material);
+    setLauncherMode(resolveMaterialInsightMode(link.mode));
+    setLauncherContext([link.projectCode || (link.projectId ? `项目 #${link.projectId}` : ''), link.partId ? `器件 #${link.partId}` : ''].filter(Boolean).join(' · '));
+  }, []);
+
+  const consumeMaterialInsightLink = useCallback((value?: unknown) => {
+    if (value) {
+      applyMaterialInsightLink(value);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem('costhub-material-insight-pending');
+      if (!raw) return;
+      localStorage.removeItem('costhub-material-insight-pending');
+      applyMaterialInsightLink(JSON.parse(raw));
+    } catch { }
+  }, [applyMaterialInsightLink]);
 
   useEffect(() => {
     loadTree();
     loadWatchedParts();
     loadQuickItems();
-  }, [loadTree, loadWatchedParts, loadQuickItems]);
+    consumeMaterialInsightLink();
+  }, [loadTree, loadWatchedParts, loadQuickItems, consumeMaterialInsightLink]);
 
   // 右侧 AI 协作窗洞察完成 → 实时刷新卡片（insight_material_trend 写库后 dispatch costhub-trend-updated）
   useEffect(() => {
@@ -553,20 +596,22 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
       loadWatchedParts();
       loadQuickItems();
       loadTree();
+      consumeMaterialInsightLink();
     };
     window.addEventListener('app-page-active', handler);
     return () => window.removeEventListener('app-page-active', handler);
-  }, [loadTree, loadWatchedParts, loadQuickItems]);
+  }, [loadTree, loadWatchedParts, loadQuickItems, consumeMaterialInsightLink]);
 
   // 进入树详情视图时构建 React Flow 节点。选中状态不参与布局，拖拽位置不会被点击重置。
   useEffect(() => {
     if (view === 'tree' && rootNodeId) buildFlowTree(rootNodeId);
-  }, [view, rootNodeId, nodes, snapshotMap]);
+  }, [view, rootNodeId, nodes, snapshotMap, treeFilter, focusNodeId, checkedIds]);
 
   const buildFlowTree = (rootId: number) => {
-    const nodeById = new Map<number, any>(nodes.map((node: any) => [node.id, node]));
+    const visibleNodes = filterInsightTreeNodes(nodes, treeFilter, checkedIds, focusNodeId);
+    const nodeById = new Map<number, any>(visibleNodes.map((node: any) => [node.id, node]));
     const childrenByParent = new Map<number, any[]>();
-    nodes.forEach((node: any) => {
+    visibleNodes.forEach((node: any) => {
       if (node.parent_id == null) return;
       const children = childrenByParent.get(node.parent_id) || [];
       children.push(node);
@@ -612,7 +657,7 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
       const snapshot = snapshotMap[node.trend_item_id];
       const direction = snapshot?.direction || '';
       let color = TREND_COLORS[direction] || '#94A3B8';
-      if (node.node_type === 'terminal' && node.insight_status === 'pending' && !direction) color = '#F59E0B';
+      if (node.node_type === 'terminal' && ['pending', 'ready', 'queued', 'paused'].includes(node.insight_status) && !direction) color = '#F59E0B';
       else if (node.source_type === 'ai_draft') color = '#94A3B8';
       else if (!direction && node.node_type !== 'terminal') color = '#3B82F6';
       return {
@@ -623,7 +668,7 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
         data: {
           label: node.component_name,
           trendColor: color,
-          trendIcon: direction ? TREND_ICONS[direction] : (node.node_type === 'terminal' && node.insight_status === 'pending' ? <ClockCircleOutlined /> : ''),
+          trendIcon: direction ? TREND_ICONS[direction] : (node.node_type === 'terminal' && ['pending', 'ready', 'queued', 'paused'].includes(node.insight_status) ? <ClockCircleOutlined /> : ''),
           nodeType: node.node_type,
           costRatio: node.cost_ratio_estimate,
           sourceType: node.source_type,
@@ -746,6 +791,34 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
     setPreviewModalOpen(true);
   };
 
+  const launcherDecision = useMemo(() => suggestMaterialInsightMode(launcherMode, launcherMaterial) || {
+    mode: launcherMode,
+    reason: launcherMode === 'decompose' ? '按你的选择先生成可编辑分解预览，不会立即提交全部节点。' : '按你的选择直接查询这个物料的行情。',
+  }, [launcherMaterial, launcherMode]);
+
+  const startDirectMaterialInsight = async (name: string) => {
+    let item = await getDirectTrendItemByCategory(name, '直接查询');
+    if (!item) {
+      const { saveQuickTrendItem } = await import('../db');
+      const id = await saveQuickTrendItem({ material_name: name, category_type: '直接查询' });
+      item = { id, query_category: name, category_type: '直接查询' };
+    }
+    await requestInsightWithPreview({ id: -1, component_name: name, node_type: 'terminal', insight_status: 'pending', trend_item_id: item.id });
+  };
+
+  const startMaterialInsight = async () => {
+    const name = launcherMaterial.trim();
+    if (!name) { message.warning('请输入想洞察的物料或问题'); return; }
+    if (launcherMode === 'direct') {
+      try { await startDirectMaterialInsight(name); } catch (e: any) { message.error(`发起洞察失败：${String(e?.message || e)}`); }
+      return;
+    }
+    setAiDraftParentId(null);
+    setAiDraftName(name);
+    setAiDraftResult([]);
+    setAiDraftOpen(true);
+  };
+
   const confirmInsightRequest = async () => {
     setPreviewModalOpen(false);
     if (!previewTargetNode) return;
@@ -773,7 +846,7 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
       if (!hasLLM) {
         message.warning('未配置 LLM API Key，请先在「设置」中完成供应商配置');
         setInsightLoading(false);
-        return;
+        return { ok: false };
       }
 
       let workingNode = { ...node };
@@ -786,7 +859,7 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
       if (!workingNode.trend_item_id) {
         message.warning('无法创建趋势条目');
         setInsightLoading(false);
-        return;
+        return { ok: false };
       }
 
       // 获取本次洞察使用的Skill列表（弹窗选择优先，未选择则用设置中激活的）
@@ -800,29 +873,49 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
       if (skills.length === 0) {
         message.warning('未选择任何Skill，请在设置中选择');
         setInsightLoading(false);
-        return;
+        return { ok: false };
       }
 
       // 先搜索一次，然后用多个Skill分析
             message.loading({ content: `正在为「${workingNode.component_name}」搜索信息...`, key: 'insight', duration: 0 });
       const result = await agentSearchLoop(workingNode.component_name, '直接查询', undefined,
         (progress: string) => message.loading({ content: progress, key: 'insight', duration: 0 }));
-      
+
+      const usableSources = result.allSources.filter((source: any) => Boolean(safeHttpUrl(source.url)));
+      const projectRows = await getTrendProjectContext(Number(workingNode.trend_item_id)).catch(() => []);
+      // ⚠️ 2026-09-21：把本机内部事实交给**本地**研判模型（只在本机，进不了云端载荷）。
+      // 之前研判提示词里没有任何内部数据，于是"看自己/看竞争"这类维度只能写"本次未提供自身 BOM/用量/库存，
+      // 无法评估敞口"——用户看到的"没有有效信息"有一半来自这里。内部数据只喂本地分支（createStructuredInsight 的 localContext）。
+      const localContext = buildInsightLocalContext(projectRows);
       // 对每个激活的Skill生成洞察（并行执行：各Skill独立LLM调用，可同时进行）
       const structuredResults = await Promise.all(skills.map(async (skill, i) => {
                 message.loading({ content: `正在按「${skill.name}」生成采购结论 (${i + 1}/${skills.length})...`, key: 'insight', duration: 0 });
-        const structured = await createStructuredInsight(workingNode.component_name, skill, result.allSources, result.summary);
-                return { skill, structured };
+        const structured = await createStructuredInsight(workingNode.component_name, skill, usableSources, result.summary, {
+          localContext,
+          sourceQuality: result.sourceQuality,
+        });
+        structured.project_impacts = estimateProjectImpacts(projectRows, structured, new Date().toISOString());
+        return { skill, structured };
       }));
+
+      await clearTrendSources(workingNode.trend_item_id);
+      const sourceIds = await Promise.all(usableSources.map((source: any) =>
+        saveTrendSource({ trend_item_id: workingNode.trend_item_id, source_title: source.title, source_url: source.url, excerpt: source.snippet })
+      ));
+      const asOf = new Date().toISOString();
 
       // 并行落库
       await Promise.all(structuredResults.map(async ({ skill, structured }) => {
+        const parsedResult = parseMaterialInsightResult(structured, {
+          mode: 'direct', asOf, rawText: structured.summary, evidenceIds: sourceIds,
+        });
         const snapshotId = await saveTrendSnapshot({
           trend_item_id: workingNode.trend_item_id, source_type: 'direct_query', skill_used: skill.id,
           direction: structured.trend_direction, confidence_level: structured.confidence_level,
           magnitude_min: structured.magnitude_min, magnitude_max: structured.magnitude_max,
           magnitude_reference: structured.magnitude_reference, summary: structured.summary,
           suggested_action: structured.suggested_action, raw_search_results: JSON.stringify(result.allSources),
+          result: parsedResult,
         });
         
         await saveTrendInsightDimensions(snapshotId!, structured.dimensions || []);
@@ -831,16 +924,13 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
         }
       }));
 
-      await clearTrendSources(workingNode.trend_item_id);
-      await Promise.all(result.allSources.map((source: any) =>
-        saveTrendSource({ trend_item_id: workingNode.trend_item_id, source_title: source.title, source_url: source.url, excerpt: source.snippet })
-      ));
       await saveDecompositionNode({ ...workingNode, insight_status: 'queried' });
       message.destroy('insight');
       message.success(`「${workingNode.component_name}」洞察完成：使用了${skills.length}个Skill`);
       await loadTree();
       loadQuickItems(); // 快捷洞察区同步刷新（含最近洞察时间/趋势）
       if (selectedId === workingNode.id) await selectNode(workingNode);
+      return { ok: true };
     } catch (e: any) {
       console.error('洞察失败 - 完整错误:', e);
       console.error('错误类型:', typeof e);
@@ -848,10 +938,197 @@ ${searchResult.allSources.map((s: any, i: number) => `${i + 1}. ${s.title}\n${s.
       console.error('错误堆栈:', e?.stack);
       message.destroy('insight');
       const errorMsg = e?.message || e?.toString() || JSON.stringify(e) || '未知错误';
-      message.error(`趋势查询失败：${errorMsg}`);
+      const waiting = e?.name === 'CloudApprovalError' || String(errorMsg).includes('条件审批队列');
+      const unavailable = e?.name === 'CloudApprovalUnavailableError';
+      if (waiting) message.info('本次洞察未发送，已保留在待洞察状态；审批卡已放入右侧 AI 协作窗，批准后可继续。');
+      else if (unavailable) message.warning(String(errorMsg));
+      else message.error(`趋势查询失败：${errorMsg}`);
+      return { ok: false, waiting };
     } finally {
       setInsightLoading(false);
     }
+  };
+
+  // 物料洞察队列：只持久化节点状态，暂停/失败后可从数据库恢复，不再引入单独的工作流表。
+  const updateInsightNodeStatus = async (nodeId: number, status: string) => {
+    const node = await getDecompositionNode(nodeId);
+    if (node) await saveDecompositionNode({ ...node, insight_status: status });
+  };
+
+  const runInsightQueue = async (nodeIds: number[]) => {
+    const ids = [...new Set(nodeIds.map(Number).filter(id => Number.isFinite(id) && id > 0))];
+    if (ids.length === 0) { message.info('没有可执行的终端物料'); return; }
+    if (queueRunningRef.current) { message.info('洞察队列正在运行'); return; }
+
+    const rootIds = new Set<number>();
+    ids.forEach(id => {
+      let current = nodes.find(node => Number(node.id) === id);
+      const visited = new Set<number>();
+      while (current && !visited.has(Number(current.id))) {
+        visited.add(Number(current.id));
+        if (current.parent_id == null) { rootIds.add(Number(current.id)); break; }
+        current = nodes.find(node => Number(node.id) === Number(current.parent_id));
+      }
+    });
+    queueRunningRef.current = true;
+    queuePausedRef.current = false;
+    setQueueRunning(true);
+    setQueuePaused(false);
+    setQueueProgress({ done: 0, total: ids.length });
+    setQueueStats({ success: 0, failed: 0, skipped: 0 });
+    setQueueCurrent('');
+    let done = 0, success = 0, failed = 0, skipped = 0;
+    const queue = [...ids];
+    const worker = async () => {
+      while (queue.length > 0 && !queuePausedRef.current) {
+        const nodeId = queue.shift();
+        if (!nodeId) continue;
+        const node = await getDecompositionNode(nodeId);
+        if (!node || node.source_type === 'ai_draft' || node.node_type !== 'terminal') {
+          skipped += 1;
+          setQueueStats({ success, failed, skipped });
+          done += 1;
+          setQueueProgress({ done, total: ids.length });
+          continue;
+        }
+        setQueueCurrent(node.component_name || `节点 #${nodeId}`);
+        await updateInsightNodeStatus(nodeId, 'running');
+        const result = await handleNodeInsight(node);
+        if (result?.ok) { success += 1; await updateInsightNodeStatus(nodeId, 'queried'); }
+        else if (result?.waiting) {
+          await updateInsightNodeStatus(nodeId, 'paused');
+          queuePausedRef.current = true;
+          setQueuePaused(true);
+        } else { failed += 1; await updateInsightNodeStatus(nodeId, 'failed'); }
+        setQueueStats({ success, failed, skipped });
+        done += 1;
+        setQueueProgress({ done, total: ids.length });
+      }
+    };
+
+    try {
+      await Promise.all(Array.from({ length: Math.min(2, ids.length) }, worker));
+    } finally {
+      queueRunningRef.current = false;
+      setQueueRunning(false);
+      setQueueCurrent('');
+      await loadTree();
+    }
+    if (!queuePausedRef.current && done === ids.length) {
+      for (const rootId of rootIds) {
+        const root = await getDecompositionNode(rootId);
+        if (root?.trend_item_id) continue;
+        if (root) await handleRollup(root);
+      }
+    }
+    if (queuePausedRef.current) message.info('队列已暂停，可继续或仅重试失败项');
+    else message.success(`洞察队列完成：${done}/${ids.length}`);
+  };
+
+  const pauseInsightQueue = async () => {
+    if (!queueRunningRef.current) return;
+    queuePausedRef.current = true;
+    setQueuePaused(true);
+    const freshNodes = await getAllDecompositionNodes();
+    for (const node of freshNodes.filter((item: any) => item.insight_status === 'queued')) {
+      await updateInsightNodeStatus(node.id, 'paused');
+    }
+    await loadTree();
+  };
+
+  const subjectNodes = (subject: MaterialInsightSubject) => subject.nodes.filter(node => Number(node.id) !== subject.rootNodeId);
+  const subjectPendingIds = (subject: MaterialInsightSubject, statuses: string[]) => subjectNodes(subject)
+    .filter(node => node.node_type === 'terminal' && node.source_type !== 'ai_draft' && statuses.includes(String(node.insight_status || 'pending')))
+    .map(node => Number(node.id));
+
+  const continueSubject = async (subject: MaterialInsightSubject) => {
+    if (subject.kind === 'direct') {
+      await quickInsight(subject.title, subject.trendItemId || undefined);
+      return;
+    }
+    if (subject.rootNodeId) await enterTreeView(subject.rootNodeId);
+    const ids = subjectPendingIds(subject, ['ready', 'pending', 'queued', 'paused']);
+    if (ids.length) {
+      for (const id of ids) await updateInsightNodeStatus(id, 'queued');
+      await runInsightQueue(ids);
+    }
+  };
+
+  const retrySubject = async (subject: MaterialInsightSubject) => {
+    const ids = subjectPendingIds(subject, ['failed']);
+    if (ids.length === 0) { message.info('当前任务没有失败节点'); return; }
+    for (const id of ids) await updateInsightNodeStatus(id, 'queued');
+    await runInsightQueue(ids);
+  };
+
+  const batchContinueSubjects = async () => {
+    const selected = insightSubjects.filter(subject => selectedSubjectKeys.has(subject.key));
+    const ids = selected.flatMap(subject => subject.kind === 'decomposition' ? subjectPendingIds(subject, ['ready', 'pending', 'queued', 'paused']) : []);
+    for (const id of ids) await updateInsightNodeStatus(id, 'queued');
+    await runInsightQueue(ids);
+  };
+
+  const batchRetryFailed = async () => {
+    const selected = insightSubjects.filter(subject => selectedSubjectKeys.has(subject.key));
+    const ids = selected.flatMap(subject => subject.kind === 'decomposition' ? subjectPendingIds(subject, ['failed']) : []);
+    for (const id of ids) await updateInsightNodeStatus(id, 'queued');
+    await runInsightQueue(ids);
+  };
+
+  const archiveSelectedSubjects = async () => {
+    const selected = insightSubjects.filter(subject => selectedSubjectKeys.has(subject.key));
+    for (const subject of selected) await updateMaterialInsightSubjectMeta(subject.key, { archived: true });
+    setSelectedSubjectKeys(new Set());
+    await loadTree();
+  };
+
+  const deleteSelectedSubjects = async () => {
+    const selected = insightSubjects.filter(subject => selectedSubjectKeys.has(subject.key));
+    if (!selected.length || deletingSubjectsRef.current || queueRunning) return;
+    deletingSubjectsRef.current = true;
+    setDeletingSubjects(true);
+    try {
+      await deleteMaterialInsightSubjects(selected);
+      setSelectedSubjectKeys(new Set());
+      await loadTree();
+      message.success(`已删除 ${selected.length} 个任务`);
+    } catch (error) {
+      console.error('删除物料洞察任务失败:', error);
+      const detail = error instanceof Error ? error.message : String(error || '未知错误');
+      message.error(`删除失败：${detail.slice(0, 100)}`);
+    } finally {
+      deletingSubjectsRef.current = false;
+      setDeletingSubjects(false);
+    }
+  };
+
+  const confirmDeleteSelectedSubjects = () => {
+    const count = selectedSubjectKeys.size;
+    if (!count) return;
+    Modal.confirm({
+      title: `删除选中的 ${count} 个任务？`,
+      content: '分解型任务及其子节点、洞察快照会一并删除，且无法恢复。',
+      okText: '删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: deleteSelectedSubjects,
+    });
+  };
+
+  const exportInsightSubjects = () => {
+    const selected = insightSubjects.filter(subject => selectedSubjectKeys.size === 0 || selectedSubjectKeys.has(subject.key));
+    if (selected.length === 0) { message.info('没有可导出的洞察任务'); return; }
+    const text = selected.map(subject => {
+      const snap = subject.latestSnapshot;
+      const progress = subject.kind === 'decomposition' ? `${subject.completedNodes}/${subject.totalNodes}` : (snap ? '已完成' : '待洞察');
+      return `【${subject.title}】${subject.kind === 'decomposition' ? '分解洞察' : '直接查询'}\n状态：${subject.status}\n进度：${progress}\n趋势：${snap?.direction || '-'}\n置信度：${snap?.confidence_level || '-'}\n${snap?.summary || '暂无结论'}\n`;
+    }).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    a.download = `CostHub_物料洞察_${new Date().toISOString().slice(0, 10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    message.success('已导出');
   };
 
   // ====== 节点追问 ======
@@ -1031,12 +1308,20 @@ ${allConversations.slice(-5).map((c: any) => `Q: ${c.question}\nA: ${c.answer}`)
     if (!node || !node.id) return;
     setRollupLoading(true);
     try {
-      const children = nodes.filter((n: any) => n.parent_id === node.id && n.insight_status === 'queried' && n.trend_item_id);
+      const currentTree = await getDecompositionTree(Number(node.root_part_id || node.id));
+      const currentNode = currentTree.find((item: any) => Number(item.id) === Number(node.id)) || node;
+      let children = currentTree.filter((item: any) => Number(item.parent_id) === Number(currentNode.id) && item.insight_status === 'queried' && item.trend_item_id);
+      // ponytail: use queried descendants only when a deep tree has no directly queryable child; hierarchical rollups can refine weighting later.
+      if (children.length === 0) {
+        children = currentTree.filter((item: any) => Number(item.id) !== Number(currentNode.id) && item.node_type === 'terminal' && item.insight_status === 'queried' && item.trend_item_id);
+      }
       if (children.length === 0) { message.warning('没有已洞察的子节点可汇总'); setRollupLoading(false); return; }
       let totalWeight = 0, weightedScore = 0, uncertainWeight = 0;
       const childData: { name: string; cost: number; dir: string; conf: string; summary: string; magRef: string }[] = [];
+      const childSnapshots: any[] = [];
       for (const child of children) {
-        const snap = snapshotMap[child.trend_item_id];
+        const snap = (await getTrendSnapshots(child.trend_item_id))[0];
+        if (snap) childSnapshots.push(snap);
         const costW = child.cost_ratio_estimate || 0;
         totalWeight += costW;
         if (snap?.direction === '信号不明确' || !snap?.direction) { uncertainWeight += costW; }
@@ -1060,20 +1345,33 @@ ${allConversations.slice(-5).map((c: any) => `Q: ${c.question}\nA: ${c.answer}`)
         parsed = JSON.parse(jsonStr);
         if (!parsed.trend_direction) throw new Error('Missing direction');
       } catch { parsed = { trend_direction: ruleDirection, confidence_level: autoConfidence, summary: 'AI综合解析失败，使用规则计算结果。' + response.slice(0, 200) }; }
+      const contributionData = buildDecompositionContributionData(children, childSnapshots);
+      const synthesis = {
+        ...parseMaterialInsightResult(parsed, {
+          mode: 'decompose', asOf: new Date().toISOString(), rawText: response,
+          dataGaps: contributionData.kind === 'insufficient' ? [contributionData.reason || '子节点贡献数据不足'] : [],
+        }),
+        coverage: contributionData.coverage,
+        contributions: contributionData.points,
+        additiveReliable: contributionData.additiveReliable,
+      };
       const trendItemId = await ensureTrendItem(node.component_name + '（汇总）', '直接查询');
       const snapshotId = await saveTrendSnapshot({
         trend_item_id: trendItemId, source_type: 'aggregated',
         direction: parsed.trend_direction, confidence_level: parsed.confidence_level || autoConfidence,
         summary: `【基于${children.length}个子节点的综合研判】\n${ruleSummary}\n\n${parsed.summary || ''}`,
         suggested_action: parsed.suggested_action || '观望', magnitude_min: null, magnitude_max: null, magnitude_reference: '', raw_search_results: '',
+        result: synthesis,
       });
       for (const child of children) {
-        const snap = snapshotMap[child.trend_item_id];
+        const snap = (await getTrendSnapshots(child.trend_item_id))[0];
         await saveRollupContribution({ parent_snapshot_id: snapshotId, child_component_id: child.id, cost_ratio_used: child.cost_ratio_estimate ?? null, direction_used: snap?.direction || '' });
       }
       await saveDecompositionNode({ ...node, trend_item_id: trendItemId, insight_status: 'queried' });
       message.success(`「${node.component_name}」趋势汇总完成：${parsed.trend_direction}`);
-      loadTree(); selectNode(node);
+      await loadTree();
+      const refreshed = await getDecompositionNode(node.id);
+      if (refreshed) await selectNode(refreshed);
     } catch (e: any) { message.error(`汇总失败：${e.message || '未知错误'}`); }
     setRollupLoading(false);
   };
@@ -1263,6 +1561,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
       }
 
       let count = 0;
+      const createdTerminalIds: { id: number; ratio: number }[] = [];
       // 如果是顶层起草（parent_id == null），先创建根节点
       let rootId = aiDraftParentId;
       if (rootId === null && aiDraftName.trim()) {
@@ -1270,7 +1569,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
           parent_id: null,
           component_name: aiDraftName.trim(),
           cost_ratio_estimate: null,
-          source_type: 'ai_draft',
+          source_type: 'user_confirmed',
           node_type: 'structural',
           insight_status: 'pending',
           trend_item_id: null,
@@ -1279,16 +1578,19 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
       }
       for (const item of aiDraftResult) {
         if (!item.component_name) continue;
-                await saveDecompositionNode({
+                const createdId = await saveDecompositionNode({
           parent_id: rootId, component_name: item.component_name,
           cost_ratio_estimate: item.cost_ratio_estimate ?? null,
-          source_type: 'ai_draft', node_type: item.node_type || 'structural',
-          insight_status: 'pending', trend_item_id: null,
+          source_type: 'user_confirmed', node_type: item.node_type || 'structural',
+          // ready 表示已入树但尚未纳入本次洞察选择，避免把未选节点显示成待处理噪音。
+          insight_status: 'ready', trend_item_id: null,
         });
+        if (item.node_type === 'terminal' && Number.isFinite(Number(createdId))) createdTerminalIds.push({ id: Number(createdId), ratio: Number(item.cost_ratio_estimate) || 0 });
         count++;
       }
       message.success(`已入库 ${count} 个节点`);
       setAiDraftOpen(false); setAiDraftName(''); setAiDraftResult([]); setAiDraftParentId(null);
+      setCheckedIds(new Set(createdTerminalIds.sort((a, b) => b.ratio - a.ratio).slice(0, 8).map(item => item.id)));
       await loadTree();
     } catch (e: any) {
       console.error('确认入库失败 - 完整错误:', e);
@@ -1339,7 +1641,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
         const catType = node.component_name?.includes('合金') || node.component_name?.includes('树脂') || node.component_name?.includes('钢') ? '原材料映射' : '直接查询';
         tid = await ensureTrendItem(node.component_name, catType);
       }
-      await saveDecompositionNode({ ...node, source_type: 'user_confirmed', trend_item_id: tid });
+      await saveDecompositionNode({ ...node, source_type: 'user_confirmed', insight_status: node.node_type === 'terminal' ? 'ready' : node.insight_status, trend_item_id: tid });
       message.success('已确认');
       await selectNode(node);
       await loadTree();
@@ -1582,25 +1884,11 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
   // ====== 批量洞察 ======
   const runBatchInsight = () => setBatchInsightOpen(true);
   const confirmBatchInsight = async () => {
-    const selected = nodes.filter((n: any) => checkedIds.has(n.id) && n.node_type === 'terminal');
-    if (selected.length === 0) { message.warning('未选中 terminal 节点'); return; }
+    const selected = getSelectableInsightNodeIds(nodes.filter((n: any) => checkedIds.has(n.id)));
+    if (selected.length === 0) { message.warning('未选中可洞察的终端节点'); return; }
     setBatchInsightOpen(false);
-    setBatchProgress({ done: 0, total: selected.length });
-    // 有界并发：同时最多2个洞察，避免 API 请求风暴，速度仍远快于串行
-    const CONCURRENCY = 2;
-    let done = 0;
-    const queue = [...selected];
-    const worker = async () => {
-      while (queue.length > 0) {
-        const node = queue.shift()!;
-        try { await handleNodeInsight(node); } catch { /* 单个失败不阻塞 */ }
-        done++;
-        setBatchProgress({ done, total: selected.length });
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, selected.length) }, worker));
-    setBatchProgress({ done: 0, total: 0 });
-    message.success(`批量洞察完成：${done}/${selected.length}`);
+    for (const id of selected) await updateInsightNodeStatus(id, 'queued');
+    await runInsightQueue(selected);
     setCheckedIds(new Set());
   };
 
@@ -1629,6 +1917,13 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
     setCheckedIds(new Set());
   };
 
+  useEffect(() => {
+    const rootId = pendingInsightRootRef.current;
+    if (!rootId || !nodes.some(node => Number(node.id) === rootId)) return;
+    pendingInsightRootRef.current = null;
+    void enterTreeView(rootId);
+  }, [nodes]);
+
   // ====== 返回清单视图 ======
   const backToList = () => {
     setView('list');
@@ -1637,61 +1932,44 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
     setSelectedId(null);
   };
 
-  // ====== 清单页：批量重命名 ======
-  const handleBatchRename = () => {
-    const selected = nodes.filter((n: any) => n.parent_id == null && listChecked.has(n.id));
-    if (selected.length === 0) { message.warning('请先选择顶层物料'); return; }
-    if (selected.length > 1) { message.warning('一次只能重命名一个顶层物料'); return; }
-    setRenameValue(selected[0].component_name);
-    setRenameModalOpen(true);
-  };
-  const confirmRename = async () => {
-    const selected = nodes.filter((n: any) => n.parent_id == null && listChecked.has(n.id));
-    if (selected.length !== 1 || !renameValue.trim()) return;
-    await saveDecompositionNode({ ...selected[0], component_name: renameValue.trim() });
-    message.success('已重命名');
-    setRenameModalOpen(false); loadTree();
-  };
-  const handleBatchDelete = async () => {
-    const selected = nodes.filter((n: any) => n.parent_id == null && listChecked.has(n.id));
-    if (selected.length === 0) return;
-    Modal.confirm({
-      title: `删除 ${selected.length} 个顶层物料及其整棵树？`,
-      content: '该操作不可恢复。',
-      okType: 'danger',
-      onOk: async () => {
-        for (const n of selected) await deleteDecompositionNode(n.id);
-        message.success(`已删除 ${selected.length} 个`);
-        setListChecked(new Set()); loadTree();
-      },
-    });
-  };
-
   // ====== 计算状态 ======
-  const rootNodes = useMemo(() => nodes.filter((n: any) => n.parent_id == null), [nodes]);
-  const topLevelNodes = rootNodes;
   const structuralSelected = nodes.filter((n: any) => n.node_type === 'structural' && checkedIds.has(n.id)).length;
   const terminalSelected = nodes.filter((n: any) => n.node_type === 'terminal' && checkedIds.has(n.id)).length;
   const draftSelected = nodes.filter((n: any) => n.source_type === 'ai_draft' && checkedIds.has(n.id)).length;
+  const selectedInsightCount = getSelectableInsightNodeIds(nodes.filter((n: any) => checkedIds.has(n.id))).length;
   const canRollup = selectedNode && selectedNode.id && !(selectedNode.node_type === 'terminal');
   const childrenQueried = selectedNode ? nodes.filter((n: any) => n.parent_id === selectedNode.id && n.insight_status === 'queried') : [];
   const childrenTotal = selectedNode ? nodes.filter((n: any) => n.parent_id === selectedNode.id) : [];
-
-  // ====== 清单页统计 ======
-  const getRootStats = (rootId: number) => {
-    const children = nodes.filter((n: any) => {
-      let p = n.parent_id;
-      while (p) {
-        if (p === rootId) return true;
-        const parent = nodes.find((x: any) => x.id === p);
-        p = parent?.parent_id;
-      }
-      return false;
-    });
-    const confirmed = children.filter((n: any) => n.source_type === 'user_confirmed').length;
-    const pendingInsight = children.filter((n: any) => n.node_type === 'terminal' && n.insight_status === 'pending').length;
-    return { total: children.length, confirmed, pendingInsight };
+  const currentTreeNodeIds = rootNodeId ? new Set([rootNodeId, ...getDescendantIds(rootNodeId)]) : null;
+  const currentTreeNodes = currentTreeNodeIds ? nodes.filter(node => currentTreeNodeIds.has(Number(node.id))) : nodes;
+  const currentTreeTrendIds = new Set(currentTreeNodes.map(node => Number(node.trend_item_id)).filter(Number.isFinite));
+  const structuredSnapshots = [...new Map([...snapshots, ...Object.values(snapshotMap)].filter(snapshot => currentTreeTrendIds.has(Number(snapshot.trend_item_id))).map(snapshot => [Number(snapshot.id || 0), snapshot])).values()];
+  const structuredSnapshotsForView = selectedNode?.node_type === 'terminal' ? structuredSnapshots.filter(snapshot => Number(snapshot.trend_item_id) === Number(selectedNode.trend_item_id)) : structuredSnapshots;
+  const structuredSnapshot = selectedNode ? snapshots.find(snapshot => Number(snapshot.trend_item_id) === Number(selectedNode.trend_item_id)) || snapshotMap[Number(selectedNode.trend_item_id)] || null : null;
+  const compactTreeNodes = filterInsightTreeNodes(currentTreeNodes, treeFilter, checkedIds, focusNodeId);
+  const compactChildren = new Map<number | null, any[]>();
+  compactTreeNodes.forEach(node => { const parentId = node.parent_id == null ? null : Number(node.parent_id); compactChildren.set(parentId, [...(compactChildren.get(parentId) || []), node]); });
+  const renderCompactTree = (node: any, depth: number): React.ReactNode => {
+    const nodeId = Number(node.id);
+    const childRows = compactChildren.get(nodeId) || [];
+    const collapsed = collapsedTreeIds.has(nodeId);
+    const trend = snapshotMap[Number(node.trend_item_id)]?.direction || '';
+    const status = node.insight_status === 'queried' ? '已洞察' : node.insight_status === 'failed' ? '失败' : node.insight_status === 'ready' ? '待选择' : '待洞察';
+    return <div key={nodeId} className="material-compact-tree-node" role="treeitem" aria-level={depth + 1}>
+      <div className={`material-compact-tree-row ${selectedId === nodeId ? 'is-selected' : ''} ${focusNodeId === nodeId ? 'is-focused' : ''}`} style={{ paddingLeft: 8 + depth * 18 }} onClick={() => void selectNode(node)} onDoubleClick={() => { const chain = getAncestorChain(nodeId); setFocusNodeId(focusNodeId === nodeId ? null : nodeId); setChainPath(chain); applyChainHighlight(new Set(chain.map(item => item.id)), true); }}>
+        <button type="button" className="material-result-tree-toggle" disabled={!childRows.length} onClick={event => { event.stopPropagation(); setCollapsedTreeIds(previous => { const next = new Set(previous); collapsed ? next.delete(nodeId) : next.add(nodeId); return next; }); }}>{childRows.length ? (collapsed ? '›' : '⌄') : '·'}</button>
+        <Checkbox checked={checkedIds.has(nodeId)} onClick={event => event.stopPropagation()} onChange={event => { event.stopPropagation(); checkToggleFn?.(nodeId, Boolean((event.nativeEvent as any)?.ctrlKey), Boolean((event.nativeEvent as any)?.shiftKey)); }} />
+        <span className={`material-result-tree-dot ${node.node_type === 'terminal' ? 'is-terminal' : ''}`} />
+        <b className="material-compact-tree-name">{node.component_name || '未命名节点'}</b>
+        <span className="material-compact-tree-ratio">{node.cost_ratio_estimate == null ? '占比待估算' : `${node.cost_ratio_estimate}%`}</span>
+        {trend && <Tag color={TREND_COLORS[trend] || 'default'}>{trend}</Tag>}
+        <Tag color={status === '已洞察' ? 'green' : status === '失败' ? 'red' : 'gold'}>{status}</Tag>
+        {node.node_type === 'terminal' && node.source_type === 'user_confirmed' && <Tooltip title="洞察行情"><Button type="text" size="small" icon={<RadarChartOutlined />} onClick={event => { event.stopPropagation(); requestInsightWithPreview(node); }} /></Tooltip>}
+      </div>
+      {!collapsed && childRows.map(child => renderCompactTree(child, depth + 1))}
+    </div>;
   };
+  const compactRoots = compactChildren.get(null) || compactTreeNodes.filter(node => node.parent_id == null);
 
   const renderSkillDimensions = (skillId: string, dims: any[]) => {
     const evidenceColors: Record<string, string> = { '强': '#10B981', '中': '#3B82F6', '弱': '#F59E0B', '未验证': '#94A3B8' };
@@ -1699,7 +1977,9 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
     // SWOT：2x2 四象限矩阵
     if (skillId === 'swot') {
       const quad = (key: string, color: string, bg: string) => {
-        const d = dims.find(x => x.dimension_type === key);
+        // 容错匹配（2026-09-21）：模型可能把维度名写成「供给面」「1. 供给因子」等变体，
+        // 完全相等匹配会丢掉它的内容 → 页面只能显示兜底文案"公开信息不足"。见 ai/skillDimensions.ts
+        const d = findDimension(dims, key);
         return (
           <div style={{ padding: 10, background: bg, borderRadius: 8, border: `1px solid ${color}22` }}>
             <div style={{ fontWeight: 700, fontSize: 12, color, marginBottom: 4 }}>{key}</div>
@@ -1735,7 +2015,8 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
       return (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           {quads.map(q => {
-            const d = dims.find(x => x.dimension_type === q.key);
+            // 容错匹配（2026-09-21）：同 quad，见 ai/skillDimensions.ts
+            const d = findDimension(dims, q.key);
             return (
               <div key={q.key} style={{ padding: 10, background: q.bg, borderRadius: 8, border: `1px solid ${q.color}22` }}>
                 <div style={{ fontWeight: 700, fontSize: 12, color: q.color, marginBottom: 4 }}>{q.key}</div>
@@ -1766,7 +2047,8 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {five.map(f => {
-            const d = dims.find(x => x.dimension_type === f.key);
+            // 容错匹配（2026-09-21）：同 quad，见 ai/skillDimensions.ts
+            const d = findDimension(dims, f.key);
             return (
               <div key={f.key} style={{ padding: 8, background: 'var(--color-surface)', border: '1px solid #E2E8F0', borderRadius: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
@@ -1887,334 +2169,254 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
     );
   };
 
+  const filteredInsightSubjects = useMemo(() => {
+    return filterMaterialInsightSubjects(insightSubjects, taskKeyword, taskModeFilter, taskStatusFilter);
+  }, [insightSubjects, taskKeyword, taskModeFilter, taskStatusFilter]);
+
+  useEffect(() => { setTaskPage(1); }, [taskKeyword, taskModeFilter, taskStatusFilter]);
+  const taskPageSize = 8;
+  const pagedInsightSubjects = useMemo(() => filteredInsightSubjects.slice((taskPage - 1) * taskPageSize, taskPage * taskPageSize), [filteredInsightSubjects, taskPage]);
+
+  const toggleSubject = (key: string) => {
+    setSelectedSubjectKeys(previous => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleSubjectExpanded = (key: string) => {
+    setExpandedSubjectKeys(previous => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleVisibleSubjects = () => {
+    const keys = pagedInsightSubjects.map(subject => subject.key);
+    const allSelected = keys.length > 0 && keys.every(key => selectedSubjectKeys.has(key));
+    setSelectedSubjectKeys(previous => {
+      const next = new Set(previous);
+      keys.forEach(key => allSelected ? next.delete(key) : next.add(key));
+      return next;
+    });
+  };
+
+  const subjectStatus = (status: MaterialInsightSubject['status']) => {
+    const map: Record<string, { label: string; color: string }> = {
+      draft: { label: '待编辑', color: 'default' }, ready: { label: '待选择', color: 'gold' },
+      pending: { label: '待洞察', color: 'gold' }, queued: { label: '排队中', color: 'blue' },
+      running: { label: '执行中', color: 'processing' }, paused: { label: '已暂停', color: 'orange' },
+      partial: { label: '部分完成', color: 'warning' }, completed: { label: '已完成', color: 'success' },
+      failed: { label: '失败', color: 'error' },
+    };
+    return map[status] || map.pending;
+  };
+
+  const selectTreeLeaves = (mode: 'all' | 'high' | 'invert' | 'clear') => {
+    const root = rootNodeId;
+    const scope = root ? [root, ...getDescendantIds(root)] : nodes.map(node => Number(node.id));
+    const candidates = nodes.filter(node => scope.includes(Number(node.id)) && node.source_type !== 'ai_draft');
+    if (mode === 'clear') { setCheckedIds(new Set()); return; }
+    if (mode === 'invert') {
+      setCheckedIds(previous => {
+        const next = new Set(previous);
+        getSelectableInsightNodeIds(candidates).forEach(id => next.has(id) ? next.delete(id) : next.add(id));
+        return next;
+      });
+      return;
+    }
+    const leaves = getSelectableInsightNodeIds(candidates);
+    if (mode === 'all') { setCheckedIds(new Set(leaves)); return; }
+    const high = candidates
+      .filter(node => node.node_type === 'terminal' && node.cost_ratio_estimate != null)
+      .sort((a, b) => Number(b.cost_ratio_estimate) - Number(a.cost_ratio_estimate))
+      .slice(0, 8);
+    if (high.length === 0) { message.info('当前树没有可识别成本占比的终端物料'); return; }
+    setCheckedIds(new Set(getSelectableInsightNodeIds(high)));
+  };
+
+  const selectSameLevel = () => {
+    const anchor = selectedNode || (rootNodeId ? nodes.find(node => Number(node.id) === rootNodeId) : null);
+    const parentId = anchor?.parent_id != null ? Number(anchor.parent_id) : rootNodeId;
+    if (parentId == null) { message.info('请先进入一棵分解树'); return; }
+    const siblings = nodes.filter(node => Number(node.parent_id) === parentId && node.source_type !== 'ai_draft');
+    const ids = getSelectableInsightNodeIds(siblings);
+    if (ids.length === 0) { message.info('当前层没有可洞察的终端物料'); return; }
+    setCheckedIds(new Set(ids));
+  };
+
+  const openInsightSubject = async (subject: MaterialInsightSubject) => {
+    if (subject.kind === 'direct') {
+      await openQuickDetail(subject.trendItem || { id: subject.trendItemId, query_category: subject.title });
+    } else if (subject.rootNodeId) {
+      await enterTreeView(subject.rootNodeId);
+    }
+  };
+
   // ====== 渲染：清单页 ======
   if (view === 'list') {
     if (loading) return <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 100 }}><Spin size="large" /></div>;
     return (
-      <div style={{ padding: '0 20px', maxWidth: 900, margin: '0 auto' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <div className="page-title" style={{ marginBottom: 0 }}>
-            <SignalFilled /> 物料趋势洞察
+      <div className="material-workbench-page">
+        <div className="material-workbench-header">
+          <div>
+            <div className="page-title" style={{ marginBottom: 4 }}><SignalFilled /> 物料洞察工作台</div>
           </div>
-          <Space>
-            <Button icon={<DownloadOutlined />} size="small" onClick={handleExport}>导出</Button>
+          <Space wrap>
+            <Button icon={<DownloadOutlined />} size="small" onClick={exportInsightSubjects}>导出</Button>
             <Button icon={<MergeCellsOutlined />} size="small" onClick={openFeedbackHistory}>修正记录</Button>
           </Space>
         </div>
 
-        <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
-          管理所有进行物料分解分析的顶层物料清单。点击物料名称进入该物料的分解树详情页。
-        </p>
+        <section className="material-workbench-launcher" aria-label="新建物料洞察">
+          <div className="material-workbench-launcher-copy">
+            <Tag color="blue">统一入口</Tag>
+            <h2>新建物料洞察</h2>
+            {launcherContext && <Tag icon={<LinkOutlined />}>上下文：{launcherContext}</Tag>}
+          </div>
+          <div className="material-workbench-launcher-form">
+            <Input.TextArea
+              value={launcherMaterial}
+              onChange={event => setLauncherMaterial(event.target.value)}
+              placeholder="例如：MLCC、32寸 LCD 面板，或电源模块成本机会"
+              autoSize={{ minRows: 2, maxRows: 4 }}
+              aria-label="物料或分析主题"
+            />
+            <div className="material-workbench-launcher-actions">
+              <Radio.Group
+                value={launcherMode}
+                onChange={event => setLauncherMode(event.target.value)}
+                optionType="button"
+                buttonStyle="solid"
+                options={[{ value: 'direct', label: '直接洞察' }, { value: 'decompose', label: '分解型洞察' }]}
+                aria-label="洞察模式"
+              />
+              <span className="material-workbench-hint">{launcherDecision.reason}</span>
+              {launcherDecision.mode !== launcherMode && <Button type="link" size="small" onClick={() => setLauncherMode(launcherDecision.mode)}>切换为{launcherDecision.mode === 'direct' ? '直接洞察' : '分解型洞察'}</Button>}
+              <Button type="primary" icon={<RadarChartOutlined />} onClick={startMaterialInsight}>开始洞察</Button>
+            </div>
+          </div>
+        </section>
 
-        {/* 操作栏 */}
-        <Space style={{ marginBottom: 16 }}>
-          <Button type="primary" icon={<ThunderboltOutlined />} onClick={() => { setAiDraftParentId(null); setAiDraftName(''); setAiDraftResult([]); setAiDraftOpen(true); }}>
-            AI 起草顶层物料
-          </Button>
-          <Button icon={<PlusOutlined />} onClick={() => {
-            setEditingNode({ parent_id: null, component_name: '', cost_ratio_estimate: null, source_type: 'user_confirmed', node_type: 'structural', insight_status: 'pending', trend_item_id: null });
-            setEditModalOpen(true);
-          }}>手动添加</Button>
-          {listChecked.size > 0 && (
-            <>
-              <Button size="small" icon={<EditOutlined />} onClick={handleBatchRename}>重命名</Button>
-              <Button size="small" danger icon={<DeleteOutlined />} onClick={handleBatchDelete}>删除 ({listChecked.size})</Button>
-            </>
-          )}
-        </Space>
+        <div className="material-workbench-context-note">
+          <BulbOutlined /> 器件库已关注 {watchedParts.length} 个物料；历史快捷记录 {quickItems.length} 条，已归并到父级直接查询任务。
+        </div>
 
-        {/* 快捷洞察区：无需分解树，直接洞察单个物料行情 */}
-        <Card
-          size="small"
-          title={
-            <Space>
-              <ThunderboltOutlined style={{ color: '#F59E0B' }} />
-              <span>快捷洞察 ({quickItems.length})</span>
-              <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>
-                无需分解树，直接查询单个物料行情（如"锂电池"）
-              </span>
+        <section className="material-workbench-tasks" aria-label="洞察任务列表">
+          <div className="material-workbench-task-heading">
+            <div>
+              <h3>洞察任务</h3>
+              <span>共 {insightSubjects.length} 个父级任务，子节点不会单独出现在这里。</span>
+            </div>
+            <Space wrap>
+              <Input prefix={<SearchOutlined />} value={taskKeyword} onChange={event => setTaskKeyword(event.target.value)} placeholder="搜索物料" size="small" style={{ width: 180 }} aria-label="搜索洞察任务" />
+              <Select value={taskModeFilter} onChange={value => setTaskModeFilter(value)} size="small" style={{ width: 112 }} aria-label="洞察模式筛选" options={[{ value: 'all', label: '全部模式' }, { value: 'direct', label: '直接洞察' }, { value: 'decomposition', label: '分解型洞察' }]} />
+              <Select value={taskStatusFilter} onChange={value => setTaskStatusFilter(value)} size="small" style={{ width: 112 }} options={[{ value: 'all', label: '全部状态' }, { value: 'ready', label: '待选择' }, { value: 'pending', label: '待处理' }, { value: 'running', label: '执行中' }, { value: 'completed', label: '已完成' }, { value: 'partial', label: '部分完成' }, { value: 'failed', label: '失败' }]} />
             </Space>
-          }
-          extra={
-            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => { setQuickAddName(''); setQuickAddOpen(true); }} style={{ fontWeight: 600 }}>
-              添加物料
-            </Button>
-          }
-          style={{ marginBottom: 20, borderTop: '3px solid #F59E0B' }}
-        >
-          {quickItems.length === 0 ? (
-            <Empty description="还没有快捷洞察物料 — 点右上角「添加物料」直接洞察想查的行情（无需分解）" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ padding: '20px 0' }} />
+          </div>
+          <div className="material-workbench-task-toolbar">
+            <Checkbox
+              checked={pagedInsightSubjects.length > 0 && pagedInsightSubjects.every(subject => selectedSubjectKeys.has(subject.key))}
+              indeterminate={pagedInsightSubjects.some(subject => selectedSubjectKeys.has(subject.key)) && !pagedInsightSubjects.every(subject => selectedSubjectKeys.has(subject.key))}
+              onChange={toggleVisibleSubjects}
+            >全选当前</Checkbox>
+            <span>{selectedSubjectKeys.size ? `已选 ${selectedSubjectKeys.size} 个` : '可多选任务批量处理'}</span>
+            <Button size="small" icon={<PlayCircleOutlined />} disabled={selectedSubjectKeys.size === 0 || queueRunning} onClick={batchContinueSubjects}>批量继续</Button>
+            <Button size="small" icon={<ReloadOutlined />} disabled={selectedSubjectKeys.size === 0 || queueRunning} onClick={batchRetryFailed}>仅重试失败</Button>
+            {queueRunning ? <Button size="small" icon={<PauseCircleOutlined />} onClick={pauseInsightQueue}>暂停队列</Button> : <Button size="small" icon={<PlayCircleOutlined />} disabled={selectedSubjectKeys.size === 0} onClick={batchContinueSubjects}>继续队列</Button>}
+            <Button size="small" danger disabled={selectedSubjectKeys.size === 0} onClick={archiveSelectedSubjects}>归档</Button>
+            <Button size="small" danger icon={<DeleteOutlined />} loading={deletingSubjects} disabled={selectedSubjectKeys.size === 0 || deletingSubjects || queueRunning} onClick={confirmDeleteSelectedSubjects}>删除</Button>
+            <Button size="small" icon={<DownloadOutlined />} disabled={selectedSubjectKeys.size === 0} onClick={exportInsightSubjects}>导出选中</Button>
+            {queueProgress.total > 0 && <><span className="material-workbench-queue-status">{queueCurrent ? `当前：${queueCurrent} · ` : ''}成功 {queueStats.success} · 失败 {queueStats.failed} · 跳过 {queueStats.skipped} · 剩余 {Math.max(0, queueProgress.total - queueProgress.done)}</span><Progress percent={Math.round(queueProgress.done / queueProgress.total * 100)} size="small" style={{ width: 150, marginLeft: 8 }} format={() => `${queueProgress.done}/${queueProgress.total}`} /></>}
+          </div>
+
+          {filteredInsightSubjects.length === 0 ? (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={insightSubjects.length ? '没有匹配的父级任务' : '还没有物料洞察任务'}>
+              {!insightSubjects.length && <Button type="primary" onClick={() => document.querySelector<HTMLTextAreaElement>('.material-workbench-launcher textarea')?.focus()}>从上方统一入口开始</Button>}
+            </Empty>
           ) : (
-            <>
-            <Row gutter={[12, 12]}>
-              {quickItems.map((item: any) => {
-                const snap = quickSnapMap[item.id];
-                const dir = snap?.direction || '';
-                const dirColor = TREND_COLORS[dir] || '#94A3B8';
-                const lastTime = snap?.query_time || item.last_queried_at;
+            <div className="material-workbench-task-list">
+              {pagedInsightSubjects.map(subject => {
+                const status = subjectStatus(subject.status);
+                const isDecomposition = subject.kind === 'decomposition';
+                const mode = getMaterialInsightModeMeta(isDecomposition ? 'decompose' : 'direct');
+                const previewNodes = isDecomposition ? getMaterialInsightPreviewNodes(subject.nodes) : [];
+                const remainingNodes = Math.max(0, subject.totalNodes - previewNodes.length);
+                const coverage = subject.totalNodes ? Math.round(subject.completedNodes / subject.totalNodes * 100) : 0;
+                const expanded = expandedSubjectKeys.has(subject.key);
+                const progressText = isDecomposition ? `${subject.completedNodes}/${subject.totalNodes} 个终端完成` : (subject.latestSnapshot ? '已有最新结论' : '尚未查询');
+                const latest = subject.latestSnapshot || subject.trendItem || {};
+                const insightDirection = String(latest.direction || latest.trend_direction || '未判断');
+                const insightTone = insightDirection === '上涨' ? 'up' : insightDirection === '下降' ? 'down' : insightDirection === '震荡' ? 'flat' : 'muted';
+                const insightSummary = String(latest.summary || subject.trendItem?.summary || (isDecomposition ? '分解任务已建立，打开详情查看终端节点与证据。' : '暂无结构化结论，打开详情开始洞察。')).replace(/\s+/g, ' ').trim();
+                const insightReason = insightSummary.length > 92 ? `${insightSummary.slice(0, 92)}…` : insightSummary;
                 return (
-                  <Col key={item.id} xs={24} sm={12} md={8} lg={6}>
-                    <Card
-                      size="small"
-                      hoverable
-                      style={{ borderLeft: `3px solid ${dirColor}`, cursor: 'pointer' }}
-                      bodyStyle={{ padding: '10px 12px' }}
-                      onClick={() => openQuickDetail(item)}
-                      actions={[
-                        <Button key="insight" size="small" type="primary" icon={<RadarChartOutlined />}
-                          onClick={(e) => { e.stopPropagation(); quickInsight(item.query_category, item.id); }}>
-                          洞察行情
-                        </Button>,
-                        <Popconfirm key="del" title={`删除「${item.query_category}」？`}
-                          onConfirm={async () => {
-                            const { deleteQuickTrendItem } = await import('../db');
-                            await deleteQuickTrendItem(item.id);
-                            message.success('已删除');
-                            loadQuickItems();
-                          }}>
-                          <Button size="small" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
-                        </Popconfirm>,
-                      ]}
-                    >
-                      <div style={{ marginBottom: 6 }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>
-                        {item.query_category}
-                        {item.source_type === 'auto' && <Tag color="orange" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px' }}>自动</Tag>}
+                  <article className={`material-workbench-task ${selectedSubjectKeys.has(subject.key) ? 'is-selected' : ''} ${expanded ? 'is-expanded' : ''}`} data-insight-mode={mode.id} aria-expanded={expanded} key={subject.key} onClick={event => { if (event.target === event.currentTarget) toggleSubjectExpanded(subject.key); }} onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggleSubjectExpanded(subject.key); } }} tabIndex={0}>
+                    <Checkbox checked={selectedSubjectKeys.has(subject.key)} onChange={() => toggleSubject(subject.key)} aria-label={`选择${subject.title}`} />
+                    <div className="material-workbench-task-main" onClick={event => { if (!(event.target as HTMLElement).closest('button')) toggleSubjectExpanded(subject.key); }}>
+                      <div className="material-workbench-task-title">
+                        <button type="button" className="material-workbench-link" onClick={() => openInsightSubject(subject)}>{subject.title}</button>
+                        <Tag className={`material-workbench-mode-tag is-${mode.id}`} icon={mode.icon === 'branches' ? <BranchesOutlined /> : <ThunderboltOutlined />} color={isDecomposition ? 'blue' : 'cyan'}>{mode.label}</Tag>
+                        <Tag color={status.color}>{status.label}</Tag>
+                        {subject.needsReview && <Tag color="gold">待整理</Tag>}
                       </div>
-                        {/* 最近洞察时间 */}
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                          <ClockCircleOutlined style={{ marginRight: 4 }} />
-                          {lastTime ? formatTime(lastTime) : '尚未洞察'}
-                        </div>
-                        {/* 成本趋势 */}
-                        {snap ? (
-                          <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                            <Tag color={dirColor} style={{ fontSize: 11, margin: 0 }}>{TREND_ICONS[dir] || ''} {dir}</Tag>
-                            <Tag style={{ fontSize: 10, margin: 0 }}>{snap.confidence_level}置信</Tag>
-                            {snap.magnitude_min != null && (
-                              <span style={{ fontSize: 11, color: '#666' }}>
-                                幅度 {String(snap.magnitude_min).replace('%', '')}%~{String(snap.magnitude_max).replace('%', '')}%
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <div style={{ marginTop: 6, fontSize: 11, color: '#F59E0B' }}>
-                            <ClockCircleOutlined style={{ marginRight: 4 }} />待洞察
-                          </div>
-                        )}
+                      <div className={`material-workbench-latest-insight is-${insightTone}`}>
+                        <Tag>{insightDirection}</Tag>
+                        <span title={insightSummary}>{insightReason}</span>
                       </div>
-                    </Card>
-                  </Col>
+                      <div className="material-workbench-task-meta">
+                        <span>置信度：{latest.confidence_level || latest.confidence || '未评估'}</span>
+                        <span>历史：{subject.historyCount} 次</span>
+                        <span>项目：{subject.trendItem?.project_name || subject.trendItem?.project_code || '未关联'}</span>
+                        <span>{progressText}</span>
+                        {subject.failedNodes > 0 && <span className="material-workbench-failed">失败 {subject.failedNodes} 个</span>}
+                        {isDecomposition && <span>待处理 {subject.pendingNodes} 个</span>}
+                        {isDecomposition && <span>覆盖率 {coverage}%</span>}
+                        {subject.skippedNodes > 0 && <span>跳过 {subject.skippedNodes} 个</span>}
+                        {subject.updatedAt && <span>更新于 {formatTime(subject.updatedAt)}</span>}
+                      </div>
+                      <div className="material-workbench-task-note">{isDecomposition ? '子节点趋势快照保留在分解树详情中' : '最新结论可在详情中回看证据与历史变化'}</div>
+                      <div className="material-workbench-task-detail" aria-hidden={!expanded}>
+                        {isDecomposition ? <>
+                          <div className="material-workbench-task-progress"><span>节点完成度</span><Progress percent={coverage} size="small" status={subject.failedNodes > 0 ? 'exception' : undefined} /></div>
+                          <div className="material-workbench-preview-title">高影响节点</div>
+                          <div className="material-workbench-preview-list">{previewNodes.map(node => <span key={node.id}>{node.component_name || '未命名节点'} · {node.cost_ratio_estimate == null ? '占比待估算' : `${node.cost_ratio_estimate}%`}</span>)}{remainingNodes > 0 && <span className="material-workbench-preview-more">还有 {remainingNodes} 项</span>}</div>
+                        </> : <div className="material-workbench-direct-summary">{subject.latestSnapshot?.summary || subject.trendItem?.summary || '暂无结构化结论，打开详情开始洞察。'}</div>}
+                      </div>
+                    </div>
+                    <Space wrap className="material-workbench-task-actions">
+                      <Button size="small" onClick={() => toggleSubjectExpanded(subject.key)} aria-expanded={expanded}>{expanded ? '收起详情' : '查看详情'}</Button>
+                      <Button size="small" type={isDecomposition ? 'primary' : 'default'} onClick={() => openInsightSubject(subject)}>{isDecomposition ? '进入分解树' : '查看结果'}</Button>
+                      {(isDecomposition && ['pending', 'queued', 'paused', 'partial', 'ready'].includes(subject.status)) && <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => continueSubject(subject)}>继续</Button>}
+                      {isDecomposition && subject.failedNodes > 0 && <Button size="small" icon={<ReloadOutlined />} onClick={() => retrySubject(subject)}>重试失败</Button>}
+                      {!isDecomposition && <Button size="small" icon={<RadarChartOutlined />} onClick={() => continueSubject(subject)}>重新洞察</Button>}
+                    </Space>
+                  </article>
                 );
               })}
-            </Row>
-            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
-              <HistoryOutlined style={{ marginRight: 4 }} /> 点击卡片查看详情（分 Skill 结果 / 历史对比 / 融合总结）
             </div>
-            </>
           )}
-        </Card>
+          {filteredInsightSubjects.length > taskPageSize && <Pagination current={taskPage} pageSize={taskPageSize} total={filteredInsightSubjects.length} onChange={setTaskPage} size="small" showSizeChanger={false} hideOnSinglePage aria-label="洞察任务分页" />}
+        </section>
 
-        {/* 关注物料区域 */}
-        {watchedParts.length > 0 && (
-          <Card
-            size="small"
-            title={
-              <Space>
-                <RadarChartOutlined style={{ color: '#8B5CF6' }} />
-                <span>关注物料 ({watchedParts.length})</span>
-              </Space>
-            }
-            style={{ marginBottom: 20, borderTop: '3px solid #8B5CF6' }}
-          >
-            <Row gutter={[12, 12]}>
-              {watchedParts.map((part: any) => (
-                <Col key={part.id} xs={24} sm={12} md={8} lg={6}>
-                  <Card
-                    size="small"
-                    hoverable
-                    style={{
-                      borderLeft: `3px solid ${getCategoryColor(part.main_category)}`,
-                    }}
-                    bodyStyle={{ padding: '10px 12px' }}
-                    actions={[
-                      <Button
-                        key="insight"
-                        size="small"
-                        type="primary"
-                        icon={<RadarChartOutlined />}
-                        onClick={async () => {
-                          // 复用正式的洞察逻辑：创建/查找 trend_item，发起洞察，结果落库
-                          try {
-                            const { getTrendItemByCategory, saveTrendItem } = await import('../db');
-                            let trendItem = await getTrendItemByCategory(part.name, part.main_category);
-
-                            if (!trendItem) {
-                              // 创建 trend_item（本地时间，与 SQLite 一致）
-                              const now = new Date();
-                              const pad = (n: number) => String(n).padStart(2, '0');
-                              const localTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-                              const newId = await saveTrendItem({
-                                material_name: part.name,
-                                category_type: part.main_category,
-                                last_queried_at: localTime,
-                                source_type: 'quick',
-                              });
-                              trendItem = { id: newId, material_name: part.name, category_type: part.main_category };
-                            }
-
-                            // 使用与树节点相同的洞察逻辑（会落库到 trend_snapshots）
-                            // 模拟一个树节点结构
-                            const mockNode = {
-                              id: -1, // 临时ID，不影响实际逻辑
-                              component_name: part.name,
-                              node_type: 'terminal',
-                              trend_item_id: trendItem.id,
-                            };
-
-                            // 调用正式的洞察预览确认流程
-                            await requestInsightWithPreview(mockNode);
-                          } catch (e: any) {
-                            message.error('洞察失败: ' + (e.message || '未知错误'));
-                          }
-                        }}
-                      >
-                        洞察
-                      </Button>,
-                      <Popconfirm
-                        key="remove"
-                        title="取消关注此物料？"
-                        onConfirm={async () => {
-                          try {
-                            const { savePart } = await import('../db');
-                            await savePart({ ...part, trend_enabled: 0 });
-                            message.success('已取消关注');
-                            loadWatchedParts();
-                          } catch {
-                            message.error('操作失败');
-                          }
-                        }}
-                      >
-                        <Button key="delete" size="small" danger icon={<DeleteOutlined />}>
-                          移除
-                        </Button>
-                      </Popconfirm>,
-                    ]}
-                  >
-                    <div style={{ marginBottom: 6 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-                        {part.name}
-                      </div>
-                      {part.model && (
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                          型号: {part.model}
-                        </div>
-                      )}
-                      <Tag color={getCategoryColor(part.main_category)} style={{ fontSize: 10, marginTop: 4 }}>
-                        {part.main_category}
-                      </Tag>
-                    </div>
-                  </Card>
-                </Col>
-              ))}
-            </Row>
-            <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
-              <BulbOutlined style={{ marginRight: 4 }} /> 在"器件库"中开启"关注趋势"可将物料添加到此列表
-            </div>
-          </Card>
-        )}
-
-        {/* 顶层物料标题 */}
-        <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: 'var(--text-secondary)' }}>
-          <ApartmentOutlined /> 顶层物料清单
-        </h3>
-
-        {topLevelNodes.length === 0 ? (
-          <Empty description="暂无顶层物料数据" style={{ marginTop: 60 }}>
-            <Button type="primary" icon={<ThunderboltOutlined />} onClick={() => { setAiDraftParentId(null); setAiDraftName(''); setAiDraftResult([]); setAiDraftOpen(true); }}>
-              开始 AI 起草
-            </Button>
-          </Empty>
-        ) : (
-          <Row gutter={[16, 16]}>
-            {topLevelNodes.map((node: any) => {
-              const stats = getRootStats(node.id);
-              const snap = snapshotMap[node.trend_item_id];
-              const trendDir = snap?.direction || '';
-              return (
-                <Col key={node.id} xs={24} sm={12} lg={8}>
-                  <Card
-                    hoverable
-                    size="small"
-                    style={{ borderLeft: `4px solid ${TREND_COLORS[trendDir] || '#3B82F6'}` }}
-                    actions={[
-                      <Tooltip key="enter" title="进入分解树">
-                        <BranchesOutlined onClick={() => enterTreeView(node.id)} />
-                      </Tooltip>,
-                      <Tooltip key="decompose" title="进入后 AI 拆解子件">
-                        <ThunderboltOutlined onClick={() => { enterTreeView(node.id); setTimeout(() => { setAiDraftParentId(node.id); setAiDraftName(node.component_name); setAiDraftResult([]); setAiDraftOpen(true); }, 120); }} />
-                      </Tooltip>,
-                      <Tooltip key="insight" title="洞察顶层物料行情">
-                        <RadarChartOutlined onClick={() => requestInsightWithPreview(node)} style={{ color: '#8B5CF6' }} />
-                      </Tooltip>,
-                      <Tooltip key="rename" title="重命名">
-                        <EditOutlined onClick={() => { setListChecked(new Set([node.id])); setRenameValue(node.component_name); setRenameModalOpen(true); }} />
-                      </Tooltip>,
-                      <Tooltip key="del" title="删除">
-                        <DeleteOutlined onClick={() => {
-                          Modal.confirm({ title: '删除该顶层物料？', okType: 'danger', onOk: async () => { await deleteDecompositionNode(node.id); loadTree(); } });
-                        }} />
-                      </Tooltip>,
-                    ]}
-                  >
-                    <Card.Meta
-                      title={
-                        <a onClick={() => enterTreeView(node.id)} style={{ fontWeight: 600 }}>
-                          {node.component_name}
-                        </a>
-                      }
-                      description={
-                        <div style={{ fontSize: 12, lineHeight: '2' }}>
-                          {snap && <Tag color={TREND_COLORS[trendDir]} style={{ fontSize: 10 }}>{TREND_ICONS[trendDir]} {trendDir}</Tag>}
-                          <div><InboxOutlined /> {stats.total} 个节点 · {stats.confirmed} 已确认</div>
-                          <Space size={6} style={{ marginTop: 4 }}>
-                            <Button size="small" type="primary" icon={<BranchesOutlined />} onClick={() => enterTreeView(node.id)}>查看分解树</Button>
-                            <Button size="small" icon={<RadarChartOutlined />} onClick={() => requestInsightWithPreview(node)}>AI 洞察</Button>
-                          </Space>
-                          {stats.pendingInsight > 0 && <div style={{ color: '#F59E0B' }}><ClockCircleOutlined style={{ marginRight: 4 }} />{stats.pendingInsight} 个待洞察</div>}
-                          <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-                            {node.updated_at ? `更新于 ${node.updated_at.slice(0, 10)}` : ''}
-                          </div>
-                        </div>
-                      }
-                    />
-                  </Card>
-                </Col>
-              );
-            })}
-          </Row>
-        )}
-
-        {/* 清单页共用弹窗 */}
-        <Modal title="重命名顶层物料" open={renameModalOpen} onCancel={() => setRenameModalOpen(false)} onOk={confirmRename}>
-          <Input value={renameValue} onChange={e => setRenameValue(e.target.value)} placeholder="输入新名称" />
-        </Modal>
+        <div className="material-workbench-footnote">直接查询只保存一个父级结果；分解查询只保存一个父级任务，叶子节点的历史快照仍可在详情树中查看。</div>
         {renderModals()}
       </div>
     );
   }
-
   // ====== 渲染：树详情页 ======
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: 'calc(100vh - 60px)', padding: '0 4px' }}>
+    <div className="material-insight-studio" style={{ display: 'flex', flexDirection: 'column', gap: 8, height: 'calc(100vh - 60px)', padding: '0 4px' }}>
       {/* 顶部导航 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+      <div className="material-insight-studio-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
         <Space>
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={backToList} size="small">
             返回清单
           </Button>
           <Typography.Text style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-            物料趋势洞察 <span style={{ margin: '0 4px' }}>›</span>
+            物料拆解洞察 <span style={{ margin: '0 4px' }}>›</span>
           </Typography.Text>
           <Typography.Text strong style={{ fontSize: 14 }}>{rootNodeName}</Typography.Text>
         </Space>
@@ -2227,11 +2429,11 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
         </Space>
       </div>
 
-      <div style={{ display: 'flex', gap: 12, flex: 1, minHeight: 0 }}>
+      <div className="material-insight-studio-body" style={{ display: 'flex', gap: 12, flex: 1, minHeight: 0 }}>
         {/* 左侧 React Flow */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 300 }}>
+        <div className="material-insight-canvas-column" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 300 }}>
           {/* 操作栏 */}
-          <Space style={{ flexWrap: 'wrap' }}>
+          <Space className="material-insight-toolbar" style={{ flexWrap: 'wrap' }}>
             <Button icon={<ThunderboltOutlined />} size="small" type="primary"
               onClick={() => { setAiDraftParentId(selectedId || rootNodeId); setAiDraftName(''); setAiDraftResult([]); setAiDraftOpen(true); }}>
               AI 拆解子件
@@ -2285,10 +2487,41 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
             <Tooltip title="批量洞察">
               <Button size="small" icon={<RadarChartOutlined />} disabled={terminalSelected === 0} onClick={runBatchInsight} />
             </Tooltip>
+            <Button size="small" onClick={() => selectTreeLeaves('all')}>全选叶子</Button>
+            <Button size="small" onClick={() => selectTreeLeaves('high')}>选高价值</Button>
+            <Button size="small" onClick={selectSameLevel}>选同层</Button>
+            <Button size="small" onClick={() => selectTreeLeaves('invert')}>反选</Button>
+            <Button size="small" onClick={() => selectTreeLeaves('clear')}>清空</Button>
+            {selectedInsightCount > 0 && <Typography.Text type="secondary" style={{ fontSize: 11 }}>已选 {selectedInsightCount} 个叶子 · 预计同数调用</Typography.Text>}
+            {queueRunning && <Progress percent={queueProgress.total ? Math.round(queueProgress.done / queueProgress.total * 100) : 0} size="small" style={{ width: 130 }} format={() => queuePaused ? '已暂停' : `${queueProgress.done}/${queueProgress.total}`} />}
+            {queueRunning && <Button size="small" icon={<PauseCircleOutlined />} onClick={pauseInsightQueue}>暂停</Button>}
+            <Radio.Group size="small" value={detailTreeView} onChange={event => setDetailTreeView(event.target.value)} optionType="button" buttonStyle="solid" options={[{ value: 'tree', label: '树清单' }, { value: 'graph', label: '结构图' }]} aria-label="分解树视图" />
+            <Select size="small" value={treeFilter} onChange={value => setTreeFilter(value)} style={{ width: 112 }} options={[{ value: 'all', label: '全部节点' }, { value: 'high-impact', label: '高影响' }, { value: 'failed', label: '失败节点' }, { value: 'selected', label: '仅所选' }]} aria-label="树分支筛选" />
           </Space>
 
-          {/* React Flow 画布 */}
-          <div className="content-card" style={{ flex: 1, overflow: 'hidden', minHeight: 400, padding: 0 }}>
+          {/* 紧凑树清单为默认视图；结构图保留 React Flow */}
+          {detailTreeView === 'tree' ? (
+            <div className="content-card material-compact-tree" style={{ flex: 1, overflow: 'auto', minHeight: 400, padding: 8 }} role="tree">
+              <div className="material-compact-tree-head"><span>节点</span><span>成本占比</span><span>趋势 / 状态</span></div>
+              {compactRoots.length > 0 ? compactRoots.map(node => renderCompactTree(node, 0)) : <Empty description="当前筛选没有节点" />}
+            </div>
+          ) : (
+          <div className="material-insight-graph-layout">
+            <aside className="material-insight-palette" aria-label="物料层级目录">
+              <div className="material-insight-palette-head">
+                <div><span className="material-insight-eyebrow">MATERIAL MAP</span><b>物料层级</b></div>
+                <span>{currentTreeNodes.length} 项</span>
+              </div>
+              <div className="material-insight-palette-summary">
+                <span><b>{currentTreeNodes.filter(node => node.node_type === 'terminal').length}</b> 终端物料</span>
+                <span><b>{currentTreeNodes.filter(node => node.insight_status === 'queried').length}</b> 已洞察</span>
+              </div>
+              <div className="material-insight-palette-tree" role="tree">
+                {compactRoots.length > 0 ? compactRoots.map(node => renderCompactTree(node, 0)) : <Empty description="暂无节点" />}
+              </div>
+              <div className="material-insight-palette-note"><span className="material-insight-status-dot" />点击节点查看洞察，双击聚焦血缘</div>
+            </aside>
+            <div className="content-card material-insight-canvas-card" style={{ flex: 1, overflow: 'hidden', minHeight: 400, padding: 0 }}>
             {rfNodes.length === 0 ? (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
                 <Empty description="暂无树节点数据" />
@@ -2379,11 +2612,13 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                 </Panel>
               </ReactFlow>
             )}
+            </div>
           </div>
+          )}
         </div>
 
         {/* 右侧详情面板 */}
-        <div style={{ width: 420, flexShrink: 0, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
+        <div className="material-insight-inspector" style={{ width: 420, flexShrink: 0, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
           {!selectedNode ? (
             <div className="content-card" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Empty description="点击树节点查看详情" />
@@ -2451,8 +2686,17 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                   </div>
                 )}
 
+                <MaterialInsightResultView
+                  snapshot={structuredSnapshot}
+                  snapshots={structuredSnapshotsForView}
+                  nodes={selectedNode.node_type === 'terminal' ? [] : currentTreeNodes}
+                  subjectKind={selectedNode.node_type === 'terminal' ? 'direct' : 'decomposition'}
+                  sources={trendSources}
+                  onSelectNode={nodeId => { const target = nodes.find(node => Number(node.id) === Number(nodeId)); if (target) void selectNode(target); }}
+                />
+
                 {rollupResult?.source_type === 'aggregated' && (
-                  <div style={{ marginBottom: 12, padding: 12, background: 'var(--main-bg)', borderRadius: 10, border: '1px solid #C4B5FD' }}>
+                  <div className="legacy-material-result" style={{ marginBottom: 12, padding: 12, background: 'var(--main-bg)', borderRadius: 10, border: '1px solid #C4B5FD' }}>
                     <div style={{ fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
                       <ApartmentOutlined /> 趋势汇总
                     </div>
@@ -2473,7 +2717,7 @@ JSON数组：[{"component_name":"名称","cost_ratio_estimate":数字,"node_type
                     && prev.direction !== s.direction
                     && !['震荡', '信号不明确'].includes(s.direction);
                   return (
-                    <div style={{ marginBottom: 12, padding: 12, background: 'var(--main-bg)', borderRadius: 10, border: '1px solid var(--card-border)' }}>
+                    <div className="legacy-material-result" style={{ marginBottom: 12, padding: 12, background: 'var(--main-bg)', borderRadius: 10, border: '1px solid var(--card-border)' }}>
                       <div style={{ fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <RadarChartOutlined /> 最新洞察 {s.skill_used ? <Tag style={{ fontSize: 10 }}>框架：{s.skill_used}</Tag> : null}
                       </div>

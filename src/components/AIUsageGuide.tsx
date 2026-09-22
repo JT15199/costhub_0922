@@ -40,7 +40,7 @@ export default function AIUsageGuide({ open, onClose, onOpenSettings }: Props) {
     (async () => {
       try {
         const providers = await getAllApiProviders();
-        const active = providers.find((p: any) => p.provider_type === 'llm' && p.is_active && p.api_key);
+        const active = providers.find((p: any) => p.provider_type === 'llm' && p.is_active && p.credential_configured);
         setLlmReady(!!active);
         setLlmName(active?.provider_name || '');
         setLocalModel(await getSetting('local_ai_model', ''));
@@ -69,10 +69,7 @@ export default function AIUsageGuide({ open, onClose, onOpenSettings }: Props) {
 
         {/* 1.5 数据就绪度：缺什么数据 → 能做到什么样 → 建议补什么（引导客户如何使用） */}
         <div style={{ marginBottom: 14 }}>
-          <DataReadiness onAskAi={() => {
-            onClose();
-            window.dispatchEvent(new CustomEvent('costhub-open-ai-prompt'));
-          }} />
+          <DataReadiness />
         </div>
 
         {/* 2. 怎么用（示例提问） */}

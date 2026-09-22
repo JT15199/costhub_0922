@@ -24,7 +24,7 @@ export const PANEL_TYPES = ['IPS','VA','TN','OLED','MiniLED','QD-OLED'];
 export const TIERS = ['入门级','主流级','中高端','高端','旗舰级'];
 export const PROJECT_STATUSES = ['进行中','已完成','暂停'];
 export const PROJECT_TYPES = ['在研','已完成'];
-export const MEASURE_STATUSES = ['待执行','执行中','已完成','已取消'];
+export const MEASURE_STATUSES = ['待执行','执行中','已完成','已取消','已实现','未实现','放弃'];
 export const BRAND_RED = '#CF0A2C';
 
 // 主题调色板定义

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { auditSensitive, auditPromptStrict, sanitizeForCloud, SENSITIVE_PATTERNS, buildSanitizedContext, stripModelCodes, isProjectInsight, validateCloudQueryArgs } from '../aiBridge';
+import { auditSensitive, auditPromptStrict, sanitizeForCloud, SENSITIVE_PATTERNS, buildSanitizedContext, stripModelCodes, isProjectInsight, validateCloudQueryArgs, validatePublicModelQueryArgs } from '../aiBridge';
 import { materialKey } from '../db/advisor';
 
 describe('auditSensitive 发送前审计', () => {
@@ -100,6 +100,14 @@ describe('validateCloudQueryArgs 云端工具闸门', () => {
   it('缺参数被拒', () => {
     expect(validateCloudQueryArgs({}).ok).toBe(false);
     expect(validateCloudQueryArgs({ material: '屏' }).ok).toBe(false);
+  });
+});
+
+describe('validatePublicModelQueryArgs 受控公开型号路径', () => {
+  it('允许型号数字但拒绝内部成本语境', () => {
+    expect(validatePublicModelQueryArgs({ material: '27英寸显示器', category: '公开型号', question: '公开规格与接口' }).ok).toBe(true);
+    expect(validatePublicModelQueryArgs({ material: '27英寸显示器', category: '公开型号', question: '我方成本和供应商报价' }).ok).toBe(false);
+    expect(validatePublicModelQueryArgs({ material: '27英寸显示器', category: '显示器', question: '公开规格' }).ok).toBe(false);
   });
 });
 

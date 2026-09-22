@@ -1,8 +1,10 @@
+import { requestChannel, REQUEST_CHANNEL_SQL, type RequestChannel } from '../ai/requestChannel';
 // 由 _tools/split-db.mjs 自动生成（db.ts 按域拆分）
 // 手工修改请改对应域文件；新增函数请更新 _tools/split-db.mjs 的 DOMAINS 映射
 
 import { PRESET_PROVIDERS as PRESET_PROVIDER_TEMPLATES } from '../constants';
 import { getDb } from './core';
+import { invoke } from '@tauri-apps/api/core';
 
 
 
@@ -96,16 +98,19 @@ export async function saveApiProvider(data: any) {
     monthly_quota_note: data.monthly_quota_note || '',
     registration_url: data.registration_url || '',
   };
-  if (data.id) {
-    return updateApiProvider(normalized);
-  }
-  return addApiProvider(normalized);
+  const secret = typeof data.api_key === 'string' && data.api_key.trim() && !data.api_key.startsWith('{') ? data.api_key.trim() : '';
+  const id = data.id
+    ? await updateApiProvider({ ...normalized, api_key: secret ? '__vault__' : undefined })
+    : await addApiProvider({ ...normalized, api_key: secret ? '__vault__' : '' });
+  if (secret) await invoke('save_provider_secret', { request: { provider_id: Number(id), secret } });
+  return id;
 }
 
 
 
 export async function deleteApiProvider(id: number) {
   await (await getDb()).execute('DELETE FROM api_providers WHERE id = ?', [id]);
+  await invoke('delete_provider_secret', { providerId: id }).catch(() => undefined);
 }
 
 
@@ -186,20 +191,47 @@ export async function logOutboundRequest(data: any) {
 
 
 // ==================== API Providers ====================
+async function sanitizeProviderRows(rows: any[]) {
+  return Promise.all(rows.map(async ({ api_key: _legacyKey, ...row }) => {
+    try {
+      return {
+        ...row,
+        api_key: '',
+        credential_configured: await invoke<boolean>('provider_secret_status', { providerId: Number(row.id) }),
+        credential_error: '',
+      };
+    } catch {
+      return { ...row, api_key: '', credential_configured: false, credential_error: '本机安全保险库读取失败' };
+    }
+  }));
+}
+
 export async function getAllApiProviders() {
-  return (await getDb()).select<any[]>('SELECT * FROM api_providers ORDER BY provider_type, priority');
+  const rows = await (await getDb()).select<any[]>('SELECT * FROM api_providers ORDER BY provider_type, priority');
+  return sanitizeProviderRows(rows);
 }
 
 
 
 export async function getApiProvidersByType(type: 'search' | 'llm') {
-  return (await getDb()).select<any[]>('SELECT * FROM api_providers WHERE provider_type = ? ORDER BY priority', [type]);
+  return sanitizeProviderRows(await (await getDb()).select<any[]>('SELECT * FROM api_providers WHERE provider_type = ? ORDER BY priority', [type]));
 }
 
 
 
+/** 修复历史遗留：已有可读搜索 Key 但被误存为停用时，自动启用一个，避免洞察被误判为未配置搜索。 */
+export async function ensureConfiguredSearchActive(): Promise<boolean> {
+  const providers = await getApiProviders();
+  const searchProviders = providers.filter((p: any) => p.provider_type === 'search');
+  if (searchProviders.some((p: any) => p.is_active && p.credential_configured)) return true;
+  const fallback = searchProviders.find((p: any) => p.credential_configured);
+  if (!fallback) return false;
+  await setActiveProvider('search', Number(fallback.id));
+  return true;
+}
+
 export async function getActiveApiProviders(type: 'search' | 'llm') {
-  return (await getDb()).select<any[]>('SELECT * FROM api_providers WHERE provider_type = ? AND is_active = 1 ORDER BY priority', [type]);
+  return sanitizeProviderRows(await (await getDb()).select<any[]>('SELECT * FROM api_providers WHERE provider_type = ? AND is_active = 1 ORDER BY priority', [type]));
 }
 
 
@@ -217,10 +249,17 @@ export async function addApiProvider(data: any) {
 
 export async function updateApiProvider(data: any) {
   const d = await getDb();
-  await d.execute(
-    'UPDATE api_providers SET provider_name=?, api_key=?, base_url=?, model_name=?, is_active=?, priority=?, monthly_quota_note=?, registration_url=? WHERE id=?',
-    [data.provider_name, data.api_key || '', data.base_url || '', data.model_name || '', data.is_active ? 1 : 0, data.priority || 0, data.monthly_quota_note || '', data.registration_url || '', data.id]
-  );
+  if (data.api_key === undefined) {
+    await d.execute(
+      'UPDATE api_providers SET provider_name=?, base_url=?, model_name=?, is_active=?, priority=?, monthly_quota_note=?, registration_url=? WHERE id=?',
+      [data.provider_name, data.base_url || '', data.model_name || '', data.is_active ? 1 : 0, data.priority || 0, data.monthly_quota_note || '', data.registration_url || '', data.id]
+    );
+  } else {
+    await d.execute(
+      'UPDATE api_providers SET provider_name=?, api_key=?, base_url=?, model_name=?, is_active=?, priority=?, monthly_quota_note=?, registration_url=? WHERE id=?',
+      [data.provider_name, data.api_key || '', data.base_url || '', data.model_name || '', data.is_active ? 1 : 0, data.priority || 0, data.monthly_quota_note || '', data.registration_url || '', data.id]
+    );
+  }
   return data.id;
 }
 
@@ -235,6 +274,7 @@ export async function toggleApiProviderActive(id: number, isActive: boolean) {
 // ==================== AI Request Logs（AI请求审计日志） ====================
 
 export async function saveAIRequestLog(data: {
+  request_channel?: RequestChannel;
   request_type: string;
   material_name?: string;
   system_prompt: string;
@@ -250,7 +290,7 @@ export async function saveAIRequestLog(data: {
 }) {
   const d = await getDb();
   const r = await d.execute(
-    'INSERT INTO ai_request_logs (request_type, material_name, system_prompt, user_prompt, response_summary, success, error_message, provider_name, model_name, prompt_tokens, completion_tokens, total_tokens) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+    'INSERT INTO ai_request_logs (request_type, material_name, system_prompt, user_prompt, response_summary, success, error_message, provider_name, model_name, prompt_tokens, completion_tokens, total_tokens, request_channel) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
     [
       data.request_type,
       data.material_name || '',
@@ -263,7 +303,7 @@ export async function saveAIRequestLog(data: {
       data.model_name || '',
       data.prompt_tokens ?? 0,
       data.completion_tokens ?? 0,
-      data.total_tokens ?? 0
+      data.total_tokens ?? 0, requestChannel(data)
     ]
   );
   return r.lastInsertId;
@@ -292,6 +332,7 @@ export async function updateAIRequestLog(id: number, data: { response_summary?: 
 
 // Token 用量记录（轻量，每次外部 LLM 调用记录一条）
 export async function saveAIUsageLog(data: {
+  request_channel?: RequestChannel;
   provider_name: string;
   model_name: string;
   prompt_tokens: number;
@@ -300,7 +341,7 @@ export async function saveAIUsageLog(data: {
 }) {
   const d = await getDb();
   await d.execute(
-    'INSERT INTO ai_request_logs (request_type, material_name, system_prompt, user_prompt, response_summary, success, error_message, provider_name, model_name, prompt_tokens, completion_tokens, total_tokens) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+    'INSERT INTO ai_request_logs (request_type, material_name, system_prompt, user_prompt, response_summary, success, error_message, provider_name, model_name, prompt_tokens, completion_tokens, total_tokens, request_channel) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
     [
       'usage',
       '',
@@ -313,7 +354,7 @@ export async function saveAIUsageLog(data: {
       data.model_name,
       data.prompt_tokens,
       data.completion_tokens,
-      data.total_tokens
+      data.total_tokens, requestChannel(data)
     ]
   );
 }
@@ -325,7 +366,7 @@ export async function saveAIUsageLog(data: {
 export async function getDailyCloudUsage(): Promise<{ count: number; tokens: number }> {
   const d = await getDb();
   const rows = await d.select<any[]>(
-    "SELECT COUNT(*) AS cnt, SUM(COALESCE(total_tokens,0)) AS tk FROM ai_request_logs WHERE provider_name NOT LIKE 'Ollama%' AND created_at >= datetime('now','localtime','start of day')"
+    `SELECT COUNT(*) AS cnt, SUM(COALESCE(total_tokens,0)) AS tk FROM ai_request_logs WHERE (${REQUEST_CHANNEL_SQL}) = 'cloud' AND created_at >= datetime('now','localtime','start of day')`
   );
   return { count: rows?.[0]?.cnt || 0, tokens: rows?.[0]?.tk || 0 };
 }
@@ -337,11 +378,11 @@ export async function getTokenUsageStats(): Promise<{
 }> {
   const d = await getDb();
   const rows = await d.select<any[]>(
-    'SELECT provider_name, model_name, SUM(COALESCE(prompt_tokens,0)) as prompt, SUM(COALESCE(completion_tokens,0)) as completion, SUM(COALESCE(total_tokens,0)) as total, COUNT(*) as cnt FROM ai_request_logs GROUP BY provider_name, model_name ORDER BY total DESC'
+    `SELECT provider_name, model_name, SUM(COALESCE(prompt_tokens,0)) as prompt, SUM(COALESCE(completion_tokens,0)) as completion, SUM(COALESCE(total_tokens,0)) as total, COUNT(*) as cnt FROM ai_request_logs WHERE (${REQUEST_CHANNEL_SQL}) = 'cloud' GROUP BY provider_name, model_name ORDER BY total DESC`
   );
-  const totalRow = await d.select<any[]>(`SELECT SUM(COALESCE(prompt_tokens,0)) as p, SUM(COALESCE(completion_tokens,0)) as c, SUM(COALESCE(total_tokens,0)) as t, COUNT(*) as cnt FROM ai_request_logs WHERE provider_name NOT LIKE 'Ollama%'`);
+  const totalRow = await d.select<any[]>(`SELECT SUM(COALESCE(prompt_tokens,0)) as p, SUM(COALESCE(completion_tokens,0)) as c, SUM(COALESCE(total_tokens,0)) as t, COUNT(*) as cnt FROM ai_request_logs WHERE (${REQUEST_CHANNEL_SQL}) = 'cloud'`);
   const daily = await d.select<any[]>(
-    "SELECT substr(created_at,1,10) as day, SUM(COALESCE(total_tokens,0)) as total FROM ai_request_logs WHERE provider_name NOT LIKE 'Ollama%' GROUP BY day ORDER BY day DESC LIMIT 30"
+    `SELECT substr(created_at,1,10) as day, SUM(COALESCE(total_tokens,0)) as total FROM ai_request_logs WHERE (${REQUEST_CHANNEL_SQL}) = 'cloud' GROUP BY day ORDER BY day DESC LIMIT 30`
   );
   const t = totalRow[0] || { p: 0, c: 0, t: 0, cnt: 0 };
   return {
@@ -355,7 +396,7 @@ export async function getTokenUsageStats(): Promise<{
 
 export async function getAllAIRequestLogs(limit = 100) {
   return (await getDb()).select<any[]>(
-    'SELECT * FROM ai_request_logs ORDER BY created_at DESC LIMIT ?',
+    `SELECT *, (${REQUEST_CHANNEL_SQL}) AS request_channel FROM ai_request_logs ORDER BY created_at DESC, id DESC LIMIT ?`,
     [limit]
   );
 }

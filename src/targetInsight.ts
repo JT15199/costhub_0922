@@ -1,18 +1,20 @@
 // 仪表盘驾驶舱的计算纯函数（v2.3.19）
 // 目标达成：领域（main_category）粒度，实际成本 = BOM 按领域汇总（原始值）
 // 达成率 = (2 - actual/target) * 100，>=100 达标（与项目页口径一致）
+import { bomPriceState, bomQuantityState } from './ai/contracts';
 
 export interface TargetRow { id?: number; project_id: number; domain: string; target_cost: number; }
-export interface BomRowLite { main_category?: string; part_cost?: number; quantity?: number; }
+export interface BomRowLite { main_category?: string; part_cost?: number; quantity?: number; price_state?: string; }
 export interface TargetStatus {
   projectId: number;
   code: string;
   domain: string;
-  actual: number;
+  actual: number | null;
   target: number;
-  diff: number;      // 实际 - 目标（>0 超支）
-  rate: number;      // 达成率 %
+  diff: number | null;      // 实际 - 目标（>0 超支）
+  rate: number | null;      // 达成率 %
   missed: boolean;   // 有目标且超支
+  unknown: boolean;  // 领域存在未确认价格/数量
 }
 
 export interface SnapshotLite { id: number; project_id: number; bom_cost: number; total_cost: number; change_reason?: string; created_at?: string; }
@@ -29,19 +31,24 @@ export function computeTargetStatuses(
     const boms = bomsByProject[p.id] || [];
     // 领域实际成本（原始值累加）
     const byDomain: Record<string, number> = {};
+    const unknownDomains = new Set<string>();
     for (const b of boms) {
       const d = b.main_category || '其他';
-      byDomain[d] = (byDomain[d] || 0) + (b.part_cost || 0) * (b.quantity || 1);
+      if (bomPriceState(b as any) !== 'confirmed' || bomQuantityState(b as any) !== 'confirmed') { unknownDomains.add(d); continue; }
+      const quantity = Number(b.quantity);
+      byDomain[d] = (byDomain[d] || 0) + Number(b.part_cost || 0) * quantity;
     }
     for (const t of targets) {
-      const actual = byDomain[t.domain] || 0;
+      const unknown = unknownDomains.has(t.domain);
+      const actual = unknown ? null : (byDomain[t.domain] || 0);
       const target = t.target_cost || 0;
-      const diff = target ? actual - target : 0;
-      const rate = target ? Math.round((2 - actual / target) * 100) : 0;
+      const diff = unknown || actual == null ? null : target ? actual - target : 0;
+      const rate = unknown || actual == null ? null : target ? Math.round((2 - actual / target) * 100) : 0;
       out.push({
         projectId: p.id, code: p.code, domain: t.domain,
         actual, target, diff, rate,
-        missed: target > 0 && actual > target,
+        missed: !unknown && actual != null && target > 0 && actual > target,
+        unknown,
       });
     }
   }
@@ -54,6 +61,7 @@ export function summarizeTargets(statuses: TargetStatus[], projects: { id: numbe
   missedDomains: number;
   targetedProjects: number;
   untargetedProjects: number;
+  unknownDomains: number;
 } {
   const withTarget = new Set(statuses.map(s => s.projectId));
   const missedProjects = new Set(statuses.filter(s => s.missed).map(s => s.projectId));
@@ -62,6 +70,7 @@ export function summarizeTargets(statuses: TargetStatus[], projects: { id: numbe
     missedDomains: statuses.filter(s => s.missed).length,
     targetedProjects: withTarget.size,
     untargetedProjects: projects.length - withTarget.size,
+    unknownDomains: statuses.filter(s => s.unknown).length,
   };
 }
 

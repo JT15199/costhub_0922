@@ -1,19 +1,23 @@
+import { SupplierNameInput } from '../components/SupplierResourcePool';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { EmojiIcon } from '../iconMap';
 import { Button, Input, Select, Space, Modal, Form, InputNumber, Tag, message, Popconfirm, Tooltip, Upload, Row, Col } from 'antd';
 import type { TableRowSelection } from 'antd/es/table/interface';
-import { PlusOutlined, DeleteOutlined, DownloadOutlined, UploadOutlined, HistoryOutlined, SearchOutlined, ShopOutlined, ToolOutlined, CheckOutlined, UndoOutlined } from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, DownloadOutlined, UploadOutlined, HistoryOutlined, SearchOutlined, ShopOutlined, ToolOutlined, CheckOutlined, UndoOutlined, BulbOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
-import { getParts, savePart, deletePart, getCategories, getPriceHistory, getMainCategories, getPartSuppliers, addPartSupplier, updatePartSupplier, deletePartSupplier, getSupplierPriceHistory, getPartCostChangeLogs, getDataChangeHistory } from '../db';
+import { confirmPartPriceBaseline, getParts, savePart, deletePart, getCategories, getPriceHistory, getPartPriceEvidence, getMainCategories, getPartSuppliers, addPartSupplier, updatePartSupplier, deletePartSupplier, getSupplierPriceHistory, getPartCostChangeLogs, getDataChangeHistory } from '../db';
 import { summarizeSupplierTrend, supplierTrendTag } from '../supplierTrend';
 import { MAIN_CATEGORIES, SUB_CATEGORIES, getCategoryColor } from '../constants';
 import DataTable from '../components/DataTable';
+import { openMaterialInsightDraft } from '../materialInsight';
+import { downloadPartsTemplate } from '../excelTemplates';
 
 export default function PartsLibrary() {
   const [parts, setParts] = useState<any[]>([]);
+  const [priceEvidence, setPriceEvidence] = useState<Record<number, any>>({});
   const [loading, setLoading] = useState(false);
   const [selKeys, setSelKeys] = useState<React.Key[]>([]);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => localStorage.getItem('costhub-part-search') || '');
   const [mainCat, setMainCat] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [categories, setCategories] = useState<string[]>([]);
@@ -40,14 +44,14 @@ export default function PartsLibrary() {
   useEffect(() => {
     const onOpenPart = (e: Event) => {
       const search = (e as CustomEvent).detail?.search;
-      if (search) setSearch(String(search));
+      if (search) { setSearch(String(search)); localStorage.removeItem('costhub-part-search'); }
     };
     window.addEventListener('costhub-open-part', onOpenPart);
     return () => window.removeEventListener('costhub-open-part', onOpenPart);
   }, []);
   const load = useCallback(async () => {
     setLoading(true);
-    try { const d = await getParts(search, typeFilter, mainCat); setParts(d); setCategories(await getCategories()); } catch (e) { console.error(e); }
+    try { const d = await getParts(search, typeFilter, mainCat); setParts(d); setPriceEvidence(await getPartPriceEvidence(d.map((row: any) => row.id))); setCategories(await getCategories()); } catch (e) { console.error(e); }
     setLoading(false);
   }, [search, typeFilter, mainCat]);
   useEffect(() => { load(); }, [load]);
@@ -59,7 +63,7 @@ export default function PartsLibrary() {
   }, [load]);
 
   // ====== 项目筛选：选某项目只显示该项目 BOM 里使用的器件 ======
-  const [projectFilter, setProjectFilter] = useState('');
+  const [projectFilter, setProjectFilter] = useState<number | ''>('');
   const [allProjects, setAllProjects] = useState<any[]>([]);
   // 该项目 BOM 关联的器件 ID 集合
   const [projectPartIds, setProjectPartIds] = useState<Set<number>>(new Set());
@@ -75,12 +79,10 @@ export default function PartsLibrary() {
     (async () => {
       if (!projectFilter) { setProjectPartIds(new Set()); return; }
       try {
-        const proj = allProjects.find((p: any) => p.name === projectFilter);
-        if (!proj) { setProjectPartIds(new Set()); return; }
         const db = await (await import('../db')).getDb();
         const rows = await db.select<any[]>(
           'SELECT DISTINCT part_id FROM project_boms WHERE project_id = ? AND COALESCE(is_deleted,0) = 0 AND part_id IS NOT NULL',
-          [proj.id]
+          [projectFilter]
         );
         setProjectPartIds(new Set(rows.map((r: any) => r.part_id)));
       } catch { setProjectPartIds(new Set()); }
@@ -89,16 +91,10 @@ export default function PartsLibrary() {
   // 前端过滤：BOM 反查（最准确）+ projects 字段匹配（兼容旧数据）双保险
   const filteredParts = useMemo(() => {
     if (!projectFilter) return parts;
-    const proj = allProjects.find((p: any) => p.name === projectFilter);
-    const matchKeys = [projectFilter];
-    if (proj) {
-      if (proj.code) matchKeys.push(proj.code);
-      if (proj.name) matchKeys.push(proj.name);
-    }
     return parts.filter((p: any) => {
       if (projectPartIds.has(p.id)) return true; // BOM 反查命中
-      const projText = `${p.projects || ''}`;
-      return matchKeys.some(k => k && projText.includes(k)); // projects 字段匹配
+      const project = allProjects.find((row: any) => row.id === projectFilter);
+      return Boolean(project && `${p.projects || ''}`.includes(project.code || '')); // 兼容旧数据中的项目标签
     });
   }, [parts, projectFilter, allProjects, projectPartIds]);
 
@@ -140,7 +136,7 @@ export default function PartsLibrary() {
             await savePart({
               main_category: d['大类'] || d['main_category'] || '硬件类',
               sub_category: d['子类'] || d['sub_category'] || '',
-              category: d['大类'] || d['main_category'] || '硬件类',
+              category: d['分类'] || d['category'] || d['大类'] || d['main_category'] || '硬件类',
               name: String(name).trim(),
               model: String(d['型号'] || d['model'] || '').trim(),
               cost: parseFloat(d['成本'] || d['cost'] || d['价格'] || '0') || 0,
@@ -207,6 +203,7 @@ export default function PartsLibrary() {
     setModalOpen(false); setEditing(null); form.resetFields(); load(); message.success('已保存');
   };
   const handleDelete = async (id: number) => { await deletePart(id); load(); message.success('已删除'); };
+  const confirmBaseline = async (row: any) => { const evidence = priceEvidence[Number(row.id)]; if (!evidence?.low) { message.info('暂无有效价格证据，不能确认基线'); return; } await confirmPartPriceBaseline(Number(row.id), evidence.low); await load(); message.success(`已确认 ${row.name} 的物料基线价`); };
   const batchDelete = async () => { for (const id of selKeys) await deletePart(Number(id)); message.success(`已删除 ${selKeys.length} 条`); setSelKeys([]); load(); };
   const rowSel: TableRowSelection<any> = { selectedRowKeys: selKeys, onChange: setSelKeys };
   const showHistory = async (r: any) => {
@@ -416,7 +413,11 @@ export default function PartsLibrary() {
     { title: '子类', dataIndex: 'sub_category', width: 110, onCell: (r: any) => partCellProps(r, 'sub_category'), render: (v: string, r: any) => renderPartInline(r, 'sub_category', v) },
     { title: '名称', dataIndex: 'name', width: 200, ellipsis: true, onCell: (r: any) => partCellProps(r, 'name'), render: (v: string, r: any) => renderPartInline(r, 'name', v) },
     { title: '型号', dataIndex: 'model', width: 160, ellipsis: true, onCell: (r: any) => partCellProps(r, 'model'), render: (v: string, r: any) => renderPartInline(r, 'model', v) },
-    { title: '成本(¥)', dataIndex: 'cost', width: 110, align: 'right' as const, onCell: (r: any) => partCellProps(r, 'cost'), render: (v: number, r: any) => renderPartInline(r, 'cost', v, <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>{Number(v || 0).toFixed(4)}</span>) },
+    { title: '最近参考价(¥)', dataIndex: 'cost', width: 120, align: 'right' as const, onCell: (r: any) => partCellProps(r, 'cost'), render: (v: number, r: any) => <Tooltip title="兼容显示值，不作为正式基线；正式基线需确认价格证据">{renderPartInline(r, 'cost', v, <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>{Number(v || 0).toFixed(4)}</span>)}</Tooltip> },
+    { title: '有效报价区间', width: 140, align: 'right' as const, render: (_: any, r: any) => { const e = priceEvidence[Number(r.id)]; return e ? `¥${e.low.toFixed(4)} ~ ¥${e.high.toFixed(4)}` : '暂无报价证据'; } },
+    { title: '最新价', width: 90, align: 'right' as const, render: (_: any, r: any) => priceEvidence[Number(r.id)] ? `¥${priceEvidence[Number(r.id)].latest.toFixed(4)}` : '—' },
+    { title: '基线价', width: 130, align: 'right' as const, render: (_: any, r: any) => { const e = priceEvidence[Number(r.id)]; return e?.baseline != null ? <span style={{ color: '#15803D' }}>¥{e.baseline.toFixed(4)}</span> : e?.low ? <Button type="link" size="small" onClick={() => void confirmBaseline(r)}>确认最低 ¥{e.low.toFixed(4)}</Button> : '未确认'; } },
+    { title: '来源数', width: 70, align: 'center' as const, render: (_: any, r: any) => priceEvidence[Number(r.id)]?.sourceCount || 0 },
     { title: '规格', dataIndex: 'specs', width: 220, ellipsis: true, onCell: (r: any) => partCellProps(r, 'specs'), render: (v: string, r: any) => renderPartInline(r, 'specs', v) },
     { title: '规范化', width: 200, render: (_: any, r: any) => {
       const cn = r.canonical_name || '';
@@ -438,6 +439,7 @@ export default function PartsLibrary() {
       <Space size="small">
         <Tooltip title="供应商"><Button type="link" size="small" icon={<ShopOutlined />} onClick={() => openSupplierModal(r)} /></Tooltip>
         <Tooltip title="修改历史"><Button type="link" size="small" icon={<HistoryOutlined />} onClick={() => showHistory(r)} /></Tooltip>
+        <Tooltip title="物料洞察"><Button type="link" size="small" icon={<BulbOutlined />} onClick={() => openMaterialInsightDraft({ material: r.name, partId: r.id })} /></Tooltip>
         {r.canonical_name ? (
           <Popconfirm title="还原规范化？" description="清空该器件规范结果（原名不受影响），之后可重新规范" onConfirm={() => handleResetCanonical(r)}>
             <Tooltip title="还原规范化"><Button type="link" size="small" icon={<UndoOutlined />} /></Tooltip>
@@ -463,11 +465,12 @@ export default function PartsLibrary() {
               value={projectFilter || undefined}
               onChange={v => { setProjectFilter(v || ''); setSelKeys([]); }}
               optionFilterProp="label"
-              options={allProjects.map((p: any) => ({ label: `${p.code} · ${p.name}`, value: p.name }))}
+              options={allProjects.map((p: any) => ({ label: `${p.code} · ${p.name}`, value: p.id }))}
             />
           </Space>
           <Space>
             <Upload beforeUpload={handleImport} showUploadList={false}><Button icon={<UploadOutlined />}>导入Excel</Button></Upload>
+            <Button icon={<DownloadOutlined />} onClick={downloadPartsTemplate}>模板</Button>
             <Button icon={<DownloadOutlined />} onClick={handleExport}>导出Excel</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit()}>新增器件</Button>
           </Space>
@@ -527,7 +530,7 @@ export default function PartsLibrary() {
         <div style={{ marginBottom: 16 }}>
           <Form form={supplierForm} layout="inline" onFinish={handleSupplierSave}>
             <Form.Item label="供应商" name="supplier_name" rules={[{ required: true, message: '请输入供应商名称' }]}>
-              <Input placeholder="供应商名称" style={{ width: 150 }} />
+              <SupplierNameInput style={{ width: 220 }} />
             </Form.Item>
             <Form.Item label="报价(¥)" name="price" rules={[{ required: true, message: '请输入报价' }]}>
               <InputNumber min={0} precision={4} style={{ width: 110 }} placeholder="0.0000" />

@@ -9,8 +9,10 @@
 import { getProjects, getProjectBOMs, getPartAliases, getCompareCache, saveCompareCache, upsertInsight, normalizePartName, getSetting, getPartsSpecsMap } from './db';
 import { startOllamaStream, logLocalAICall } from './ollama';
 import { invoke } from '@tauri-apps/api/core';
+import { bomExtendedCostStrict } from './ai/contracts';
 
 export const partKey = (r: any) => `${normalizePartName(r.name)}|${normalizePartName(r.model)}`;
+export { filterStoredInsightGroups } from './db';
 // v3 前缀：识别规则升级（排除完全一致行/同子类优先）后强制旧缓存失效，重新识别一轮
 export const moduleFingerprint = (rows: any[]) => 'v3|' + rows.map(r => `${r.project}|${r.name}|${r.model}|${r.cost}|${r.quantity}`).sort().join('\n');
 
@@ -187,8 +189,11 @@ export function buildInsights(aiGroups: any[], rows: any[], aliases: any[]): any
   const confirmed = new Set<string>();
   aliases.filter((a: any) => a.source === 'user_confirmed').forEach((a: any) => confirmed.add(`${normalizePartName(a.alias_name)}|${normalizePartName(a.alias_model)}`));
   const rowDiff = getRowDiffSet(aliases);
+  const negGroups = new Set(aliases.filter((a: any) => a.source === 'marked_different' && a.alias_name.startsWith('#NEG#')).map((a: any) => a.alias_name.slice(5)));
+  const isNegGroup = (groupRows: any[]) => negGroups.has(groupRows.map(partKey).sort().join(';'));
   const okRow = (r: any) => !confirmed.has(partKey(r)) && !rowDiff.has(partKey(r));
   aiGroups.forEach((g: any) => {
+    if (isNegGroup(g.rows || [])) return;
     const unconfirmed = (g.rows || []).filter(okRow);
     if (unconfirmed.length < 2) return; // 整组已确认/被逐行否定 → 情报消失
     const prices = unconfirmed.map((r: any) => r.cost);
@@ -198,6 +203,7 @@ export function buildInsights(aiGroups: any[], rows: any[], aliases: any[]): any
     out.push(ins);
   });
   buildRuleGroups(rows, aliases).forEach((g: any) => {
+    if (isNegGroup(g.rows || [])) return;
     const kept = (g.rows || []).filter(okRow);
     if (kept.length < 2) return;
     // 全部行都已被用户确认归组 → 该组已处理，不再提醒（与 rebuildModuleInsight 过滤一致，防止后台轮询让已确认组重现）
@@ -266,7 +272,10 @@ export async function runAutoCompare(onProgress?: (p: { done: number; total: num
       for (const p of projs) {
         const boms = await getProjectBOMs(p.id);
         boms.filter((b: any) => b.module_name === mod).forEach((b: any) => {
-          rows.push({ project: p.code || p.name, projectId: p.id, name: b.part_name, model: b.part_model || '', sub_category: b.sub_category || '', cost: b.part_cost || 0, quantity: b.quantity || 1, partId: b.part_id || 0 });
+          const extended = bomExtendedCostStrict(b);
+          const quantity = Number(b.quantity);
+          if (extended === null || !Number.isFinite(quantity) || quantity <= 0) return;
+          rows.push({ project: p.code || p.name, projectId: p.id, name: b.part_name, model: b.part_model || '', sub_category: b.sub_category || '', cost: extended / quantity, quantity, partId: b.part_id || 0 });
         });
       }
       try {

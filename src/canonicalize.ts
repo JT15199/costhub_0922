@@ -3,6 +3,7 @@
 // 结果只写 parts 的 canonical 影子字段（原名/模块库不动）
 import { getDb, getProjectBOMs, getSetting } from './db';
 import { startOllamaStream } from './ollama';
+import { detectOllama } from './aiStatus';
 
 export const CANONICAL_CATEGORIES = ['被动元件', '显示面板', '背光模组', '电源器件', '驱动板', '接口/连接器', '结构件', '包装材料', '线材', '声学', '散热', '加工费', '软件/固件', '其他'];
 
@@ -62,7 +63,6 @@ export async function canonicalizePartBatch(parts: { id: number; name: string; m
   for (const sql of ["ALTER TABLE parts ADD COLUMN canonical_name TEXT DEFAULT ''", "ALTER TABLE parts ADD COLUMN canonical_category TEXT DEFAULT ''", "ALTER TABLE parts ADD COLUMN canonical_specs TEXT DEFAULT '[]'", "ALTER TABLE parts ADD COLUMN canonical_updated_at TEXT DEFAULT ''"]) { try { await db.execute(sql); } catch { } }
   // 预检：模型不可用直接静默返回（隐线不阻塞）
   try {
-    const { detectOllama } = await import('./aiStatus');
     const st = await detectOllama();
     if (!st.connected) return { done: 0, kept: 0, failed: items.length };
   } catch { return { done: 0, kept: 0, failed: items.length }; }

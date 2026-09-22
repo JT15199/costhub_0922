@@ -10,7 +10,7 @@ import {
   TitleComponent,
   MarkLineComponent,
 } from 'echarts/components';
-import { CanvasRenderer } from 'echarts/renderers';
+import { CanvasRenderer, SVGRenderer } from 'echarts/renderers';
 
 echarts.use([
   // 图表
@@ -18,7 +18,7 @@ echarts.use([
   // 组件
   GridComponent, TooltipComponent, LegendComponent, TitleComponent, MarkLineComponent,
   // 渲染器
-  CanvasRenderer,
+  CanvasRenderer, SVGRenderer,
 ]);
 
 export default echarts;

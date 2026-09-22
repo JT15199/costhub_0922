@@ -1,0 +1,14 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+const dir = path.resolve(process.env.COSTHUB_PORTABLE_DIR || 'artifacts/agent-upgrade/20260910-portable/CostHub-Portable');
+const exe = path.join(dir, 'CostHub.exe');
+if (!fs.existsSync(exe)) throw new Error(`portable executable missing: ${exe}`);
+const forbidden = fs.readdirSync(dir).filter(name => /(^|\.)costhub\.db($|\.)|\.key$|\.pem$|\.env$/i.test(name));
+if (forbidden.length) throw new Error(`portable package contains sensitive/runtime data: ${forbidden.join(', ')}`);
+const sha256 = crypto.createHash('sha256').update(fs.readFileSync(exe)).digest('hex');
+const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'portable-manifest.json'), 'utf8'));
+if (manifest.sha256 !== sha256) throw new Error('portable manifest hash mismatch');
+const result = { mode: 'portable', dir, executable: exe, sha256, formalDatabaseIncluded: false, forbiddenFiles: forbidden, nodeModulesPresent: fs.existsSync(path.join(dir, 'node_modules')), publicSkillsPresent: fs.existsSync(path.join(dir, 'public', 'skills')) };
+fs.writeFileSync(path.join(dir, 'portable-check.json'), JSON.stringify(result, null, 2));
+console.log(JSON.stringify(result, null, 2));

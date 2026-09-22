@@ -10,6 +10,7 @@ import ReactECharts from 'echarts-for-react/esm/core';
 import echarts from '../echartsSetup';
 import { getProjects, getCompetitors, getFeatures, getAllScoresForRefs, saveScore, getProjectBOMs, getCompetitorBOMs, getModuleNames, getModuleFeatureLinks, setModuleFeatureLinks } from '../db';
 import { chartTooltip, chartTextMuted, chartSplitLine } from '../chartTheme';
+import { bomExtendedCostStrict, sumBomCostStrict } from '../ai/contracts';
 
 // 我方固定第一色，竞品依次取项目色板其余色（系列/data 级设置，图例自动跟随）
 const RADAR_COLORS = ['#0A84FF', '#5E5CE6', '#BF5AF2', '#FF9F0A', '#34C759', '#FF375F', '#64D2FF', '#98989D'];
@@ -69,12 +70,13 @@ export default function CompetitivenessRadar() {
     const items: RadarProduct[] = [];
     // 我方：BOM 快照口径累加（原始值累加，最终显示才舍入——项目铁律）
     const myBoms = await getProjectBOMs(selPid);
-    const myCost = myBoms.reduce((s, b) => s + ((b.part_cost || 0) * (b.quantity || 1)), 0);
+    const myCostState = sumBomCostStrict(myBoms);
+    const myCost = myCostState.missing.length ? null : myCostState.total;
     const myByMod: Record<string, number> = {};
-    myBoms.forEach(b => { const m = b.module_name || '未分模块'; myByMod[m] = (myByMod[m] || 0) + ((b.part_cost || 0) * (b.quantity || 1)); });
+    myBoms.forEach(b => { const value = bomExtendedCostStrict(b); if (value !== null) { const m = b.module_name || '未分模块'; myByMod[m] = (myByMod[m] || 0) + value; } });
     items.push({
       key: `p${selPid}`, type: 'project', id: selPid, name: `${selProj?.code || ''} ${selProj?.name || '我方项目'}`,
-      bomCost: myCost > 0 ? myCost : null,
+      bomCost: myCost,
       scoreMap: {},
       bomByModule: Object.entries(myByMod).map(([module, subtotal]) => ({ module, subtotal })),
     });
@@ -83,7 +85,7 @@ export default function CompetitivenessRadar() {
     for (const c of picked) {
       const cboms = await getCompetitorBOMs(c.id);
       const byMod: Record<string, number> = {};
-      cboms.forEach(b => { const m = b.module_name || '未分模块'; byMod[m] = (byMod[m] || 0) + ((b.estimated_cost || 0) * (b.quantity || 1)); });
+      cboms.forEach(b => { const value = bomExtendedCostStrict({ ...b, part_cost: b.estimated_cost }); if (value !== null) { const m = b.module_name || '未分模块'; byMod[m] = (byMod[m] || 0) + value; } });
       items.push({
         key: `c${c.id}`, type: 'competitor', id: c.id, name: `${c.brand} ${c.model}`,
         bomCost: (c.bom_cost && c.bom_cost > 0) ? c.bom_cost : null,
@@ -581,7 +583,7 @@ export default function CompetitivenessRadar() {
       <Modal title="模块-特性关联" open={linkModal} onCancel={() => setLinkModal(false)} footer={null} width={720}
         afterOpenChange={(open) => { if (open && !selModule && moduleNames.length > 0) pickModule(moduleNames[0].name); }}>
         <div style={{ marginBottom: 10, fontSize: 12, color: '#6E6A64' }}>
-          配置"哪些模块影响哪些特性"——评分时系统会列出该产品下关联的模块及成本占比，作为打分依据。同名模块全局一致。
+          这里维护跨项目的默认关联；评分时系统会列出关联模块及成本占比作为依据。若不同项目的维度或支撑模块不同，请到成本策划的「成本长城」卡片右上角按项目配置。
         </div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center' }}>
           <Radio.Group value={linkView} onChange={e => setLinkView(e.target.value)} size="small" optionType="button" buttonStyle="solid"

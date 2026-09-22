@@ -1,0 +1,24 @@
+
+ RUN  v4.1.10 D:/AI coding folder/costhub
+
+stdout | docs/check-llama-reacceptance.test.ts > second acceptance: actual adapter and oversized rows > bounds a default follow-up read of the saved long-cell result
+saved-result default read: { characters: 30777, tokens: 45307, inputHard: 21954 }
+
+ ❯ docs/check-llama-reacceptance.test.ts (6 tests | 1 failed) 401ms
+     × bounds a default follow-up read of the saved long-cell result 35ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  docs/check-llama-reacceptance.test.ts > second acceptance: actual adapter and oversized rows > bounds a default follow-up read of the saved long-cell result
+AssertionError: expected 45307 to be less than or equal to 21954
+ ❯ docs/check-llama-reacceptance.test.ts:71:34
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 9 passed (10)
+   Start at  09:14:52
+   Duration  3.81s (transform 930ms, setup 0ms, import 6.20s, tests 900ms, environment 0ms)
+

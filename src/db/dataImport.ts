@@ -5,6 +5,8 @@ import { getDb } from './core';
 
 export interface BomImportItem { name: string; model?: string; quantity?: number; cost?: number; module?: string; mainCat?: string; sub?: string; remark?: string; }
 
+const finite = (value: unknown) => value === undefined || value === null || value === '' ? null : Number.isFinite(Number(value)) ? Number(value) : undefined;
+
 /** BOM 拆解入库：器件去重（name+model 完全相等复用已有 parts）→ 写 parts + project_boms */
 export async function importProjectBom(projectId: number, items: BomImportItem[]) {
   const d = await getDb();
@@ -14,22 +16,22 @@ export async function importProjectBom(projectId: number, items: BomImportItem[]
   for (const it of items) {
     const name = String(it.name || '').trim();
     const model = String(it.model || '').trim();
-    const qty = Math.max(1, Number(it.quantity) || 1);
-    const cost = Number(it.cost) || 0;
-    if (!name) { stats.skipped++; continue; }
+    const qty = finite(it.quantity);
+    const cost = finite(it.cost);
+    if (!name || qty == null || qty <= 0 || cost === undefined || (cost != null && cost < 0)) { stats.skipped++; continue; }
     const part = (await d.select<any[]>('SELECT id FROM parts WHERE name = ? AND model = ? LIMIT 1', [name, model]))[0];
     let partId: number;
     if (part) { partId = part.id; stats.reused++; }
     else {
       const r = await d.execute('INSERT INTO parts (main_category, sub_category, category, name, model, cost, specs, projects, remark) VALUES (?,?,?,?,?,?,?,?,?)',
-        [it.mainCat || '硬件类', it.sub || '', it.mainCat || '硬件类', name, model, cost, '', '', it.remark || '']);
+        [it.mainCat || '硬件类', it.sub || '', it.mainCat || '硬件类', name, model, cost ?? 0, '', '', it.remark || '']);
       partId = Number(r.lastInsertId) || 0; stats.created++; undoParts.push(partId);
     }
     const ex = await d.select<any[]>('SELECT id FROM project_boms WHERE project_id=? AND part_id=? AND COALESCE(is_deleted,0)=0', [projectId, partId]);
     if (ex.length) { stats.skipped++; continue; }
     const module = it.module || '未归类';
-    const rb = await d.execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, part_name, part_model, part_cost, main_category, sub_category) VALUES (?,?,?,?,?,?,?,?,?,?)',
-      [projectId, partId, module, qty, it.remark || '', name, model, cost, it.mainCat || '硬件类', it.sub || '']);
+    const rb = await d.execute('INSERT INTO project_boms (project_id, part_id, module_name, quantity, remark, part_name, part_model, part_cost, price_state, main_category, sub_category) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      [projectId, partId, module, qty, it.remark || '', name, model, cost ?? 0, cost == null ? 'unknown' : 'confirmed', it.mainCat || '硬件类', it.sub || '']);
     undoBoms.push(Number(rb.lastInsertId) || 0);
     stats.byModule[module] = (stats.byModule[module] || 0) + 1;
   }
@@ -54,12 +56,13 @@ export async function importSupplierQuotes(rows: { name: string; model?: string;
   const undoIds: number[] = [];
   for (const r of rows) {
     const name = String(r.name || '').trim(); const model = String(r.model || '').trim();
-    if (!name) { stats.unmatched++; continue; }
+    const price = finite(r.price);
+    if (!name || price === undefined || price == null || price < 0) { stats.invalid = (stats.invalid || 0) + 1; continue; }
     const part = (await d.select<any[]>('SELECT id FROM parts WHERE name = ? AND model = ? LIMIT 1', [name, model]))[0];
     if (!part) { stats.unmatched++; stats.unmatchedNames.push(name + (model ? '(' + model + ')' : '')); continue; }
     stats.matched++;
     const rs = await d.execute('INSERT INTO part_suppliers (part_id, supplier_name, price, share_ratio, is_active, remark) VALUES (?,?,?,?,?,?)',
-      [part.id, String(r.supplier || '').trim() || '未命名供应商', Number(r.price) || 0, Number(r.share) || 0, 1, r.remark || '']);
+      [part.id, String(r.supplier || '').trim() || '未命名供应商', price, finite(r.share) ?? 0, 1, r.remark || '']);
     undoIds.push(Number(rs.lastInsertId) || 0);
     stats.added++;
   }
@@ -75,34 +78,44 @@ export async function importSupplierQuotes(rows: { name: string; model?: string;
 }
 
 /** 竞品 BOM 入库 */
-export async function importCompetitorBom(competitorId: number, rows: { name: string; model?: string; cost: number; quantity?: number; module?: string }[]) {
+export async function importCompetitorBom(competitorId: number, rows: { name: string; model?: string; cost?: number; quantity?: number; module?: string }[]) {
   const d = await getDb();
   let added = 0;
+  let skipped = 0;
   const undoIds: number[] = [];
   for (const r of rows) {
-    const name = String(r.name || '').trim(); if (!name) continue;
-    const rc = await d.execute('INSERT INTO competitor_boms (competitor_id, part_name, part_model, estimated_cost, quantity, module_name) VALUES (?,?,?,?,?,?)',
-      [competitorId, name, String(r.model || ''), Number(r.cost) || 0, Number(r.quantity) || 1, r.module || '未归类']);
+    const name = String(r.name || '').trim(); if (!name) { skipped++; continue; }
+    const cost = finite(r.cost);
+    const quantity = finite(r.quantity);
+    if (cost === undefined || quantity === undefined) { skipped++; continue; }
+    const rc = await d.execute('INSERT INTO competitor_boms (competitor_id, part_name, part_model, estimated_cost, quantity, price_state, quantity_state, module_name) VALUES (?,?,?,?,?,?,?,?)',
+      [competitorId, name, String(r.model || ''), cost, quantity, cost == null ? 'unknown' : 'confirmed', quantity == null ? 'unknown' : quantity >= 0 ? 'confirmed' : 'invalid', r.module || '未归类']);
     undoIds.push(Number(rc.lastInsertId) || 0);
     added++;
   }
   try { const W = window as any; W.__costhub_undo = { toolId: 'import_competitor_bom', inserts: { competitor_boms: undoIds } }; } catch { }
-  return { total: rows.length, added };
+  return { total: rows.length, added, skipped };
 }
 
-/** 原声批量导入（content+product 去重） */
-export async function importVoiceItems(product: string, contents: string[]) {
+/** 原声批量导入（content+product 去重；来源字段随记录保存） */
+export async function importVoiceItems(product: string, contents: string[], meta: { projectId?: number; source?: string; sourcePlatform?: string; sourceProduct?: string; collectedAt?: string } = {}) {
   const d = await getDb();
+  const normalizedProduct = String(product || '').trim();
+  if (!normalizedProduct) throw new Error('产品名不能为空，无法可靠归属原声');
   let added = 0, dup = 0;
   const undoIds: number[] = [];
-  for (const c of contents) {
-    const content = String(c || '').trim(); if (!content) continue;
-    const ex = await d.select<{ c: number }[]>('SELECT COUNT(*) as c FROM voice_item WHERE content = ? AND product = ?', [content, product]);
-    if ((ex[0]?.c || 0) > 0) { dup++; continue; }
-    const rv = await d.execute('INSERT INTO voice_item (content, source, product) VALUES (?,?,?)', [content, 'ai_import', product]);
-    undoIds.push(Number(rv.lastInsertId) || 0);
-    added++;
-  }
+  const existing = new Set((await d.select<{ content: string }[]>('SELECT content FROM voice_item WHERE product = ?', [normalizedProduct])).map(r => String(r.content || '')));
+  const inputSeen = new Set<string>();
+  await d.execute('BEGIN');
+  try {
+    for (const c of contents) {
+      const content = String(c || '').trim(); if (!content) continue;
+      if (existing.has(content) || inputSeen.has(content)) { dup++; continue; }
+      const rv = await d.execute('INSERT INTO voice_item (content, source, product, project_id, source_platform, source_product, collected_at) VALUES (?,?,?,?,?,?,?)', [content, meta.source || 'ai_import', normalizedProduct, Number(meta.projectId || 0), meta.sourcePlatform || '', meta.sourceProduct || normalizedProduct, meta.collectedAt || '']);
+      undoIds.push(Number(rv.lastInsertId) || 0); inputSeen.add(content); existing.add(content); added++;
+    }
+    await d.execute('COMMIT');
+  } catch (error) { try { await d.execute('ROLLBACK'); } catch { } throw error; }
   try { const W = window as any; W.__costhub_undo = { toolId: 'import_voice_items', inserts: { voice_item: undoIds } }; } catch { }
   return { total: contents.length, added, dup };
 }

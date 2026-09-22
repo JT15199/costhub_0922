@@ -1,5 +1,6 @@
+import { openInsightCenter } from './insightNavigation';
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
-import { message, Dropdown, Modal, Badge, Tooltip } from 'antd';
+import { Button,  message, Dropdown, Modal, Badge, Tooltip, Input, List, Empty, Tag } from 'antd';
 import { runAutoCompare } from './autoCompare';
 import { runAutoAdvisor } from './autoAdvisor';
 import { getInsights } from './db';
@@ -18,6 +19,9 @@ const Settings = lazy(() => import('./pages/Settings'));
 const UserVoice = lazy(() => import('./pages/UserVoice'));
 const QuoteReview = lazy(() => import('./pages/QuoteReview'));
 const WorkLog = lazy(() => import('./pages/WorkLog'));
+const AnalysisResults = lazy(() => import('./pages/AnalysisResults'));
+const Intelligence = lazy(() => import('./pages/Intelligence'));
+const Library = lazy(() => import('./pages/Library'));
 const LoginScreen = lazy(() => import('./pages/LoginScreen'));
 import { ThemeProvider } from './theme/ThemeContext';
 import { ThemeSwitcher } from './theme/ThemeSwitcher';
@@ -26,44 +30,30 @@ import AIUsageGuide from './components/AIUsageGuide';
 import AiPanel from './components/AiPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 import {
-  BarChartOutlined, ToolOutlined, AppstoreOutlined, ProjectOutlined,
-  ShopOutlined, LineChartOutlined, FileTextOutlined, PartitionOutlined, CalendarOutlined,
-  TeamOutlined, SettingOutlined, RobotOutlined, BookOutlined, BulbOutlined, LockOutlined, MessageOutlined, AuditOutlined,
-  MenuFoldOutlined, MenuUnfoldOutlined
+  BarChartOutlined, AppstoreOutlined, ProjectOutlined, SearchOutlined,
+  SettingOutlined, RobotOutlined, BookOutlined, BulbOutlined, LockOutlined,
+  MenuFoldOutlined, MenuUnfoldOutlined, BranchesOutlined
 } from '@ant-design/icons';
 
-// 导航分区（v2.3.19 界面轻量化第一步：12 项平铺 → 驾驶舱 + 三区收敛，页面零改动）
+// 一级导航只保留五个工作入口；AI 是全局能力，资料与情报页负责收拢各自的唯一维护入口。
 const NAV: { key: string; label: string; icon: any; iconBg: string; iconColor: string }[] = [
-  { key: 'dashboard',          label: '驾驶舱',     icon: <BarChartOutlined />,  iconBg: '#EFF6FF', iconColor: '#3B82F6' },
+  { key: 'dashboard',    label: '今日工作台', icon: <BarChartOutlined />, iconBg: '#EFF6FF', iconColor: '#3B82F6' },
+  { key: 'projects',     label: '项目',       icon: <ProjectOutlined />,  iconBg: '#F0FDF4', iconColor: '#16A34A' },
+  { key: 'intelligence', label: '情报',       icon: <BranchesOutlined />, iconBg: '#EFF6FF', iconColor: '#2F6FED' },
+  { key: 'library',      label: '资料库',     icon: <AppstoreOutlined />, iconBg: '#F5F3FF', iconColor: '#8B5CF6' },
+  { key: 'workLog',      label: '工作手账',   icon: <BookOutlined />,      iconBg: '#ECFDF5', iconColor: '#059669' },
 ];
-const NAV_GROUPS: { title: string; items: typeof NAV }[] = [
-  {
-    title: '项目中心',
-    items: [
-      { key: 'projects',           label: '项目管理',   icon: <ProjectOutlined />,   iconBg: '#F0FDF4', iconColor: '#16A34A' },
-      { key: 'competitors',        label: '竞品管理',   icon: <ShopOutlined />,      iconBg: '#FFF1F2', iconColor: '#F43F5E' },
-      { key: 'compare',            label: '对比分析',   icon: <LineChartOutlined />, iconBg: '#ECFEFF', iconColor: '#0891B2' },
-      { key: 'reports',            label: '成本报告',   icon: <FileTextOutlined />,  iconBg: '#FFFBEB', iconColor: '#D97706' },
-      { key: 'workLog',            label: '工作手账',   icon: <CalendarOutlined />,  iconBg: '#F0FDF4', iconColor: '#059669' },
-    ],
-  },
-  {
-    title: '数据资产',
-    items: [
-      { key: 'parts',              label: '器件库',     icon: <ToolOutlined />,      iconBg: '#FFF7ED', iconColor: '#F97316' },
-      { key: 'modules',            label: '模块库',     icon: <AppstoreOutlined />,  iconBg: '#F5F3FF', iconColor: '#8B5CF6' },
-      { key: 'supplierManagement', label: '供应商管理', icon: <TeamOutlined />,      iconBg: '#F0FDFA', iconColor: '#0D9488' },
-    ],
-  },
-  {
-    title: 'AI 趋势',
-    items: [
-      { key: 'decomposition',      label: '物料趋势洞察', icon: <PartitionOutlined />, iconBg: '#EEF2FF', iconColor: '#6366F1' },
-      { key: 'userVoice',          label: '用户原声分析', icon: <MessageOutlined />, iconBg: '#FAF5FF', iconColor: '#8B5CF6' },
-      { key: 'quoteReview',        label: 'AI 审价助手', icon: <AuditOutlined />,     iconBg: '#FFF7ED', iconColor: '#F97316' },
-    ],
-  },
-];
+
+const PRIMARY_NAV_KEYS = new Set(NAV.map(item => item.key));
+const LEGACY_PAGE_ALIASES: Record<string, string> = {
+  analysisResults: 'intelligence', decomposition: 'intelligence',
+  parts: 'library', modules: 'library', supplierManagement: 'library', competitors: 'library',
+  compare: 'projects', reports: 'projects', quoteReview: 'projects', userVoice: 'projects',
+};
+const getInitialPage = () => {
+  const saved = localStorage.getItem('app-active') || 'dashboard';
+  return PRIMARY_NAV_KEYS.has(saved) ? saved : LEGACY_PAGE_ALIASES[saved] || 'dashboard';
+};
 
 const ZOOM_LEVELS = [80, 100, 125, 150];
 
@@ -71,11 +61,11 @@ const ZOOM_LEVELS = [80, 100, 125, 150];
 const dialogActive = () => { try { return !!(window as any).__costhub_ai_dialog; } catch { return false; } };
 
 export default function App() {
-  const [active, setActive] = useState(() => localStorage.getItem('app-active') || 'dashboard');
+  const [active, setActive] = useState(getInitialPage);
   // 登录门禁：null=未登录(显示登录页) false=受限模式(不显示数据) true=已解锁
   const [authed, setAuthed] = useState<boolean | null>(null);
   // 已挂载的页面集合：初始包含当前页，切走的页面保持挂载，切回时不重新加载
-  const [mountedPages, setMountedPages] = useState<Set<string>>(() => new Set([localStorage.getItem('app-active') || 'dashboard']));
+  const [mountedPages, setMountedPages] = useState<Set<string>>(() => new Set([getInitialPage()]));
   const [zoom, setZoom] = useState(() => {
     const saved = localStorage.getItem('app-zoom');
     return saved ? parseInt(saved) : 100;
@@ -100,6 +90,50 @@ export default function App() {
   const projectRouteTimerRef = useRef<number | null>(null);
   // 当前登录用户名（侧边栏底部显示）
   const [currentUser, setCurrentUser] = useState('');
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [globalSearchKeyword, setGlobalSearchKeyword] = useState('');
+  const [globalSearchResults, setGlobalSearchResults] = useState<any[]>([]);
+  const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
+  const globalSearchRequest = useRef(0);
+
+  const runGlobalSearch = useCallback(async (value: string) => {
+    const query = value.trim().toLocaleLowerCase();
+    const request = ++globalSearchRequest.current;
+    if (!query) { setGlobalSearchResults([]); return; }
+    setGlobalSearchLoading(true);
+    try {
+      const db = await import('./db');
+      const [projects, parts, competitors, artifacts] = await Promise.all([db.getProjects('', '', ''), db.getParts('', '', ''), db.getCompetitors(''), db.getAnalysisArtifacts(120)]);
+      const measures = (await Promise.all(projects.map((project: any) => db.getMeasures(project.id).catch(() => [])))).flat().map((row: any) => ({ ...row, _project: projects.find((project: any) => project.id === row.project_id) }));
+      const batches = (await Promise.all(projects.map((project: any) => db.getTenderQuoteBatches(project.id).catch(() => [])))).flat().map((row: any) => ({ ...row, _project: projects.find((project: any) => project.id === row.projectId) }));
+      const match = (values: unknown[]) => values.some(value => String(value ?? '').toLocaleLowerCase().includes(query));
+      const next = [
+        ...projects.filter(row => match([row.code, row.name, row.category])).map(row => ({ type: 'project', title: `${row.code} · ${row.name}`, meta: `${row.category || '未分类'} · ${row.status || '进行中'}`, projectId: row.id, tab: 'overview' })),
+        ...parts.filter(row => match([row.name, row.model, row.specs, row.category])).map(row => ({ type: 'part', title: `${row.name} · ${row.model}`, meta: `${row.category || '未分类'} · 最新参考价 ¥${Number(row.cost || 0).toFixed(4)}`, partId: row.id })),
+        ...competitors.filter(row => match([row.brand, row.model, row.tier])).map(row => ({ type: 'competitor', title: `${row.brand} · ${row.model}`, meta: `竞品 · ${row.tier || '未分类'}`, competitorId: row.id })),
+        ...batches.filter(row => match([row.supplierName, row.batchNo, row.sourceFileName, row.roundName])).map(row => ({ type: 'quote', title: `${row.supplierName || '未命名供应商'} · ${row.batchNo || '报价批次'}`, meta: `${row._project?.code || '未关联项目'} · ¥${Number(row.totalAmount || 0).toFixed(2)}`, projectId: row.projectId, tab: 'tender' })),
+        ...measures.filter(row => match([row.measure, row.main_category, row.owner, row.status])).map(row => ({ type: 'measure', title: row.measure || '未命名措施', meta: `${row._project?.code || '未关联项目'} · ${row.status || '待执行'}`, projectId: row.project_id, tab: 'measures' })),
+        ...artifacts.filter(row => match([row.title, row.summary])).map(row => ({ type: 'artifact', title: row.title, meta: `分析成果 · ${String(row.created_at || '').slice(0, 16)}`, artifactId: row.id })),
+      ].slice(0, 40);
+      if (request === globalSearchRequest.current) setGlobalSearchResults(next);
+    } catch (error) {
+      if (request === globalSearchRequest.current) setGlobalSearchResults([]);
+      console.warn('全局搜索失败:', error);
+    } finally {
+      if (request === globalSearchRequest.current) setGlobalSearchLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setGlobalSearchOpen(true); }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => runGlobalSearch(globalSearchKeyword), 160);
+    return () => window.clearTimeout(timer);
+  }, [globalSearchKeyword, runGlobalSearch]);
 
   // ====== 报价比对：持续后台探查（只要 Ollama 空闲就扫；60 秒一轮，探查仔细不急；发现情报才提示） ======
   const [autoProgress, setAutoProgress] = useState<{ done: number; total: number; current: string; remaining?: number } | null>(null);
@@ -142,12 +176,16 @@ export default function App() {
       }
     })();
   }, []);
-  // ====== 自主分析（AI 助理后台建议）：60 秒轮询，规则+AI 润色，指纹去重 ======
+  // ====== 自主分析（AI 助理后台建议）：事件优先，空闲时轮换补扫 ======
   const advisorRunningRef = useRef(false);
-  const scheduleAppAdvisor = useCallback(() => {
+  const lastAdvisorAtRef = useRef(0);
+  const scheduleAppAdvisor = useCallback((force = false) => {
     if (advisorRunningRef.current) return;
     if (dialogActive()) return; // 对话优先让路
+    const now = Date.now();
+    if (!force && now - lastAdvisorAtRef.current < 5 * 60 * 1000) return;
     advisorRunningRef.current = true;
+    lastAdvisorAtRef.current = now;
     (async () => {
       try {
         const r = await runAutoAdvisor(msg => window.dispatchEvent(new CustomEvent('costhub-ai-task', { detail: { task: msg } })));
@@ -157,17 +195,20 @@ export default function App() {
         }
         // 只在新建议出现时提醒（日常轮询静默）
         if (r && r.found > 0) {
-          message.success(`AI 助理发现 ${r.found} 条成本机会/风险点（见「本地 AI → 自主建议」）`);
+          message.success({ content: <span>发现 {r.found} 条成本机会/风险点 <Button type="link" size="small" onClick={() => openInsightCenter(navigate, 'advice')}>查看自主建议 →</Button></span>, duration: 8 });
         }
       } catch (e) { console.warn('自主分析失败:', e); }
       advisorRunningRef.current = false;
     })();
   }, []);
   useEffect(() => {
-    // 自主分析轮询：每 60 秒探查一轮（规则层纯计算很快；AI 润色内置 30 分钟节流；指纹去重不重复提醒）
-    const iv = setInterval(() => scheduleAppAdvisor(), 60 * 1000);
-    scheduleAppAdvisor(); // 打开应用立即探查一轮
-    return () => clearInterval(iv);
+    // ponytail: 先用共享事件做范围触发；15 分钟补扫一次，避免每 60 秒全库扫描。
+    const iv = setInterval(() => scheduleAppAdvisor(), 15 * 60 * 1000);
+    const events = ['costhub-project-bom-updated', 'costhub-targets-updated', 'costhub-quote-review-updated', 'costhub-trend-updated', 'costhub-supplier-updated', 'costhub-project-saved'];
+    const onDataChanged = () => scheduleAppAdvisor();
+    events.forEach(event => window.addEventListener(event, onDataChanged));
+    scheduleAppAdvisor(true); // 打开应用立即探查一轮
+    return () => { clearInterval(iv); events.forEach(event => window.removeEventListener(event, onDataChanged)); };
   }, [scheduleAppAdvisor]);
   // ====== 关键物料自动洞察：60 秒轮询，闸门节流（30 天周期 + 7 天复用 + 每日预算），启动立即一轮 ======
   const insightRunningRef = useRef(false);
@@ -263,11 +304,9 @@ export default function App() {
 
   const handleUnlock = () => {
     (async () => {
-      const { setDataLocked, syncProjectModulesToLibrary, syncPartsProjectsField } = await import('./db');
+      const { setDataLocked, syncPartsProjectsField } = await import('./db');
       setDataLocked(false);
       setAuthed(true);
-      // 从 project_boms 同步缺失模块到模块库（历史数据/定型项目补齐）
-      try { await syncProjectModulesToLibrary(); } catch (e) { console.warn('模块库同步失败:', e); }
       // 修复 parts.projects 字段（历史数据未更新项目关联）
       try { await syncPartsProjectsField(); } catch (e) { console.warn('projects 字段修复失败:', e); }
       // 首次使用 AI 能力引导（只看一次）
@@ -321,21 +360,29 @@ export default function App() {
   }, []);
 
   const navigate = useCallback((key: string) => {
+    const target = LEGACY_PAGE_ALIASES[key] || key;
+    const intelligenceTab = target === 'intelligence'
+      ? key === 'analysisResults' ? 'results' : key === 'decomposition' ? 'material' : undefined
+      : undefined;
+    if (intelligenceTab) localStorage.setItem('costhub-intelligence-tab', intelligenceTab);
+    if (target === 'library' && ['parts', 'modules', 'supplierManagement', 'competitors'].includes(key)) {
+      localStorage.setItem('costhub-library-tab', key === 'supplierManagement' ? 'suppliers' : key);
+    }
     // 用户主动离开项目页时，取消尚未执行的直达项目转发，避免切页后又被旧事件拉回。
-    if (key !== 'projects' && projectRouteTimerRef.current !== null) {
+    if (target !== 'projects' && projectRouteTimerRef.current !== null) {
       window.clearTimeout(projectRouteTimerRef.current);
       projectRouteTimerRef.current = null;
     }
     // 保持目标页面挂载（页面切走不卸载，切回不重连）
     setMountedPages(prev => {
       const next = new Set(prev);
-      next.add(key);
+      next.add(target);
       return next;
     });
-    setActive(key);
-    localStorage.setItem('app-active', key);
+    setActive(target);
+    localStorage.setItem('app-active', target);
     // 通知目标页面刷新（模块库等页面在其它页面改动数据后需要重新加载）
-    window.dispatchEvent(new CustomEvent('app-page-active', { detail: { page: key } }));
+    window.dispatchEvent(new CustomEvent('app-page-active', { detail: { page: target, ...(intelligenceTab ? { tab: intelligenceTab } : {}) } }));
   }, []);
 
   // 侧边栏「报价情报」入口：任何页面可点 → 跳项目管理页并打开情报弹窗
@@ -347,6 +394,7 @@ export default function App() {
       const detail = (e as CustomEvent).detail || {};
       const pid = detail.pid;
       if (!pid) return;
+      try { sessionStorage.setItem('costhub-open-project-pending', JSON.stringify(detail)); } catch { }
       navigate('projects');
       // 转发事件由 Projects 消费，但 App 不应再次安排下一次转发。
       if (detail.__costhubForwarded) return;
@@ -362,6 +410,12 @@ export default function App() {
       if (projectRouteTimerRef.current !== null) window.clearTimeout(projectRouteTimerRef.current);
       projectRouteTimerRef.current = null;
     };
+  }, [navigate]);
+
+  useEffect(() => {
+    const h = () => navigate('decomposition');
+    window.addEventListener('costhub-open-material-insight', h);
+    return () => window.removeEventListener('costhub-open-material-insight', h);
   }, [navigate]);
 
   useEffect(() => {
@@ -381,9 +435,22 @@ export default function App() {
   }, []);
 
   const openInsightsEntry = useCallback(() => {
-    localStorage.setItem('costhub-open-insights-pending', '1');
-    navigate('projects');
-    setTimeout(() => window.dispatchEvent(new CustomEvent('costhub-open-insights')), 300);
+    openInsightCenter(navigate);
+  }, [navigate]);
+
+  const openGlobalSearchResult = useCallback((result: any) => {
+    setGlobalSearchOpen(false);
+    if (result.projectId) {
+      window.dispatchEvent(new CustomEvent('costhub-open-project', { detail: { pid: result.projectId, tab: result.tab || 'overview' } }));
+    } else if (result.type === 'part') {
+      localStorage.setItem('costhub-part-search', result.title.split(' · ')[0]);
+      navigate('parts');
+      window.dispatchEvent(new CustomEvent('costhub-open-part', { detail: { search: result.title.split(' · ')[0] } }));
+    } else if (result.type === 'competitor') {
+      navigate('competitors');
+    } else if (result.type === 'artifact') {
+      navigate('analysisResults');
+    }
   }, [navigate]);
 
 
@@ -395,6 +462,8 @@ export default function App() {
   const renderPage = (key: string) => {
     switch (key) {
       case 'dashboard': return <Dashboard onNavigate={navigate} />;
+      case 'intelligence': return <Intelligence />;
+      case 'library': return <Library />;
       case 'parts': return <PartsLibrary />;
       case 'modules': return <ModuleLibrary />;
       case 'projects': return <Projects />;
@@ -406,6 +475,7 @@ export default function App() {
       case 'userVoice': return <UserVoice />;
       case 'quoteReview': return <QuoteReview />;
       case 'workLog': return <WorkLog />;
+      case 'analysisResults': return <AnalysisResults />;
       default: return <Dashboard onNavigate={navigate} />;
     }
   };
@@ -454,10 +524,16 @@ export default function App() {
       <aside className={`sidebar ${sidebarCollapsed ? 'sidebar-collapsed' : 'sidebar-expanded'}`} style={{ width: sidebarCollapsed ? 52 : 204, minWidth: sidebarCollapsed ? 52 : 204, overflow: 'hidden' }}>
         {sidebarCollapsed ? (
           <div className="sidebar-collapsed-content" style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 0', gap: 6 }}>
-            <div style={{ width: 30, height: 30, borderRadius: 8, background: '#181713', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, marginBottom: 12, flexShrink: 0 }}>C</div>
-            <Tooltip title="驾驶舱" placement="right"><div onClick={() => navigate('dashboard')} style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: active === 'dashboard' ? '#181713' : '#5F5D54', background: active === 'dashboard' ? '#F4F3EE' : 'transparent' }}><BarChartOutlined style={{ fontSize: 16 }} /></div></Tooltip>
-            <Tooltip title="项目管理" placement="right"><div onClick={() => navigate('projects')} style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: active === 'projects' ? '#181713' : '#5F5D54', background: active === 'projects' ? '#F4F3EE' : 'transparent' }}><ProjectOutlined style={{ fontSize: 16 }} /></div></Tooltip>
-            <Tooltip title="AI 协作窗" placement="right"><div onClick={() => window.dispatchEvent(new Event('costhub-ai-focus'))} style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#5F5D54' }}><RobotOutlined style={{ fontSize: 16 }} /></div></Tooltip>
+            <div className="sidebar-collapsed-logo"><img src={customLogo || defaultLogo} alt="CostHub" /></div>
+            <Tooltip title="全局搜索（Ctrl+K）" placement="right"><button type="button" aria-label="全局搜索" onClick={() => setGlobalSearchOpen(true)} style={{ width: 34, height: 34, border: 0, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#5F5D54', background: 'transparent' }}><SearchOutlined /></button></Tooltip>
+            {NAV.map(item => (
+              <Tooltip title={item.label} placement="right" key={item.key}>
+                <button type="button" aria-label={item.label} onClick={() => navigate(item.key)} style={{ width: 34, height: 34, border: 0, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: active === item.key ? '#181713' : '#5F5D54', background: active === item.key ? '#F4F3EE' : 'transparent' }}>
+                  {item.icon}
+                </button>
+              </Tooltip>
+            ))}
+            <Tooltip title="AI 协作窗" placement="right"><div onClick={() => window.dispatchEvent(new Event('costhub-ai-toggle'))} style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#5F5D54' }}><RobotOutlined style={{ fontSize: 16 }} /></div></Tooltip>
             <div style={{ flex: 1 }} />
             <Tooltip title="展开侧边栏" placement="right"><div onClick={toggleSidebar} style={{ width: 34, height: 34, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#9A978B' }}><MenuUnfoldOutlined /></div></Tooltip>
           </div>
@@ -471,6 +547,7 @@ export default function App() {
           </div>
           <div><h1>CostHub</h1><span>成本管理平台</span></div>
         </div>
+        <button type="button" className="global-search-trigger" onClick={() => setGlobalSearchOpen(true)}><SearchOutlined /><span>搜索项目、器件、报价</span><kbd>Ctrl K</kbd></button>
         <nav className={`sidebar-nav ${active === 'projects' ? 'has-project-context' : ''}`}>
           {NAV.map(item => (
             <div key={item.key} className={`nav-item ${active === item.key ? 'active' : ''}`} onClick={() => navigate(item.key)}>
@@ -486,33 +563,6 @@ export default function App() {
                 {item.icon}
               </span>
               {item.label}
-            </div>
-          ))}
-          {active === 'projects' && (
-            <div className="nav-item active" onClick={() => navigate('projects')}>
-              <span className="nav-icon" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 8, flexShrink: 0, background: '#F0FDF4', color: '#16A34A', fontSize: 14 }}><ProjectOutlined /></span>
-              项目管理
-            </div>
-          )}
-          {active !== 'projects' && NAV_GROUPS.map(group => (
-            <div key={group.title}>
-              <div style={{ padding: '10px 16px 4px', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--color-text-tertiary)', textTransform: 'uppercase' }}>{group.title}</div>
-              {group.items.map(item => (
-                <div key={item.key} className={`nav-item ${active === item.key ? 'active' : ''}`} onClick={() => navigate(item.key)}>
-                  <span className="nav-icon" style={{
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-                    background: item.iconBg,
-                    color: item.iconColor,
-                    fontSize: 14,
-                    transition: 'transform 0.15s',
-                    boxShadow: active === item.key ? `0 2px 6px ${item.iconColor}30` : 'none',
-                  }}>
-                    {item.icon}
-                  </span>
-                  {item.label}
-                </div>
-              ))}
             </div>
           ))}
 </nav>
@@ -556,7 +606,7 @@ export default function App() {
         )}
 
         {/* AI 情报中心（报价差异/自主建议/巡检发现 统一处理）——全局入口，任何页面可见 */}
-        <div onClick={openInsightsEntry}
+        <div role="button" tabIndex={0} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openInsightsEntry(); } }} onClick={openInsightsEntry}
           style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 12.5, color: 'var(--color-text-secondary)', borderTop: '1px solid var(--color-border)', userSelect: 'none' }}
           onMouseEnter={e => { e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
           onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
@@ -648,10 +698,24 @@ export default function App() {
           </div>
         )}
       </aside>
-      <main className="main-content" style={{ zoom: `${zoom}%` }}>
+      <main className={`main-content${active === 'projects' ? ' main-content-projects' : ''}`} style={{ zoom: `${zoom}%` }}>
         {render()}
       </main>
       <AiPanel activePage={active} />
+
+      <Modal
+        title="全局搜索"
+        open={globalSearchOpen}
+        onCancel={() => setGlobalSearchOpen(false)}
+        footer={null}
+        destroyOnClose
+        width={620}
+      >
+        <Input autoFocus allowClear prefix={<SearchOutlined />} value={globalSearchKeyword} onChange={event => setGlobalSearchKeyword(event.target.value)} placeholder="搜索项目、器件、竞品、报价批次、措施或分析成果" suffix={<kbd>Ctrl K</kbd>} />
+        <div style={{ marginTop: 12, minHeight: 80 }}>
+          {globalSearchLoading ? <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-tertiary)' }}>搜索中…</div> : !globalSearchKeyword.trim() ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="输入关键词开始本地搜索" /> : <List size="small" dataSource={globalSearchResults} locale={{ emptyText: '没有匹配结果' }} renderItem={(result: any) => <List.Item style={{ cursor: 'pointer' }} onClick={() => openGlobalSearchResult(result)}><List.Item.Meta title={<span><Tag style={{ marginRight: 8 }}>{result.type === 'project' ? '项目' : result.type === 'part' ? '器件' : result.type === 'competitor' ? '竞品' : result.type === 'quote' ? '报价批次' : result.type === 'measure' ? '措施' : '分析成果'}</Tag>{result.title}</span>} description={result.meta} /></List.Item>} />}
+        </div>
+      </Modal>
 
       {/* 系统设置弹窗 */}
       <Modal
