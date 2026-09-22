@@ -549,8 +549,9 @@ export default function App() {
         </div>
         <button type="button" className="global-search-trigger" onClick={() => setGlobalSearchOpen(true)}><SearchOutlined /><span>搜索项目、器件、报价</span><kbd>Ctrl K</kbd></button>
         <nav className={`sidebar-nav ${active === 'projects' ? 'has-project-context' : ''}`}>
+          {/* data-testid=nav-<key>：Quality Harness V1 桌面 E2E-003 导航 smoke 的稳定选择器（仅测试标记，不改行为） */}
           {NAV.map(item => (
-            <div key={item.key} className={`nav-item ${active === item.key ? 'active' : ''}`} onClick={() => navigate(item.key)}>
+            <div key={item.key} data-testid={`nav-${item.key}`} className={`nav-item ${active === item.key ? 'active' : ''}`} onClick={() => navigate(item.key)}>
               <span className="nav-icon" style={{
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                 width: 28, height: 28, borderRadius: 8, flexShrink: 0,
@@ -665,7 +666,9 @@ export default function App() {
             placement="topRight"
             trigger={['click']}
           >
+            {/* data-testid：Quality Harness V1 桌面 E2E-006 打开系统设置的稳定入口（仅测试标记，不改行为） */}
             <div
+              data-testid="nav-settings-trigger"
               style={{
                 display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', flex: 1, minWidth: 0,
                 padding: '6px 8px', borderRadius: 8, transition: 'background 0.2s',
