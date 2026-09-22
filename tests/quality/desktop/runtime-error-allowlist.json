@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "description": "桌面 E2E runtime error/warning allowlist (实施指导 §10)。只有明确的、已知无害的告警才允许登记。禁止使用「ignore all console.error」这类粗暴规则；errors 数组默认为空，任何未登记的未捕获异常/unhandled rejection/React fatal 都会让对应 E2E FAIL。",
+  "policy": {
+    "warningsMayBeAllowlisted": true,
+    "errorsAreNeverAllowlistedWithoutJustification": true,
+    "rule": "每条 must include: pattern(正则字符串) + reason + firstObserved + scope(哪个 scenario 允许)"
+  },
+  "errors": [],
+  "warnings": [
+    {
+      "id": "CHROMIUM-PASSWORD-FORM-NOTICE",
+      "pattern": "Password field is not contained in a form",
+      "kind": "log.recommendation",
+      "reason": "Chromium/WebView2 对「密码输入框不在 <form> 内」的开发期建议。CostHub 登录是受控组件 + 按钮触发，不使用 form submit，属于设计选择，不是缺陷。仅出现在登录页，离线环境下实测为唯一告警。",
+      "firstObserved": "2026-09-22",
+      "scope": ["E2E-002", "E2E-003", "E2E-005", "E2E-006", "E2E-007"]
+    },
+    {
+      "id": "CHROMIUM-DOM-DEVTOOLS-HINT",
+      "pattern": "^\\[DOM\\]",
+      "kind": "log.recommendation",
+      "reason": "Chromium 以 [DOM] 前缀输出的开发者提示（非错误、非功能告警）。已在离线全量导航实测中确认为唯一噪声来源。",
+      "firstObserved": "2026-09-22",
+      "scope": ["*"]
+    }
+  ],
+  "notes": [
+    "WARNING_ALLOWLIST 只影响 console 告警计数展示，不影响 E2E 通过条件。",
+    "ERROR_ALLOWLIST 为空是刻意选择：宁可让 E2E 因未知异常 FAIL，也不要为了绿灯放宽。",
+    "若某天确实需要登记 error，必须同时提交：复现步骤、为什么不影响用户、以及对应的回归测试。"
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "version": 2,
+  "description": "Quality Harness V2 配置。runner 与各检查脚本从此文件读取策略，不再在代码中硬编码。调用方若未提供配置或配置非法，一律 fail closed（按最严格解释执行）。",
+
+  "security": {
+    "failClosed": true
+  },
+
+  "database": {
+    "fixtureOnly": true,
+    "fixtureDir": "artifacts/quality/desktop-fixture",
+    "databaseFilename": "costhub.db",
+    "fixtureMarkerKey": "quality_fixture",
+    "fixtureMarkerValue": "1"
+  },
+
+  "tests": {
+    "allowFailure": false,
+    "flakeRetryMax": 1
+  },
+
+  "lint": {
+    "baseline": true,
+    "baselineFile": "tests/quality/lint-baseline.json",
+    "required": false
+  },
+
+  "report": {
+    "leakCheckBeforeFinalize": true,
+    "draftBasename": "summary.draft"
+  },
+
+  "limits": {
+    "maxFileLines": 300,
+    "enforcedDirs": ["tests/quality"]
+  },
+
+  "fixture": {
+    "passwordEnvVar": "QUALITY_TEST_PASSWORD",
+    "username": "agent-test",
+    "seedProjectCode": "QAFIX-0001"
+  }
+}

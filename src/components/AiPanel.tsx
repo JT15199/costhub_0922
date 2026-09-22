@@ -2048,7 +2048,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
             ))}
           </div>
         )}
-        <div className="local-ai-composer local-ai-composer-large" role="group" aria-label="AI 输入区">
+        <div className="local-ai-composer local-ai-composer-large" role="group" aria-label="AI 输入区" data-testid="local-ai-composer">
           <Input.TextArea
             ref={inputRef}
             className="local-ai-composer-input"
@@ -2060,6 +2060,7 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
             placeholder={streaming ? '执行中输入补充指令，回车立即注入…' : '给 CostHub AI 发消息…'}
             aria-label="输入消息"
             variant="borderless"
+            data-testid="local-ai-input"
           />
           <div className="local-ai-composer-actions">
             <div className="local-ai-composer-actions-left">

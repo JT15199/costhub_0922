@@ -14,6 +14,10 @@
     "test:agent:recovery": "python tests/agent-upgrade/restart-recovery.py",
     "test:agent:live": "node tests/agent-upgrade/real-tool-smoke.mjs && node tests/agent-upgrade/real-summary-evidence.mjs",
     "test:agent:portable": "node tests/agent-upgrade/check-portable.mjs",
+    "quality:core": "node tests/quality/run-quality.mjs core",
+    "quality:full": "node tests/quality/run-quality.mjs full",
+    "quality:live": "node tests/quality/run-quality.mjs live",
+    "quality:report": "node tests/quality/run-quality.mjs report",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
@@ -23,8 +27,8 @@
     "@earendil-works/pi-agent-core": "0.84.4",
     "@earendil-works/pi-ai": "0.84.4",
     "@tauri-apps/api": "^2.11.0",
-    "@tauri-apps/plugin-sql": "^2.4.0",
     "@tauri-apps/plugin-opener": "^2.5.0",
+    "@tauri-apps/plugin-sql": "^2.4.0",
     "@xyflow/react": "^12.3.5",
     "antd": "6.6.0",
     "echarts": "^6.1.0",
@@ -53,6 +57,7 @@
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "ws": "^8.21.3"
   }
 }

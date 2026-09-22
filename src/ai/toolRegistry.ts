@@ -10,7 +10,7 @@ import {
   localNow,
 } from '../db';
 import { computeTargetStatuses } from '../targetInsight';
-import type { AiToolManifest, AiToolResult, EvidenceRef, RunContext, ToolCall } from './contracts';
+import type { AiToolManifest, AiToolResult, EvidenceRef, RunContext, ToolCall, ToolPrivacyLevel } from './contracts';
 import { bomExtendedCost, bomPriceState, bomQuantity, bomQuantityState, bomUnitCost, sumBomCostStrict, toFiniteNumber } from './contracts';
 import { executeSkillTool, SKILL_TOOL_IDS } from './skills/core';
 
@@ -22,17 +22,33 @@ function pageRows<T>(rows: T[], args: Record<string, unknown>) {
   return { rows: rows.slice(offset, offset + limit), truncated: nextOffset !== null || offset > 0, pagination, warning: `分页 ${JSON.stringify(pagination)}；需要完整明细时继续用 nextOffset 查询，合计口径不随分页改变。` };
 }
 
-const read = (requiredData: string[], outputSchema: string, maxRows = 200): AiToolManifest => ({
-  id: '', kind: 'read', risk: 'low', requiresConfirmation: false, requiredData, outputSchema, evidencePolicy: 'required', maxRows,
+/**
+ * Manifest 构造器（Stage 2：隐私声明改为**显式参数**）
+ *
+ * 为什么把 privacyLevel 做成必填参数而不是写在注释里：
+ *   注释会被忽略，类型不会。构造器强制每个新工具在登记时就回答
+ *   「它读的数据是什么敏感级别」，而不是事后补。
+ *
+ * cloudEligible 不在此处手写，而是由 `resolveToolCloudEligible` 从 privacyLevel 推导
+ * （sensitive 恒 false、非 public 一律 false）—— 避免两处声明互相矛盾。
+ */
+const read = (requiredData: string[], outputSchema: string, maxRows = 200, privacyLevel: ToolPrivacyLevel = 'internal'): AiToolManifest => ({
+  id: '', kind: 'read', risk: 'low', requiresConfirmation: false, requiredData, outputSchema, evidencePolicy: 'required', maxRows, privacyLevel,
 });
-const calculate = (requiredData: string[], outputSchema: string): AiToolManifest => ({
-  id: '', kind: 'calculate', risk: 'low', requiresConfirmation: false, requiredData, outputSchema, evidencePolicy: 'optional',
+const calculate = (requiredData: string[], outputSchema: string, privacyLevel: ToolPrivacyLevel = 'internal'): AiToolManifest => ({
+  id: '', kind: 'calculate', risk: 'low', requiresConfirmation: false, requiredData, outputSchema, evidencePolicy: 'optional', privacyLevel,
 });
-const write = (requiredData: string[], outputSchema: string, risk: 'medium' | 'high' = 'medium'): AiToolManifest => ({
-  id: '', kind: 'write', risk, requiresConfirmation: true, requiredData, outputSchema, evidencePolicy: 'optional',
+/** 写工具一律 sensitive：它们落库的是本地业务数据（BOM/报价/目标/原声），不得参与云端上下文。 */
+const write = (requiredData: string[], outputSchema: string, risk: 'medium' | 'high' = 'medium', privacyLevel: ToolPrivacyLevel = 'sensitive'): AiToolManifest => ({
+  id: '', kind: 'write', risk, requiresConfirmation: true, requiredData, outputSchema, evidencePolicy: 'optional', privacyLevel,
 });
-const cloud = (requiredData: string[], outputSchema: string): AiToolManifest => ({
-  id: '', kind: 'cloud', risk: 'high', requiresConfirmation: true, requiredData, outputSchema, evidencePolicy: 'required',
+/**
+ * 云工具特殊：它们**发起**外发，而不是把本地数据喂给云端。
+ * 外发内容受隐私路由与审批双重约束（只发通用物料名/品类/公开问题），
+ * 因此其输出本身可参与云端上下文 —— 标 public 是**如实声明**，不是放宽。
+ */
+const cloud = (requiredData: string[], outputSchema: string, privacyLevel: ToolPrivacyLevel = 'public'): AiToolManifest => ({
+  id: '', kind: 'cloud', risk: 'high', requiresConfirmation: true, requiredData, outputSchema, evidencePolicy: 'required', privacyLevel,
 });
 
 const manifestRows: Record<string, AiToolManifest> = {
@@ -48,31 +64,31 @@ const manifestRows: Record<string, AiToolManifest> = {
   query_worklog: read(['work_logs'], 'WorkLog[]'),
   query_todos: read(['work_logs'], 'Todo[]'),
   compare_subcategory_cost: read(['projects', 'project_boms'], 'SubcategoryCostComparison'),
-  insight_material_trend: cloud(['public market data'], 'MaterialTrendInsight'),
-  cloud_abstract_analysis: cloud(['C2 abstract feature payload'], 'AbstractMarketInsight'),
-  quote_review: write(['quote text', 'parts', 'part_suppliers'], 'QuoteReview[]'),
+  insight_material_trend: cloud(['public market data'], 'MaterialTrendInsight', 'public'),
+  cloud_abstract_analysis: cloud(['C2 abstract feature payload'], 'AbstractMarketInsight', 'public'),
+  quote_review: write(['quote text', 'parts', 'part_suppliers'], 'QuoteReview[]', 'medium', 'sensitive'),
   query_project_module_value: read(['projects', 'project_boms', 'selling_points'], 'ModuleValue[]'),
   query_project_health: read(['projects', 'project_boms', 'project_targets', 'project_cost_snapshots'], 'ProjectHealth'),
-  read_excel: read(['user selected file'], 'TabSeparatedText', 200),
-  calc: calculate(['expression'], 'number'),
-  now: calculate([], 'local datetime'),
-  create_todo: write(['work_logs'], 'Todo'),
-  add_goal: write(['ai_goals'], 'Goal'),
+  read_excel: read(['user selected file'], 'TabSeparatedText', 200, 'sensitive'),
+  calc: calculate(['expression'], 'number', 'public'),
+  now: calculate([], 'local datetime', 'public'),
+  create_todo: write(['work_logs'], 'Todo', 'medium', 'sensitive'),
+  add_goal: write(['ai_goals'], 'Goal', 'medium', 'sensitive'),
   query_voice_dims: read(['voice_dimensions'], 'VoiceDimension[]'),
   query_competitor_bom: read(['competitors', 'competitor_boms'], 'CompetitorBom[]'),
   query_data_readiness: read(['data readiness scan'], 'DataReadiness'),
   query_material_insight: read(['trend_items', 'trend_snapshots'], 'MaterialTrendInsight'),
-  save_selling_analysis: write(['projects', 'selling_points'], 'SellingAnalysis'),
-  save_project_analysis: write(['projects', 'project_analysis_logs'], 'ProjectAnalysis'),
-  import_bom_to_project: write(['user selected BOM', 'projects', 'parts', 'project_boms'], 'ImportStats', 'high'),
-  import_supplier_quote: write(['user selected quote', 'supplier_quote_batches'], 'ImportStats', 'high'),
-  import_competitor_bom: write(['user selected competitor BOM', 'competitors', 'competitor_boms'], 'ImportStats', 'high'),
-  import_voice_items: write(['user selected user voice', 'voice_items'], 'ImportStats', 'high'),
-  generate_report: write(['analysis results', 'export directory'], 'ExportFile', 'high'),
-  write_excel: write(['analysis results', 'export directory'], 'ExportFile', 'high'),
+  save_selling_analysis: write(['projects', 'selling_points'], 'SellingAnalysis', 'medium', 'sensitive'),
+  save_project_analysis: write(['projects', 'project_analysis_logs'], 'ProjectAnalysis', 'medium', 'sensitive'),
+  import_bom_to_project: write(['user selected BOM', 'projects', 'parts', 'project_boms'], 'ImportStats', 'high', 'sensitive'),
+  import_supplier_quote: write(['user selected quote', 'supplier_quote_batches'], 'ImportStats', 'high', 'sensitive'),
+  import_competitor_bom: write(['user selected competitor BOM', 'competitors', 'competitor_boms'], 'ImportStats', 'high', 'sensitive'),
+  import_voice_items: write(['user selected user voice', 'voice_items'], 'ImportStats', 'high', 'sensitive'),
+  generate_report: write(['analysis results', 'export directory'], 'ExportFile', 'high', 'sensitive'),
+  write_excel: write(['analysis results', 'export directory'], 'ExportFile', 'high', 'sensitive'),
   ask_user: read(['user input'], 'UserAnswer', 12),
   query_supplier_profile: read(['part_suppliers'], 'SupplierProfile[]'),
-  canonicalize_project: write(['projects', 'project_boms', 'parts'], 'CanonicalizeResult', 'high'),
+  canonicalize_project: write(['projects', 'project_boms', 'parts'], 'CanonicalizeResult', 'high', 'sensitive'),
   query_tender_analysis: read(['projects', 'tender rounds', 'supplier quote batches', 'supplier quote lines'], 'TenderAnalysis'),
   visualize_cost_analysis: calculate(['projects', 'project_boms'], 'ChartData'),
   estimate_similar_projects: read(['projects', 'project_boms'], 'SimilarProjectEstimate'),

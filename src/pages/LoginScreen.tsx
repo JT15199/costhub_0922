@@ -101,6 +101,7 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
               onChange={e => setUsername(e.target.value)}
               autoFocus
               autoComplete="username"
+              data-testid="login-username"
             />
           </label>
           <label className="login-field">
@@ -113,10 +114,11 @@ export default function LoginScreen({ onUnlock, onEnterRestricted }: Props) {
               onChange={e => setPwd(e.target.value)}
               onPressEnter={handleSubmit}
               autoComplete="current-password"
+              data-testid="login-password"
             />
           </label>
 
-          <Button type="primary" size="large" block disabled={!!initError} loading={checking || initializing} className="login-btn" onClick={handleSubmit}>
+          <Button type="primary" size="large" block disabled={!!initError} loading={checking || initializing} className="login-btn" onClick={handleSubmit} data-testid="login-submit">
             {initializing ? '正在准备本地数据库…' : '登录'}
           </Button>
 
