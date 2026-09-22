@@ -89,6 +89,71 @@ export interface AiToolManifest {
   outputSchema: string;
   evidencePolicy: EvidencePolicy;
   maxRows?: number;
+
+  // ── Agent Runtime V1（Stage 2）新增：全部可选，42 个既有 manifest 不改也能跑 ──
+
+  /**
+   * 该工具读取数据的敏感级别。
+   * 缺省（未声明）时按 `internal` 处理 —— 见 `resolveToolPrivacyLevel`。
+   */
+  privacyLevel?: ToolPrivacyLevel;
+  /**
+   * 该工具输出是否允许参与云端上下文。
+   *
+   * **fail-closed 规则（`resolveToolCloudEligible`）**：
+   *   * `privacyLevel === 'sensitive'` → 恒为 false（即使显式写 true 也不放行）
+   *   * 未显式声明 → 仅 `privacyLevel === 'public'` 时为 true
+   * 因此「漏标」的默认结果是**不可上云**，而不是默认放行。
+   */
+  cloudEligible?: boolean;
+}
+
+/** 工具数据的敏感级别。 */
+export type ToolPrivacyLevel = 'public' | 'internal' | 'sensitive';
+
+/** 未声明 `privacyLevel` 时的保守缺省。 */
+export const DEFAULT_TOOL_PRIVACY_LEVEL: ToolPrivacyLevel = 'internal';
+
+/** 隐私级别严格度排序（数值越大越敏感），用于跨工具取最严。 */
+const PRIVACY_SEVERITY: Record<ToolPrivacyLevel, number> = { public: 0, internal: 1, sensitive: 2 };
+
+/**
+ * 解析单个工具的有效隐私级别。
+ * 未声明 → `internal`（保守缺省，不假设为 public）。
+ */
+export function resolveToolPrivacyLevel(manifest?: Pick<AiToolManifest, 'privacyLevel'> | null): ToolPrivacyLevel {
+  const declared = manifest?.privacyLevel;
+  return declared === 'public' || declared === 'internal' || declared === 'sensitive'
+    ? declared
+    : DEFAULT_TOOL_PRIVACY_LEVEL;
+}
+
+/**
+ * 解析单个工具的输出是否可进入云端上下文（fail-closed）。
+ *
+ * 这是「工具隐私声明」真正生效的地方：无论调用方怎么声明，
+ * sensitive 一律 false；未声明的一律只有在显式 public 时才 true。
+ */
+export function resolveToolCloudEligible(manifest?: Pick<AiToolManifest, 'privacyLevel' | 'cloudEligible'> | null): boolean {
+  const level = resolveToolPrivacyLevel(manifest);
+  if (level === 'sensitive') return false;
+  if (manifest?.cloudEligible === false) return false;
+  if (manifest?.cloudEligible === true) return level === 'public';
+  return level === 'public';
+}
+
+/** 跨多个工具取最严的隐私级别（用于「本轮有哪些工具可用 / 被调用」的聚合）。 */
+export function strictestPrivacyLevel(levels: ToolPrivacyLevel[]): ToolPrivacyLevel {
+  let worst: ToolPrivacyLevel = 'public';
+  for (const level of levels) {
+    if (PRIVACY_SEVERITY[level] > PRIVACY_SEVERITY[worst]) worst = level;
+  }
+  return worst;
+}
+
+/** 任一工具不可上云 → 整体不可上云。 */
+export function allCloudEligible(flags: boolean[]): boolean {
+  return flags.length > 0 && flags.every(Boolean);
 }
 
 export interface ToolCall {
