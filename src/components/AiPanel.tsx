@@ -28,7 +28,10 @@ import { detectVoiceSheet, isLikelyVoiceAttachment } from '../voiceImport';
 import { discoverTools, formatToolCatalog, parseActivatedToolIds, selectAgentTools } from '../ai/toolSelection';
 import { probePiCapability } from '../ai/piCapability';
 import { getLocalBackend, loadModelOptions, type LocalBackend } from '../localBackend';
-import { runPiAgent } from '../ai/piRuntime';
+import { runPiAgent, type PiRunOptions } from '../ai/piRuntime';
+import { isAgentRuntimeEnabled } from './ai/runtimeFeatureFlag';
+import { createRuntimeUiProjection, translateRuntimeEventForUi } from './ai/runtimeEventMapper';
+import { consumeRuntimeTurn, decideExecutionPath } from './ai/runtimeAdapter';
 import { createModelProfile, type ContextUsage, type ModelProfile, type ModelUsage } from '../ai/modelProfile';
 import type { AiGatewayRoute, AiGatewayTraceEvent } from '../ai/gateway';
 import type { AiNetworkTransport } from '../ai/networkTrace';
@@ -1318,7 +1321,8 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           lastSystemPromptRef.current = sys;
           lastToolsRef.current = tools;
           lastRunIdRef.current = runId;
-          const pi = await runPiAgent({
+          // 显式标注类型：抽成变量后 TS 不再从 runPiAgent 的形参推断回调参数类型
+          const piOptions: PiRunOptions = {
             baseUrl, model: effectiveModel, backend, systemPrompt: sys, userContent, think: deepThink, images,
             gatewayRoute,
             cloud: cloudGateway ? { context: cloudGateway.context, privacyDecision: cloudGateway.privacyDecision, provider: cloudGateway.provider, localMessageCount: messages.length + 1, dropped: cloudGateway.dropped, requestId } : undefined,
@@ -1425,7 +1429,54 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
             if (nextCompactionState) compactionStateRef.current = nextCompactionState;
           },
           onEvent: legacyOptions.onEvent,
-        });
+          };
+
+        // ---- Agent Runtime 迁移（Stage 3，双路径，feature flag 默认关闭）--------
+        // 旧路径：AiPanel → runPiAgent（既不删除也不改动）
+        // 新路径：AiPanel → runAgentTurn → runPiAgent（同一执行器，外面包了事件流）
+        //
+        // 两条路径共用同一个 piOptions：相同的工具闸门、相同的审批、相同的回调转发。
+        // 因此切换开关**只改变"谁在编排"，不改变任何安全策略或行为**。
+        const agentRuntimeOptions = {
+          sessionId: currentSid,
+          runId,
+          userMessage: userContent,
+          images,
+          pageContext: { page: activePage || '' },
+          // 按当前 UI 语义映射为通用意图：仅影响工具集选择，不影响隐私/路由判定。
+          intent: 'general',
+          options: piOptions as any,
+        };
+
+        let pi: { finalText?: string; messages: any; workingState: any; compactionState?: any };
+        // 路径选择由适配层决定（纯函数，可单测）；组件只分支，不含判断逻辑。
+        const executionPath = decideExecutionPath(isAgentRuntimeEnabled());
+        if (typeof window !== 'undefined') (window as any).__costhub_agent_runtime_rt = executionPath === 'runtime';
+
+        if (executionPath === 'runtime') {
+          // 新路径：AiPanel → runAgentTurn → runPiAgent
+          const uiProjection = createRuntimeUiProjection({ backend });
+          const consumed = await consumeRuntimeTurn(agentRuntimeOptions as any, {
+            onEvent: event => {
+              uiProjection.push(event);
+              // 把 RuntimeEvent 投影成 UI 已认识的网关事件，并复用**同一条**处理链
+              // （即上面那个 onGatewayTrace 回调），因此 UI 侧不需要第二套渲染逻辑。
+              const translated = translateRuntimeEventForUi(event, { backend });
+              if (translated.gateway) piOptions.onGatewayTrace?.(translated.gateway);
+            },
+            shouldAbort: () => runController.signal.aborted,
+          });
+          if (!consumed.result) throw new Error('任务已取消');
+          pi = {
+            finalText: consumed.result.finalText,
+            messages: consumed.result.messages,
+            workingState: consumed.result.workingState,
+            compactionState: undefined,
+          };
+        } else {
+          // 旧路径：AiPanel → runPiAgent（**保留，未删除**；开关默认关闭时走这条）
+          pi = await runPiAgent(piOptions as any);
+        }
         finalText = pi.finalText || '';
         piHistoryRef.current = pi.messages;
         workingStateRef.current = pi.workingState;
