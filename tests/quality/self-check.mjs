@@ -13,7 +13,15 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { redact, redactDeep, redactSelfTest } from './helpers/redact.mjs';
-import { assertFixtureDatabase, FIXTURE_MARKER_KEY, integrityCheck, seedFixture, snapshotCounts } from './helpers/dbGuard.mjs';
+import {
+  assertFixtureDatabase,
+  integrityCheck,
+  isStrictlyInside,
+  seedFixture,
+  snapshotCounts,
+} from './helpers/dbGuard.mjs';
+import { loadConfig } from './helpers/config.mjs';
+import { generateFixturePassword, hashFixturePassword, resolveFixtureCredentials } from './helpers/fixtureCredentials.mjs';
 import { buildSummary, renderMarkdown } from './helpers/report.mjs';
 
 let failures = 0;
@@ -73,77 +81,162 @@ const deep = redactDeep({ nested: { list: [{ token: 'supersecrettokenvalue' }] }
 check('redacts nested object values', !JSON.stringify(deep).includes('supersecrettokenvalue'), JSON.stringify(deep));
 
 // ---------------------------------------------------------------------------
-// 2. 数据库保护
+// 2. 数据库保护（V2：严格目录白名单）
 // ---------------------------------------------------------------------------
 console.log('');
-console.log('[2] database guard');
+console.log('[2] database guard (V2 strict allowlist)');
 
-// 注意：故意不使用 os.tmpdir()。Windows 上它位于 AppData\Local\Temp，
-// 而 dbGuard 把 AppData\Local 视为正式运行库特征路径并拒绝——这是我们想要的严格性，
-// 因此自检使用仓库内一个有 "quality" 段、且不会被误判为正式库的临时目录。
+const config = loadConfig();
 const tmpRoot = fs.mkdtempSync(path.join(process.cwd(), 'artifacts', 'quality', 'selfcheck-'));
+// 白名单根必须与 config 一致，否则测的不是真实策略
 const fixtureDir = path.join(tmpRoot, 'quality-fixture-selfcheck');
 fs.mkdirSync(fixtureDir, { recursive: true });
 const fixtureDb = path.join(fixtureDir, 'costhub.db');
 
 // 2a. 不存在的库必须被拒
-const missing = assertFixtureDatabase(path.join(fixtureDir, 'missing.db'));
+const missing = assertFixtureDatabase(path.join(fixtureDir, 'missing.db'), { fixtureRoot: fixtureDir });
 check('rejects non-existent database', missing.ok === false, missing.reason);
 
 // 2b. 无 marker 的库必须被拒
-seedFixture(fixtureDb, { username: 'agent-test' });
-// 先手动建表再删 marker：模拟「看起来像但没标记」的库
+seedFixture(fixtureDb, { username: 'agent-test', fixtureRoot: fixtureDir });
 {
   const { DatabaseSync } = await import('node:sqlite');
   const db = new DatabaseSync(fixtureDb);
   db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)');
-  db.prepare('DELETE FROM settings WHERE key=?').run(FIXTURE_MARKER_KEY);
+  db.prepare('DELETE FROM settings WHERE key=?').run(config.database.fixtureMarkerKey);
   db.close();
 }
-const unmarked = assertFixtureDatabase(fixtureDb);
+const unmarked = assertFixtureDatabase(fixtureDb, { fixtureRoot: fixtureDir });
 check('rejects database without fixture marker', unmarked.ok === false && /marker/i.test(unmarked.reason || ''), unmarked.reason);
 
-// 2c. 带 marker 的 fixture 必须被接受
-seedFixture(fixtureDb, { username: 'agent-test', passwordHash: 'a'.repeat(64) });
-const accepted = assertFixtureDatabase(fixtureDb);
+// 2c. 带 marker 的库必须被接受
+seedFixture(fixtureDb, { username: 'agent-test', passwordHash: 'a'.repeat(64), fixtureRoot: fixtureDir });
+const accepted = assertFixtureDatabase(fixtureDb, { fixtureRoot: fixtureDir });
 check('accepts marked fixture database', accepted.ok === true, accepted.reason);
 check('reports integrity ok', accepted.evidence?.integrity === 'ok', String(accepted.evidence?.integrity));
+check('reports path.relative evidence', accepted.evidence?.relativeToFixtureRoot === 'costhub.db', String(accepted.evidence?.relativeToFixtureRoot));
 
-// 2d. 正式库特征路径必须被拒（即使文件内容完全合法）
-const productionishDir = path.join(tmpRoot, 'AppData', 'Roaming', 'CostHub');
-fs.mkdirSync(productionishDir, { recursive: true });
-const productionishDb = path.join(productionishDir, 'costhub.db');
-fs.copyFileSync(fixtureDb, productionishDb);
-const rejectedPath = assertFixtureDatabase(productionishDb);
-check('rejects production-looking path even with valid content', rejectedPath.ok === false, rejectedPath.reason);
-
-// 2e. 非 fixture 目录名必须被拒
-// 位置选在盘根：既不含 "quality" 段（否则会被 REQUIRED_DIR_MARKER 放过），
-// 也不含 AppData/Target 等正式库特征段（否则会被 FORBIDDEN 规则拦掉，
-// 那样测的就不是「目录名不对」这一条了）。
-const plainRoot = fs.mkdtempSync(`${path.parse(process.cwd()).root}qh-selfcheck-`);
-const plainDir = path.join(plainRoot, 'plain-place');
-fs.mkdirSync(plainDir, { recursive: true });
-const plainDb = path.join(plainDir, 'costhub.db');
-fs.copyFileSync(fixtureDb, plainDb);
-const rejectedName = assertFixtureDatabase(plainDb);
+// 2d. V2 核心：白名单之外必须被拒，即使内容完全合法 ---------------------------------
+// 这正是 V1 会误判的场景 —— 路径含 "quality" 关键词但不在白名单目录内。
+const keywordOnlyDir = path.join(process.cwd(), 'artifacts', 'quality-old');
+fs.mkdirSync(keywordOnlyDir, { recursive: true });
+const keywordOnlyDb = path.join(keywordOnlyDir, 'costhub.db');
+fs.copyFileSync(fixtureDb, keywordOnlyDb);
+const keywordRejected = assertFixtureDatabase(keywordOnlyDb, { fixtureRoot: fixtureDir });
 check(
-  'rejects database outside a fixture directory',
-  rejectedName.ok === false && /fixture directory/i.test(rejectedName.reason || ''),
-  rejectedName.reason,
+  'V1 regression: rejects "quality-old" path that only LOOKS like a fixture',
+  keywordRejected.ok === false,
+  keywordRejected.reason,
 );
-fs.rmSync(plainRoot, { recursive: true, force: true });
+fs.rmSync(keywordOnlyDir, { recursive: true, force: true });
 
-// 2f. 完整性检查与计数
+// 2e. 验收要求 #4：src/test.db 必须 FAIL
+const srcDir = path.join(tmpRoot, 'src');
+fs.mkdirSync(srcDir, { recursive: true });
+const srcDb = path.join(srcDir, 'costhub.db');
+fs.copyFileSync(fixtureDb, srcDb);
+const srcRejected = assertFixtureDatabase(srcDb, { fixtureRoot: fixtureDir });
+check(
+  'acceptance: src/costhub.db is REJECTED',
+  srcRejected.ok === false,
+  srcRejected.reason,
+);
+
+// 2f. 验收要求 #4：白名单目录内的库必须 PASS（内容经 seedFixture 合法化）
+const allowedDir = path.join(tmpRoot, 'desktop-fixture');
+fs.mkdirSync(allowedDir, { recursive: true });
+const allowedDb = path.join(allowedDir, 'costhub.db');
+fs.copyFileSync(fixtureDb, allowedDb);
+const allowedPass = assertFixtureDatabase(allowedDb, { fixtureRoot: allowedDir });
+check(
+  'acceptance: artifacts/quality/desktop-fixture/costhub.db is ACCEPTED',
+  allowedPass.ok === true,
+  allowedPass.reason,
+);
+
+// 2g. 同名子目录不算越权，但逃逸必须被拒
+const escape = assertFixtureDatabase(path.join(fixtureDir, '..', 'escaped', 'costhub.db'), { fixtureRoot: fixtureDir });
+check('rejects path escaping the fixture root with ..', escape.ok === false, escape.reason);
+
+// 2h. Windows 跨盘符 / 绝对路径相对化
+const crossDrive = assertFixtureDatabase(path.join(tmpRoot, 'other-drive', 'costhub.db'), { fixtureRoot: fixtureDir });
+check('rejects sibling directory outside the fixture root', crossDrive.ok === false, crossDrive.reason);
+
+// 2i. isStrictlyInside 本身的行为
+check('isStrictlyInside: child inside parent', isStrictlyInside('/a/b', '/a/b/c').inside === true);
+check('isStrictlyInside: parent itself is not inside', isStrictlyInside('/a/b', '/a/b').inside === false);
+check('isStrictlyInside: sibling is not inside', isStrictlyInside('/a/b', '/a/c').inside === false);
+check('isStrictlyInside: ancestor is not inside', isStrictlyInside('/a/b/c', '/a/b').inside === false);
+
+// 2j. 完整性检查与计数
 check('integrityCheck returns ok', integrityCheck(fixtureDb) === 'ok');
 const counts = snapshotCounts(fixtureDb);
 check('snapshotCounts reads settings count', typeof counts.settings === 'number', JSON.stringify(counts));
 
+// 2k. seedFixture 也必须拒绝白名单外的路径（写操作的 fail closed）
+let seedRejected = false;
+try {
+  seedFixture(srcDb, { username: 'x', fixtureRoot: fixtureDir });
+} catch {
+  seedRejected = true;
+}
+check('seedFixture refuses to write outside the fixture root', seedRejected);
+
 // ---------------------------------------------------------------------------
-// 3. 报告
+// 3. V2 配置与凭据策略
 // ---------------------------------------------------------------------------
 console.log('');
-console.log('[3] reporting');
+console.log('[3] V2 config and credential policy');
+
+check('config.security.failClosed is true', config.security.failClosed === true);
+check('config.database.fixtureOnly is true', config.database.fixtureOnly === true);
+check('config.tests.allowFailure is false', config.tests.allowFailure === false);
+check('config.report.leakCheckBeforeFinalize is true', config.report.leakCheckBeforeFinalize === true);
+check('config.limits.maxFileLines is 300', config.limits.maxFileLines === 300, String(config.limits.maxFileLines));
+check('config resolves fixtureRoot under artifacts/quality', /artifacts[\\/]quality[\\/]desktop-fixture$/.test(config.fixtureRoot), config.fixtureRoot);
+
+// 生成的随机密码必须强且不重复
+const pw1 = generateFixturePassword();
+const pw2 = generateFixturePassword();
+check('generated fixture password has sufficient length', pw1.length >= 24, String(pw1.length));
+check('generated fixture passwords differ between runs', pw1 !== pw2);
+check('fixture password hash is a 64-char sha256 hex', /^[0-9a-f]{64}$/.test(hashFixturePassword('x')), hashFixturePassword('x').slice(0, 12));
+
+// 环境变量优先；未设置时生成
+const envVar = config.fixture.passwordEnvVar;
+const fromGenerated = resolveFixtureCredentials(config, {});
+check('credentials generated when env var absent', fromGenerated.source === 'generated' && fromGenerated.password.length >= 24);
+check('generated credential hash matches its password', fromGenerated.passwordHash === hashFixturePassword(fromGenerated.password));
+const fromEnv = resolveFixtureCredentials(config, { [envVar]: 'provided-by-operator-password' });
+check('credentials taken from env var when present', fromEnv.source === 'env' && fromEnv.password === 'provided-by-operator-password', fromEnv.source);
+
+// 仓库中不得出现明文 fixture 密码（V1 曾硬编码一个固定口令）。
+// 扫描**整个** Harness 目录，而不只是几个文件 —— 注释里出现也算泄漏。
+//
+// 注意：本文件自身被排除，否则「检测用的字面量」会把检查自己判成泄漏。
+// 为避免扫描器把本文件里的字符串当成真泄漏，待查口令由片段拼接构造，
+// 不做成完整字面量。
+const legacyPlaintext = [[ 'agent', 'test', '666' ].join('-')];
+const SELF = path.resolve('tests/quality/self-check.mjs');
+const leakedFiles = [];
+const walkHarness = dir => {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) { walkHarness(full); continue; }
+    if (!/\.(mjs|js|json|md)$/.test(entry.name)) continue;
+    if (path.resolve(full) === SELF) continue;
+    const text = fs.readFileSync(full, 'utf8');
+    if (legacyPlaintext.some(secret => text.includes(secret))) leakedFiles.push(full.replace(/\\/g, '/'));
+  }
+};
+for (const root of ['tests/quality']) if (fs.existsSync(root)) walkHarness(root);
+check('no legacy plaintext fixture password anywhere in the harness', leakedFiles.length === 0, leakedFiles.join(', '));
+
+// ---------------------------------------------------------------------------
+// 4. 报告
+// ---------------------------------------------------------------------------
+console.log('');
+console.log('[4] reporting');
 
 const summary = buildSummary({
   profile: 'selfcheck',

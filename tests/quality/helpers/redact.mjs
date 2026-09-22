@@ -35,6 +35,9 @@ function envSecretValues() {
     'COSTHUB_API_KEY',
     'HTTP_PROXY',
     'HTTPS_PROXY',
+    // V2：fixture 测试密码（可能来自环境变量，也可能是 runner 生成的一次性随机值）。
+    // 无论来源如何，都不允许出现在报告文本里。
+    'QUALITY_TEST_PASSWORD',
   ];
   const values = [];
   for (const name of names) {
@@ -184,7 +187,6 @@ export function redactSummary(summary) {
   const structural = redactDeep(summary);
   try {
     const asText = JSON.stringify(structural);
-    // eslint-disable-next-line no-control-regex
     const scrubbed = redact(asText);
     return JSON.parse(scrubbed);
   } catch {

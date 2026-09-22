@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Quality Harness V1 — 桌面 fixture 准备（full 档 F01；实施指导 §7 / §9 E2E-008）
+// Quality Harness V2 — 桌面 fixture 准备（full 档 F01）
 //
 // 目标：产出一个**与正式库完全隔离、且可被机器证明**的 CostHub 运行环境。
 //
@@ -11,19 +11,25 @@
 //   再写入测试账号与 fixture marker。这样夹具内容 = 程序自身 schema，不会漂移，
 //   且不含任何真实业务数据。
 //
+// V2 变化（要求 #4）：**不再硬编码明文密码**。
+//   凭据由 helpers/fixtureCredentials.mjs 解析：优先 config.fixture.passwordEnvVar
+//   指定的环境变量；未提供时由 runner 生成一次性随机密码并经进程环境传入。
+//   manifest 里只记录用户名与密码来源，不记录密码本身。
+//
 // 产物：
 //   artifacts/quality/desktop-fixture/
 //     CostHub.exe           portable 副本（来自 tauri release 构建）
 //     costhub.db            隔离夹具库（含 quality_fixture=1 标记 + 测试账号）
-//     desktop-fixture.json  机器可读的夹具描述（不含密码明文以外的真实凭据）
+//     desktop-fixture.json  机器可读的夹具描述（**不含密码明文**）
 
 import { spawn } from 'node:child_process';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
-import { assertFixtureDatabase, FIXTURE_MARKER_KEY, integrityCheck, seedFixture, snapshotCounts } from '../helpers/dbGuard.mjs';
+import { assertFixtureDatabase, integrityCheck, seedFixture, snapshotCounts } from '../helpers/dbGuard.mjs';
+import { loadConfig } from '../helpers/config.mjs';
+import { resolveFixtureCredentials } from '../helpers/fixtureCredentials.mjs';
 import { FIXTURE_BOM_ROWS, FIXTURE_PROJECT_CODE, FIXTURE_PROJECT_NAME, seedFixtureData } from './fixtureData.mjs';
 
 // node:sqlite 是内置模块，但用 createRequire 取用可以让本文件在
@@ -32,23 +38,14 @@ const requireBuiltin = createRequire(import.meta.url);
 const { DatabaseSync } = requireBuiltin('node:sqlite');
 
 const ROOT = process.cwd();
-const FIXTURE_DIR = path.join(ROOT, 'artifacts', 'quality', 'desktop-fixture');
 const DB_NAME = 'costhub.db';
 const EXE_NAME = 'CostHub.exe';
-
-// 测试账号（实施指导 §9 E2E-002 指定）。只用于隔离夹具库。
-const TEST_USERNAME = 'agent-test';
-const TEST_PASSWORD = 'agent-test-666';
 
 const RELEASE_EXE = path.join(ROOT, 'src-tauri', 'target', 'release', 'costhub.exe');
 const PORTABLE_EXE = path.join(ROOT, 'artifacts', 'agent-upgrade', '20260910-portable', 'CostHub-Portable', EXE_NAME);
 
 function log(message) {
   console.log(`[fixture] ${message}`);
-}
-
-function sha256(buffer) {
-  return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
 /** 找一个可用的 release 可执行文件。 */
@@ -122,6 +119,12 @@ async function main() {
     process.exit(3);
   }
 
+  const config = loadConfig();
+  const fixtureDir = config.fixtureRoot;
+
+  // V2：凭据不落明文。优先环境变量；未提供则由 runner 传入的随机值兜底。
+  const credentials = resolveFixtureCredentials(config);
+
   const exeSource = locateExecutable();
   if (!exeSource) {
     console.error('[fixture] BLOCKED: no CostHub executable found.');
@@ -133,26 +136,26 @@ async function main() {
   log(`executable: ${path.relative(ROOT, exeSource).replace(/\\/g, '/')}`);
 
   // 每次都重建：夹具必须可重复再生，且绝不能复用上一次可能被写脏的库
-  fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
-  fs.mkdirSync(FIXTURE_DIR, { recursive: true });
+  fs.rmSync(fixtureDir, { recursive: true, force: true });
+  fs.mkdirSync(fixtureDir, { recursive: true });
 
-  const exeTarget = path.join(FIXTURE_DIR, EXE_NAME);
+  const exeTarget = path.join(fixtureDir, EXE_NAME);
   fs.copyFileSync(exeSource, exeTarget);
 
-  const dbPath = await bootstrapSchema(exeTarget, FIXTURE_DIR);
+  const dbPath = await bootstrapSchema(exeTarget, fixtureDir);
 
   // 写入测试账号 + fixture marker（这是夹具准备阶段，允许写；写的是夹具副本）
-  const passwordHash = sha256(Buffer.from(TEST_PASSWORD, 'utf8'));
   seedFixture(dbPath, {
-    username: TEST_USERNAME,
-    passwordHash,
+    username: credentials.username,
+    passwordHash: credentials.passwordHash,
     passwordChanged: '1',
+    fixtureRoot: fixtureDir,
     extraSettings: {
       // 明确关掉 fixture 里的本地模型依赖，保证 full 档不因 Ollama 缺失而假失败
       local_ai_model: '',
     },
   });
-  log('seeded fixture marker + test identity');
+  log(`seeded fixture marker + test identity (password source: ${credentials.source})`);
 
   // 播种合成业务数据，让 E2E-004 有可断言的已知数据集
   const seeded = seedFixtureData(dbPath);
@@ -164,12 +167,17 @@ async function main() {
   for (const note of seeded.schemaNotes || []) log(`schema: ${note}`);
 
   // 机器证明：这份库确实是 fixture
-  const proof = assertFixtureDatabase(dbPath);
+  const proof = assertFixtureDatabase(dbPath, {
+    fixtureRoot: fixtureDir,
+    databaseFilename: config.database.databaseFilename,
+    markerKey: config.database.fixtureMarkerKey,
+    markerValue: config.database.fixtureMarkerValue,
+  });
   if (!proof.ok) {
     console.error(`[fixture] ABORT: fixture proof failed — ${proof.reason}`);
     process.exit(1);
   }
-  log(`proof ok: marker=${FIXTURE_MARKER_KEY}, integrity=${proof.evidence.integrity}, counts=${JSON.stringify(proof.evidence.counts)}`);
+  log(`proof ok: marker=${proof.evidence.marker}, relative=${proof.evidence.relativeToFixtureRoot}, integrity=${proof.evidence.integrity}, counts=${JSON.stringify(proof.evidence.counts)}`);
 
   const manifest = {
     mode: 'quality-desktop-fixture',
@@ -178,18 +186,21 @@ async function main() {
     formalDatabaseTouched: false,
     database: DB_NAME,
     executable: EXE_NAME,
-    // 凭据只用于隔离夹具库；不写入任何正式存储
-    identity: { username: TEST_USERNAME, password: TEST_PASSWORD },
-    fixtureMarker: { key: FIXTURE_MARKER_KEY, value: '1' },
+    // V2：只记录用户名与密码来源，**不记录密码本身**。
+    // 密码通过进程环境在 runner → prepare-fixture → run-e2e 之间传递。
+    identity: { username: credentials.username, passwordSource: credentials.source },
+    fixtureMarker: { key: config.database.fixtureMarkerKey, value: config.database.fixtureMarkerValue },
     // E2E-004 的断言目标
     projectCode: FIXTURE_PROJECT_CODE,
     projectName: FIXTURE_PROJECT_NAME,
     expectedBomModels: FIXTURE_BOM_ROWS.map(row => row.model),
     integrity: integrityCheck(dbPath),
     counts: snapshotCounts(dbPath),
-    note: 'Synthetic fixture: schema created by the application under test, no real business data. Recreated on every prepare run.',
+    note:
+      'Synthetic fixture: schema created by the application under test, no real business data. ' +
+      'Recreated on every prepare run. No plaintext credential is stored in this manifest.',
   };
-  fs.writeFileSync(path.join(FIXTURE_DIR, 'desktop-fixture.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(path.join(fixtureDir, 'desktop-fixture.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 
   console.log('');
   console.log(JSON.stringify({

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "description": "lint 基线：只允许减少，不允许新增。由 lint-gate.mjs 强制。改动 lint 配置或修掉债务后，请同步下调本文件并在 PR 中说明。",
+  "capturedAt": "2026-09-22",
+  "capturedAtCommit": "quality-harness-v1 (453ef2b)",
+  "command": "npm run lint",
+  "gate": {
+    "errors": 113,
+    "warnings": 149,
+    "total": 262
+  },
+  "sourceSubset": {
+    "command": "npx eslint src tests",
+    "errors": 6,
+    "warnings": 149,
+    "total": 155,
+    "note": "真实代码债口径（排除被 gitignore 的 .build-portable/ 打包产物）。仅作趋势记录，不作为闸门。"
+  },
+  "knownDebt": {
+    "buildPortableParsingErrors": 107,
+    "note_buildPortable": "eslint 扫描 .build-portable/ 下的 Tauri 打包产物产生的 Parsing error。属配置噪声，不是源码问题。修法是往 eslint.config.js 的 globalIgnores 加入该目录 —— 那属于生产配置变更，留待独立的 lint clean-up 轮次处理。",
+    "sourceErrors": "6 个 react-hooks「Cannot access refs during render」，位于 src 源码。",
+    "topWarningRules": {
+      "no-useless-assignment": 38,
+      "react-hooks/exhaustive-deps": 29,
+      "no-useless-escape": 15,
+      "prefer-const": 13
+    }
+  },
+  "policy": "current.total > gate.total 或 current.errors > gate.errors 即失败。任何新增的 lint 问题都必须先修掉，或经评审后显式上调基线（上调需要说明理由）。"
+}

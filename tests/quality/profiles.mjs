@@ -1,36 +1,24 @@
-// Quality Harness V1 — profile 定义
+// Quality Harness V2 — profile 定义
 //
-// 三档（实施指导 §3 / §5.4）：
+// 三档（与 V1 相同的分层意图）：
 //
-//   core  完全确定性：无网络、无 Ollama、无 API Key、无正式数据库。每次修改都必须跑。
-//   full  core + 隔离桌面程序（真实 WebView2/CDP + 隔离 SQLite fixture）。仍不访问真实云端。
-//   live  full + 本地 Ollama + 真实 Agent Tool Calling。只用于人工验收，不作为普通提交硬门槛。
+//   core  完全确定性：无网络、无 Ollama、无 API Key、无正式数据库。
+//   full  core + 隔离桌面程序（真实 WebView2/CDP + 隔离 SQLite fixture）。
+//   live  full + 本地 Ollama + 真实 Agent Tool Calling。
 //
-// 设计约束：
-//   * 命令全部是静态字面量，不接受外部输入拼接（exec.mjs 因此可以安全使用 shell）。
-//   * required: false 的步骤失败只降级为 warning，绝不静默通过。
-//   * 任何步骤都不得依赖真实 API Key 或公网。
+// V2 相对 V1 的步骤变化：
+//   * 删除 Q04–Q07（它们只是把 Q02 里的一部分文件再跑一遍）。隐私/网关/审批/
+//     resultStore 的边界结论改由 Vitest 分类报告给出（一次执行，按文件归类）。
+//   * 新增 Q03「Vitest 分类」：对同一次执行的结果做类别汇总。
+//   * 新增 Q10「lint 基线门禁」：lint 仍然不参与 PASS/FAIL，但**新增**问题会硬失败。
+//   * 新增 Q13「单文件行数门禁」：防止 Quality Harness 自身膨胀。
+//   * Q12 的语义变化：它由 runner 在写完草稿报告后调用，校验的是**本次运行的报告**。
+//
+// 命令全部是静态字面量，不接受外部输入拼接。
 
-const ROOT = process.cwd();
-
-/** 供 E2E 复用的 fixture 目录（绝对路径在运行时拼装，报告中只出现相对名）。 */
 export const FIXTURE_DIR = 'artifacts/quality/desktop-fixture';
-
-/** 回归目录路径（regression-catalog.json）。 */
 export const CATALOG_PATH = 'tests/quality/regression-catalog.json';
 
-// ---------------------------------------------------------------------------
-// CORE
-// ---------------------------------------------------------------------------
-
-/**
- * Q01–Q08（实施指导 §12）
- *
- * 注意 Q02（Vitest 全量）已经覆盖 Q04–Q07 的隐私/网关/审批/resultStore 测试文件。
- * 这里仍然把 Q04–Q07 单列为独立步骤，目的是：
- *   * 让「隐私与审批边界」在报告里有一行明确的结论，而不是淹没在 92 个文件里；
- *   * 让边界回归被破坏时能一眼定位到是哪一类边界。
- */
 const coreSteps = [
   {
     id: 'Q01',
@@ -42,17 +30,26 @@ const coreSteps = [
   },
   {
     id: 'Q02',
-    title: 'Vitest All',
-    command: ['npx', 'vitest', 'run'],
+    title: 'Vitest All (single execution, collected)',
+    // reporter 把逐测试结果写到 QUALITY_VITEST_RESULT，供 Q03 分类使用。
+    command: ['npx', 'vitest', 'run', '--reporter=default', '--reporter=./tests/quality/reporters/vitest-collect.mjs'],
     required: true,
     timeoutMs: 15 * 60 * 1000,
     // 冷启动/CPU 争用下已知存在 5s 超时抖动，允许一次重跑；
-    // 重跑通过会被降级为 warning 并写入报告（见 run-quality.mjs），不静默变绿。
+    // 重跑通过会被降级为 warning 并写入报告，不静默变绿。
     flakeRetry: { max: 1, knownFlaky: 'src/__tests__/costPackage.test.ts cold-import 5s timeout' },
     regressionIds: [],
   },
   {
     id: 'Q03',
+    title: 'Vitest boundary classification (no re-run)',
+    command: ['node', 'tests/quality/classify-vitest.mjs'],
+    required: true,
+    timeoutMs: 2 * 60 * 1000,
+    regressionIds: ['REG-PRIV-001', 'REG-PRIV-002', 'REG-CLOUD-001', 'REG-APPROVAL-001', 'REG-STORE-001', 'REG-AGENT-001'],
+  },
+  {
+    id: 'Q04',
     title: 'Rust Unit Tests',
     command: ['cargo', 'test', '--manifest-path', 'src-tauri/Cargo.toml', '--lib'],
     required: true,
@@ -60,39 +57,7 @@ const coreSteps = [
     regressionIds: [],
   },
   {
-    id: 'Q04',
-    title: 'Privacy Regression',
-    command: ['npx', 'vitest', 'run', '--reporter=dot', 'src/__tests__/privacyRouter.test.ts', 'src/__tests__/safeQuery.test.ts', 'src/__tests__/securityPolicy.test.ts'],
-    required: true,
-    timeoutMs: 5 * 60 * 1000,
-    regressionIds: ['REG-PRIV-001', 'REG-PRIV-002'],
-  },
-  {
     id: 'Q05',
-    title: 'Cloud Gateway Regression',
-    command: ['npx', 'vitest', 'run', '--reporter=dot', 'src/__tests__/cloudGateway.test.ts', 'src/__tests__/aiGateway.test.ts', 'src/__tests__/nativeSearchSources.test.ts'],
-    required: true,
-    timeoutMs: 5 * 60 * 1000,
-    regressionIds: ['REG-CLOUD-001', 'REG-SOURCE-001', 'REG-SOURCE-002', 'REG-SEARCH-001'],
-  },
-  {
-    id: 'Q06',
-    title: 'Approval Regression',
-    command: ['npx', 'vitest', 'run', '--reporter=dot', 'src/__tests__/materialInsightApproval.test.ts', 'src/__tests__/aiApproval.test.ts', 'src/__tests__/cloudConfirm.test.ts'],
-    required: true,
-    timeoutMs: 5 * 60 * 1000,
-    regressionIds: ['REG-APPROVAL-001', 'REG-SEARCH-001'],
-  },
-  {
-    id: 'Q07',
-    title: 'ResultStore Regression',
-    command: ['npx', 'vitest', 'run', '--reporter=dot', 'src/__tests__/resultStore.test.ts', 'src/__tests__/contextPolicy.test.ts'],
-    required: true,
-    timeoutMs: 5 * 60 * 1000,
-    regressionIds: ['REG-STORE-001'],
-  },
-  {
-    id: 'Q08',
     title: 'Agent Deterministic Eval/Test',
     command: ['npm', 'run', 'test:agent'],
     required: true,
@@ -100,17 +65,26 @@ const coreSteps = [
     regressionIds: ['REG-AGENT-001'],
   },
   {
-    id: 'Q09',
-    title: 'Lint (baseline debt — non-blocking in V1)',
-    command: ['npm', 'run', 'lint'],
-    // 依据实施指导 §12：基线 lint 存在历史债务（113 errors / 149 warnings），
-    // V1 先作为 warning，不允许一次性大改几百个文件“修 lint”。
+    id: 'Q06',
+    title: 'Lint capture (not in gate)',
+    // 采集输出留档；lint 本身失败是正常的（基线即失败），因此该步骤总是 pass。
+    // 是否「新增了问题」由 Q07 的基线门禁判定。
+    command: ['node', 'tests/quality/capture-lint.mjs'],
     required: false,
-    timeoutMs: 10 * 60 * 1000,
+    timeoutMs: 12 * 60 * 1000,
     regressionIds: [],
   },
   {
-    id: 'Q10',
+    id: 'Q07',
+    title: 'Lint baseline gate (no new problems)',
+    // V2 要求 #6：lint 债务只允许减少，不允许新增。
+    command: ['node', 'tests/quality/lint-gate.mjs', 'artifacts/quality/lint-output.txt'],
+    required: true,
+    timeoutMs: 3 * 60 * 1000,
+    regressionIds: [],
+  },
+  {
+    id: 'Q08',
     title: 'Harness self-check (redaction + DB guard)',
     command: ['node', 'tests/quality/self-check.mjs'],
     required: true,
@@ -118,7 +92,7 @@ const coreSteps = [
     regressionIds: ['REG-DB-001'],
   },
   {
-    id: 'Q11',
+    id: 'Q09',
     title: 'Regression catalog integrity',
     command: ['node', 'tests/quality/check-catalog.mjs'],
     required: true,
@@ -126,21 +100,14 @@ const coreSteps = [
     regressionIds: [],
   },
   {
-    id: 'Q12',
-    title: 'Report leak check (redaction verified on real artifacts)',
-    // 独立于 Q10：Q10 验证脱敏函数本身，Q12 验证**真实落盘的报告文件**
-    // ——包括子进程 stdout/stderr 带进来的、我们没预料到的内容。
-    // 这是「报告是否可能泄漏 API Key」这一问的实证答案。
-    command: ['node', 'tests/quality/check-report-leaks.mjs'],
+    id: 'Q10',
+    title: 'File size gate (max 300 lines)',
+    command: ['node', 'tests/quality/file-size-check.mjs'],
     required: true,
     timeoutMs: 2 * 60 * 1000,
-    regressionIds: ['REG-PRIV-002'],
+    regressionIds: [],
   },
 ];
-
-// ---------------------------------------------------------------------------
-// FULL
-// ---------------------------------------------------------------------------
 
 const fullSteps = [
   {
@@ -153,7 +120,7 @@ const fullSteps = [
   },
   {
     id: 'F02',
-    title: 'Portable build available + launch',
+    title: 'Fixture executable check',
     command: ['node', 'tests/quality/desktop/check-portable.mjs'],
     required: true,
     timeoutMs: 2 * 60 * 1000,
@@ -167,23 +134,7 @@ const fullSteps = [
     timeoutMs: 20 * 60 * 1000,
     regressionIds: ['REG-DB-001', 'REG-UI-001'],
   },
-  {
-    id: 'F04',
-    title: 'Portable package check',
-    // 原来指向 artifacts/agent-upgrade/20260910-portable/CostHub-Portable，
-    // 那是 2026-09-10 的一次性打包产物（artifacts/ 被 gitignore，fresh clone 后不存在），
-    // 作为质量步骤会造成「路径陈旧 → 永远失败」的噪声。
-    // 改为复用同一个检查脚本校验**当前夹具**里的可执行文件，语义等价且始终可用。
-    command: ['node', 'tests/quality/desktop/check-portable.mjs'],
-    required: false,
-    timeoutMs: 2 * 60 * 1000,
-    regressionIds: [],
-  },
 ];
-
-// ---------------------------------------------------------------------------
-// LIVE
-// ---------------------------------------------------------------------------
 
 const liveSteps = [
   {
@@ -219,7 +170,7 @@ const liveSteps = [
 export const PROFILES = {
   core: {
     name: 'core',
-    description: 'Deterministic gate: build + unit/integration + rust + boundary regressions. No network, no Ollama, no API key, no production DB.',
+    description: 'Deterministic gate: build + unit/integration (single run, classified) + rust + lint baseline + harness self-checks.',
     steps: coreSteps,
     artifactsDir: 'artifacts/quality',
   },
@@ -244,5 +195,3 @@ export function getProfile(name) {
   }
   return profile;
 }
-
-export { ROOT };
