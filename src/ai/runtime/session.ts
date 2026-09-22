@@ -20,6 +20,7 @@ import { runPiAgent, type PiRunOptions } from '../piRuntime';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 
 import { resolveBudget, type BudgetInput } from './budget';
+import { createAsyncQueue } from './queue';
 import { runPreflight } from './preflight';
 import { buildCallbacks } from './sessionCallbacks';
 import type {
@@ -32,58 +33,6 @@ import type {
 
 /** `runPiAgent` 的返回形状（Stage 1 直接复用，不重新定义）。 */
 type PiRunOutcome = Awaited<ReturnType<typeof runPiAgent>>;
-
-// ---------------------------------------------------------------------------
-// 异步队列：回调 → 生成器
-// ---------------------------------------------------------------------------
-
-/**
- * 一个最小的一次性异步队列。
- *
- * 语义（本文件第一版踩过两次坑，这里明确定义）：
- *   * `drain()` 只吐当前已缓冲的元素，**缓冲为空时立刻返回** —— 不阻塞等待新元素。
- *   * `waitForWork()` 等待"有新元素或已关闭"。
- *
- * 为什么把等待拆出来：若让 `drain()` 自己在缓冲为空时挂起，那么
- * 「生产者在 await 之后才 emit」的场景下，消费者会卡在一个**不会再被唤醒**的
- * promise 上（生产者只唤醒自己那套信号），表现为 5 秒超时死锁。
- * 拆开后，消费者可以用 `runSettled` 这类外部条件决定何时停止等待。
- */
-function createAsyncQueue<T>() {
-  const buffer: T[] = [];
-  let closed = false;
-  let wake: (() => void) | null = null;
-
-  const notify = () => {
-    const pending = wake;
-    wake = null;
-    if (pending) pending();
-  };
-
-  return {
-    push(value: T) {
-      if (closed) return;
-      buffer.push(value);
-      notify();
-    },
-    close() {
-      closed = true;
-      notify();
-    },
-    get isClosed() {
-      return closed;
-    },
-    /** 吐出当前已缓冲的元素；缓冲为空即返回（不等待）。 */
-    *drain(): Generator<T, void, undefined> {
-      while (buffer.length > 0) yield buffer.shift() as T;
-    },
-    /** 等待"有新元素或已关闭"。 */
-    waitForWork(): Promise<void> {
-      if (buffer.length > 0 || closed) return Promise.resolve();
-      return new Promise<void>(resolve => { wake = resolve; });
-    },
-  };
-}
 
 // ---------------------------------------------------------------------------
 // 主入口
