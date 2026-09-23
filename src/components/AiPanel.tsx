@@ -31,6 +31,8 @@ import { getLocalBackend, loadModelOptions, type LocalBackend } from '../localBa
 import { runPiAgent, type PiRunOptions } from '../ai/piRuntime';
 import { isAgentRuntimeEnabled } from './ai/runtimeFeatureFlag';
 import { createRuntimeUiProjection, translateRuntimeEventForUi } from './ai/runtimeEventMapper';
+import { handleRuntimeCommand } from './ai/runtimeDevSwitch';
+import { installRuntimeEventRecorder, recordRuntimeEvent } from './ai/runtimeEventRecorder';
 import { consumeRuntimeTurn, decideExecutionPath } from './ai/runtimeAdapter';
 import { createModelProfile, type ContextUsage, type ModelProfile, type ModelUsage } from '../ai/modelProfile';
 import type { AiGatewayRoute, AiGatewayTraceEvent } from '../ai/gateway';
@@ -723,6 +725,15 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
   const send = async (raw: string) => {
     if (cloudReviewBusy.current) { message.info('请先在对话中确认或拒绝本次云端请求'); return; }
     const text = (raw || '').trim();
+    // ---- Stage 3.5 开发开关：/runtime on|off|status|help ----
+    // 仅开发构建生效（生产下 handleRuntimeCommand 直接返回 null，输入原样当普通消息）。
+    // 在**任何模型调用之前**拦截，因此切换开关不会消耗 token。
+    const runtimeCommand = handleRuntimeCommand(text);
+    if (runtimeCommand) {
+      setMessages(prev => [...prev, { role: 'user', content: text }, { role: 'assistant', content: runtimeCommand.reply }]);
+      setInput('');
+      return;
+    }
     if (streaming) {
       // ⚠️ 2026-09-21 修复"执行过程中对话框无法补充指令然后发出"：
       // 旧实现在没有 piAgentRef（兼容模式 / 云端直连 / 规范化直连任务）时**静默 return**——
@@ -1456,11 +1467,16 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
         if (executionPath === 'runtime') {
           // 新路径：AiPanel → runAgentTurn → runPiAgent
           const uiProjection = createRuntimeUiProjection({ backend });
+          // Stage 3.5：安装开发期事件记录器（仅 DEV 生效），供真实链路验证读取事件顺序
+          if (typeof window !== 'undefined') installRuntimeEventRecorder(window as any);
           const consumed = await consumeRuntimeTurn(agentRuntimeOptions as any, {
             onEvent: event => {
+              // Stage 3.5 开发期旁路记录（生产构建为空操作），仅供真实链路验证读取事件顺序
+              recordRuntimeEvent(event as any);
               uiProjection.push(event);
               // 把 RuntimeEvent 投影成 UI 已认识的网关事件，并复用**同一条**处理链
               // （即上面那个 onGatewayTrace 回调），因此 UI 侧不需要第二套渲染逻辑。
+              // consumeRuntimeTurn 会在执行前移除旧 gateway callback，避免双路投递。
               const translated = translateRuntimeEventForUi(event, { backend });
               if (translated.gateway) piOptions.onGatewayTrace?.(translated.gateway);
             },

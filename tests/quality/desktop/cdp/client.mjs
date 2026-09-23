@@ -20,10 +20,10 @@ export function sleep(ms) {
  * 连接到 WebView2 的 CDP 端口。
  *
  * @param {number} port
- * @param {{timeoutMs?: number, onEvent?: (event: object) => void}} [options]
+ * @param {{timeoutMs?: number, onEvent?: (event: object) => void, targetFilter?: (target: object) => boolean}} [options]
  */
 export async function connect(port, options = {}) {
-  const { timeoutMs = DEFAULT_TIMEOUT_MS, onEvent } = options;
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, onEvent, targetFilter } = options;
   const listUrl = `http://127.0.0.1:${port}/json/list`;
 
   let targets;
@@ -41,10 +41,13 @@ export async function connect(port, options = {}) {
     );
   }
 
-  const target = Array.isArray(targets) ? targets.find(item => item.type === 'page') : null;
+  // 默认取第一个 page target；调用方可传 targetFilter 精确挑（dev 模式下
+  // /json/list 里还会出现 devtools:// 页面，直接取第一个可能连错目标）。
+  const candidates = Array.isArray(targets) ? targets.filter(item => item.type === 'page') : [];
+  const target = targetFilter ? candidates.find(targetFilter) : candidates[0];
   if (!target?.webSocketDebuggerUrl) {
     throw new Error(
-      `CDP_TARGET_MISSING: no "page" target on port ${port} ` +
+      `CDP_TARGET_MISSING: no matching "page" target on port ${port} ` +
       `(found ${Array.isArray(targets) ? targets.length : 0} targets). ` +
       'The WebView2 host may not have finished creating the page yet.',
     );
