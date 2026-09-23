@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import {
   DEV_TOOLS_DEFAULT,
   DEV_TOOLS_KEY,
@@ -15,6 +15,9 @@ function memoryStorage(initial: Record<string, string> = {}) {
     raw: () => Object.fromEntries(map),
   };
 }
+
+beforeEach(() => vi.stubEnv('DEV', true));
+afterEach(() => vi.unstubAllEnvs());
 
 describe('Stage 3.5 — 开发工具开关（默认关闭）', () => {
   it('缺省是关闭的', () => {
@@ -48,5 +51,15 @@ describe('Stage 3.5 — 开发工具开关（默认关闭）', () => {
     const broken = { getItem: () => { throw new Error('blocked'); } };
     expect(isDevToolsEnabled(broken)).toBe(false);
     expect(setDevToolsEnabled(true, { getItem: () => null, setItem: () => { throw new Error('quota'); } })).toBe(false);
+  });
+
+  it('仅开发构建且显式开启时生效；生产构建即使开关为 1 也拒绝', () => {
+    const enabled = memoryStorage({ [DEV_TOOLS_KEY]: '1' });
+    expect(isDevToolsEnabled(enabled)).toBe(true);
+
+    vi.stubEnv('DEV', false);
+    expect(isDevToolsEnabled(enabled)).toBe(false);
+    expect(setDevToolsEnabled(true, enabled)).toBe(false);
+    expect(enabled.raw()[DEV_TOOLS_KEY]).toBe('1');
   });
 });

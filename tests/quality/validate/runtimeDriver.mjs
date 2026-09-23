@@ -147,6 +147,11 @@ export async function reloadAndWait(cdp, timeoutMs = 60000) {
  *   任何整页重载都会回到登录页 —— 因此重载之后必须再登录一次。
  */
 export async function applyRuntimeFlag(cdp, identity, enabled, log = console.log) {
+  const devServer = await cdp.evaluate(`location.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(location.hostname) && location.port === '5173'`).catch(() => false);
+  if (!devServer) {
+    log('[flag] BLOCKED: Stage 3.5 validation requires the Vite development server at localhost:5173');
+    return false;
+  }
   await setDevTools(cdp, true);
   await setRuntimeFlag(cdp, enabled);
   log(`[flag] ${RUNTIME_FLAG_KEY}=${enabled ? 1 : 0} · ${DEV_TOOLS_KEY}=1`);

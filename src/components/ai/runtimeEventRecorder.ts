@@ -5,8 +5,7 @@
 // 以及确认底层网关事件有没有被重复投递。
 //
 // 边界（不越界）：
-//   * 只在**开发工具开关**打开时记录（见 `devTools.ts`）；缺省关闭，
-//     因此生产构建与生产用户都不会进入记录分支。
+//   * 只在开发构建且开发工具开关打开时安装和记录（见 `devTools.ts`）。
 //   * **只写内存**，不落库、不打印、不发网络 —— 不产生任何持久化副作用。
 //   * 长文本（token / 工具结果）只保留长度，避免把整篇回答堆进数组。
 //   * 不改变事件本身，也不改变任何执行顺序（纯旁路）。
@@ -120,18 +119,15 @@ export function createRuntimeEventRecorder(): RuntimeEventRecorder {
 /**
  * 记录一条事件（纯函数式：只依赖传入的 runtime）。
  *
- * 开发工具开关关闭、未安装记录器、或类型不在白名单时都是空操作。
+ * 非开发构建、开发工具开关关闭、未安装记录器、或类型不在白名单时都是空操作。
  *
  * @param runtime 承载记录器的对象（浏览器里传 `window`）
- * @param isDevEnv 是否记录；缺省读开发工具开关
  */
 export function recordRuntimeEventInto(
   runtime: Record<string, unknown> | undefined,
   event: { type?: string } & Record<string, unknown>,
-  isDevEnv?: boolean,
 ): void {
-  const dev = isDevEnv ?? isDev();
-  if (!dev) return;
+  if (!isDev()) return;
   if (!runtime) return;
 
   const type = String(event?.type ?? '');
@@ -154,7 +150,7 @@ export function recordRuntimeEventInto(
  * 这样"是否安装"在调用点一眼可见，也便于测试注入。
  */
 export function installRuntimeEventRecorder(target: Record<string, unknown> | undefined): RuntimeEventRecorder | null {
-  if (!target) return null;
+  if (!target || !isDev()) return null;
   const existing = target.__costhubRuntimeEvents as RuntimeEventRecorder | undefined;
   if (existing) return existing;
 
@@ -165,7 +161,7 @@ export function installRuntimeEventRecorder(target: Record<string, unknown> | un
   return recorder;
 }
 
-/** 浏览器入口：记录到 `window`（开发工具开关关闭时为空操作）。 */
+/** 浏览器入口：记录到 `window`（未通过双重门禁时为空操作）。 */
 export function recordRuntimeEvent(event: { type?: string } & Record<string, unknown>): void {
   if (typeof window === 'undefined') return;
   recordRuntimeEventInto(window as unknown as Record<string, unknown>, event);

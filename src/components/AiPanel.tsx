@@ -30,7 +30,7 @@ import { probePiCapability } from '../ai/piCapability';
 import { getLocalBackend, loadModelOptions, type LocalBackend } from '../localBackend';
 import { runPiAgent, type PiRunOptions } from '../ai/piRuntime';
 import { isAgentRuntimeEnabled } from './ai/runtimeFeatureFlag';
-import { createGatewayEventDeduplicator, createRuntimeUiProjection, translateRuntimeEventForUi } from './ai/runtimeEventMapper';
+import { createRuntimeUiProjection, translateRuntimeEventForUi } from './ai/runtimeEventMapper';
 import { handleRuntimeCommand } from './ai/runtimeDevSwitch';
 import { installRuntimeEventRecorder, recordRuntimeEvent } from './ai/runtimeEventRecorder';
 import { consumeRuntimeTurn, decideExecutionPath } from './ai/runtimeAdapter';
@@ -1469,12 +1469,6 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
           const uiProjection = createRuntimeUiProjection({ backend });
           // Stage 3.5：安装开发期事件记录器（仅 DEV 生效），供真实链路验证读取事件顺序
           if (typeof window !== 'undefined') installRuntimeEventRecorder(window as any);
-          // Stage 3.5：底层网关事件在本路径上会到达两次（旧回调直连 + Runtime 透传），
-          // 去重后只交给 UI 一次，避免轨迹卡重复、outbound/toolRequests 计数翻倍。
-          // 旧路径不经过这里，行为不变。
-          const deliverGatewayEvent = createGatewayEventDeduplicator(
-            event => piOptions.onGatewayTrace?.(event),
-          );
           const consumed = await consumeRuntimeTurn(agentRuntimeOptions as any, {
             onEvent: event => {
               // Stage 3.5 开发期旁路记录（生产构建为空操作），仅供真实链路验证读取事件顺序
@@ -1482,8 +1476,9 @@ export default function AiPanel({ activePage }: { activePage?: string }) {
               uiProjection.push(event);
               // 把 RuntimeEvent 投影成 UI 已认识的网关事件，并复用**同一条**处理链
               // （即上面那个 onGatewayTrace 回调），因此 UI 侧不需要第二套渲染逻辑。
+              // consumeRuntimeTurn 会在执行前移除旧 gateway callback，避免双路投递。
               const translated = translateRuntimeEventForUi(event, { backend });
-              if (translated.gateway) deliverGatewayEvent(translated.gateway);
+              if (translated.gateway) piOptions.onGatewayTrace?.(translated.gateway);
             },
             shouldAbort: () => runController.signal.aborted,
           });

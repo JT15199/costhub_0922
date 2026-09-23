@@ -8,10 +8,10 @@
 //   `undefined`，于是 `DEV` 判定恒为 false —— 记录器装了却永远不记录，
 //   `/runtime` 命令也被静默忽略。这类"环境标记探测"不该成为验证链路的前提。
 //
-// 因此改为**显式开关**：
-//   * 缺省关闭（`localStorage` 无键即关闭）—— 生产用户永远不会进入这些分支；
+// 修正后由本模块直接读取 Vite 的 DEV 常量，并与显式开关同时校验：
+//   * 开发构建 AND localStorage 显式开启才生效；生产构建的 DEV 常量固定为 false；
 //   * 手动验证时置 `1` 即开启，随时置 `0` 或删除键即回到默认；
-//   * 不依赖任何构建期常量，dev / 打包 / 夹具三种形态行为一致。
+//   * `localStorage` 只是第二道门禁，不会覆盖生产构建的环境常量。
 //
 // 适用范围（都只是"开发期可观测性与手动控制"，不含任何业务或安全策略）：
 //   * `/runtime on|off|status|help` 手动切换执行链路
@@ -39,6 +39,7 @@ function readStore(storage?: Pick<Storage, 'getItem'> | null): Pick<Storage, 'ge
  * 绝不让"探测开关"本身变成故障点。
  */
 export function isDevToolsEnabled(storage?: Pick<Storage, 'getItem'> | null): boolean {
+  if (!import.meta.env.DEV) return false;
   try {
     const store = readStore(storage);
     if (!store) return DEV_TOOLS_DEFAULT;
@@ -52,6 +53,7 @@ export function isDevToolsEnabled(storage?: Pick<Storage, 'getItem'> | null): bo
 
 /** 显式设置开关（供测试与手动验证使用）。 */
 export function setDevToolsEnabled(enabled: boolean, storage?: Pick<Storage, 'getItem' | 'setItem'> | null): boolean {
+  if (!import.meta.env.DEV) return false;
   try {
     const store = storage ?? (typeof localStorage === 'undefined' ? null : localStorage);
     if (!store) return false;

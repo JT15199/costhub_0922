@@ -51,7 +51,13 @@ export async function consumeRuntimeTurn(
   options: ConsumeRuntimeTurnOptions = {},
 ): Promise<ConsumeRuntimeTurnResult> {
   const { onEvent, shouldAbort } = options;
-  const turn = runAgentTurn(request);
+  // Gateway events belong to the RuntimeEvent stream on this path. Keeping the
+  // legacy callback here too would deliver each event once directly and once
+  // again when AiPanel maps the RuntimeEvent back to its existing UI handler.
+  const runtimeRequest = request.options.onGatewayTrace
+    ? { ...request, options: { ...request.options, onGatewayTrace: undefined } }
+    : request;
+  const turn = runAgentTurn(runtimeRequest);
   let eventCount = 0;
 
   for (;;) {

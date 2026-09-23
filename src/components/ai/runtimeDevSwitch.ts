@@ -5,8 +5,8 @@
 // 设计约束（Stage 3.5 要求）：
 //   * **不改变默认关闭状态** —— `AGENT_RUNTIME_DEFAULT` 仍是 `false`，
 //     本模块只提供"怎么手动打开"，不参与任何默认值判定。
-//   * **不影响生产行为** —— 命令分发只在**开发工具开关**打开时生效
-//     （见 `devTools.ts`，缺省关闭）；否则用户输入原样当普通消息处理。
+//   * **不影响生产行为** —— 命令分发只在开发构建且**开发工具开关**打开时生效
+//     （见 `devTools.ts`）；否则用户输入原样当普通消息处理。
 //   * **保留快速回滚能力** —— `/runtime off` 一条命令即可回到旧路径；
 //     也可直接清掉 localStorage 键（缺省即关闭）。
 //
@@ -84,6 +84,7 @@ export function runRuntimeCommand(
   raw: string,
   storage?: Pick<Storage, 'getItem' | 'setItem'> | null,
 ): RuntimeCommand | null {
+  if (!isDevToolsEnabled(storage)) return null;
   const action = parseRuntimeCommand(raw);
   if (!action) return null;
 
@@ -139,9 +140,7 @@ export function runRuntimeCommand(
  */
 export function handleRuntimeCommand(
   raw: string,
-  options: { storage?: Pick<Storage, 'getItem' | 'setItem'> | null; isDev?: boolean } = {},
+  options: { storage?: Pick<Storage, 'getItem' | 'setItem'> | null } = {},
 ): RuntimeCommand | null {
-  const isDev = options.isDev ?? isDevToolsEnabled(options.storage);
-  if (!isDev) return null;
   return runRuntimeCommand(raw, options.storage);
 }

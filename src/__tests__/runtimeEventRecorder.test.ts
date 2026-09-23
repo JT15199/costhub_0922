@@ -1,9 +1,22 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import {
   createRuntimeEventRecorder,
   installRuntimeEventRecorder,
   recordRuntimeEventInto,
 } from '../components/ai/runtimeEventRecorder';
+
+function memoryStorage(value: string) {
+  return { getItem: (key: string) => key === 'costhub-dev-tools' ? value : null };
+}
+
+beforeEach(() => {
+  vi.stubEnv('DEV', true);
+  vi.stubGlobal('localStorage', memoryStorage('1'));
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
 
 /** 模拟 window：记录器挂在它上面，测试不依赖 jsdom。 */
 const runtimeWith = () => {
@@ -15,41 +28,43 @@ const runtimeWith = () => {
 describe('Stage 3.5 — RuntimeEvent 记录器（真实链路验证用）', () => {
   it('按到达顺序记录事件类型', () => {
     const { target, recorder } = runtimeWith();
-    recordRuntimeEventInto(target, { type: 'budget' }, true);
-    recordRuntimeEventInto(target, { type: 'privacy' }, true);
-    recordRuntimeEventInto(target, { type: 'route' }, true);
-    recordRuntimeEventInto(target, { type: 'final' }, true);
+    recordRuntimeEventInto(target, { type: 'budget' });
+    recordRuntimeEventInto(target, { type: 'privacy' });
+    recordRuntimeEventInto(target, { type: 'route' });
+    recordRuntimeEventInto(target, { type: 'final' });
 
     expect(recorder.types()).toEqual(['budget', 'privacy', 'route', 'final']);
   });
 
-  it('开发工具开关关闭（isDevEnv=false）时不记录任何事件', () => {
+  it('开发工具开关关闭时不记录任何事件', () => {
     const { target, recorder } = runtimeWith();
-    recordRuntimeEventInto(target, { type: 'budget' }, false);
-    recordRuntimeEventInto(target, { type: 'final' }, false);
+    vi.stubGlobal('localStorage', memoryStorage('0'));
+    recordRuntimeEventInto(target, { type: 'budget' });
+    recordRuntimeEventInto(target, { type: 'final' });
     expect(recorder.events).toHaveLength(0);
   });
 
-  it('缺省（不传 isDevEnv）时读开发工具开关；测试环境无 localStorage → 回落关闭', () => {
+  it('localStorage 不可用时回落关闭', () => {
     const { target, recorder } = runtimeWith();
+    vi.stubGlobal('localStorage', undefined);
     recordRuntimeEventInto(target, { type: 'budget' });
     expect(recorder.events).toHaveLength(0);
   });
 
   it('未安装记录器时是空操作（不抛错）', () => {
-    expect(() => recordRuntimeEventInto({}, { type: 'budget' }, true)).not.toThrow();
-    expect(() => recordRuntimeEventInto(undefined, { type: 'budget' }, true)).not.toThrow();
+    expect(() => recordRuntimeEventInto({}, { type: 'budget' })).not.toThrow();
+    expect(() => recordRuntimeEventInto(undefined, { type: 'budget' })).not.toThrow();
   });
 
   it('白名单外的事件类型不记录（避免将来新增字段被无意收集）', () => {
     const { target, recorder } = runtimeWith();
-    recordRuntimeEventInto(target, { type: 'some_future_secret_event', payload: 'x' }, true);
+    recordRuntimeEventInto(target, { type: 'some_future_secret_event', payload: 'x' });
     expect(recorder.events).toHaveLength(0);
   });
 
   it('长文本折叠为字符数，不把整篇回答堆进记录', () => {
     const { target, recorder } = runtimeWith();
-    recordRuntimeEventInto(target, { type: 'token', text: 'x'.repeat(5000) }, true);
+    recordRuntimeEventInto(target, { type: 'token', text: 'x'.repeat(5000) });
 
     const detail = recorder.events[0].detail;
     expect(detail.textChars).toBe(5000);
@@ -65,7 +80,7 @@ describe('Stage 3.5 — RuntimeEvent 记录器（真实链路验证用）', () =
         reasonCode: 'source_policy:private_workspace',
         regexMatches: ['金额', '型号'], sourceTypes: ['private_workspace'],
       },
-    }, true);
+    });
 
     const detail = recorder.events[0].detail as { decision: Record<string, unknown> };
     expect(detail.decision.classification).toBe('internal');
@@ -77,26 +92,26 @@ describe('Stage 3.5 — RuntimeEvent 记录器（真实链路验证用）', () =
 
   it('gateway 事件只记内部类型与路由，便于核对重复投递', () => {
     const { target, recorder } = runtimeWith();
-    recordRuntimeEventInto(target, { type: 'gateway', event: { type: 'route_selected', route: 'local', model: 'm', provider: 'ollama' } }, true);
+    recordRuntimeEventInto(target, { type: 'gateway', event: { type: 'route_selected', route: 'local', model: 'm', provider: 'ollama' } });
 
     expect(recorder.gatewayTypes()).toEqual(['route_selected']);
   });
 
   it('reset 清空记录（跨轮运行不串数据）', () => {
     const { target, recorder } = runtimeWith();
-    recordRuntimeEventInto(target, { type: 'budget' }, true);
+    recordRuntimeEventInto(target, { type: 'budget' });
     recorder.reset();
     expect(recorder.events).toHaveLength(0);
     // 重置后重新从 0 计序号
-    recordRuntimeEventInto(target, { type: 'final' }, true);
+    recordRuntimeEventInto(target, { type: 'final' });
     expect(recorder.events[0].seq).toBe(0);
   });
 
   it('pick 按类型过滤，用于精确核对某一类事件', () => {
     const { target, recorder } = runtimeWith();
-    recordRuntimeEventInto(target, { type: 'tool_start', toolId: 'query_project_bom' }, true);
-    recordRuntimeEventInto(target, { type: 'tool_result', toolId: 'query_project_bom', ok: true }, true);
-    recordRuntimeEventInto(target, { type: 'token', text: 'hi' }, true);
+    recordRuntimeEventInto(target, { type: 'tool_start', toolId: 'query_project_bom' });
+    recordRuntimeEventInto(target, { type: 'tool_result', toolId: 'query_project_bom', ok: true });
+    recordRuntimeEventInto(target, { type: 'token', text: 'hi' });
 
     expect(recorder.pick('tool_start')).toHaveLength(1);
     expect(recorder.pick('tool_start')[0].detail.toolId).toBe('query_project_bom');
@@ -105,7 +120,7 @@ describe('Stage 3.5 — RuntimeEvent 记录器（真实链路验证用）', () =
 
   it('重复安装返回同一个记录器（幂等，不丢已有事件）', () => {
     const { target, recorder } = runtimeWith();
-    recordRuntimeEventInto(target, { type: 'budget' }, true);
+    recordRuntimeEventInto(target, { type: 'budget' });
     const again = installRuntimeEventRecorder(target);
     expect(again).toBe(recorder);
     expect(again?.types()).toEqual(['budget']);
@@ -115,5 +130,14 @@ describe('Stage 3.5 — RuntimeEvent 记录器（真实链路验证用）', () =
     const recorder = createRuntimeEventRecorder();
     expect(recorder.types()).toEqual([]);
     expect(recorder.gatewayTypes()).toEqual([]);
+  });
+
+  it('生产构建即使开关为 1 也不安装或记录', () => {
+    vi.stubEnv('DEV', false);
+    vi.stubGlobal('localStorage', memoryStorage('1'));
+    const target: Record<string, unknown> = {};
+    expect(installRuntimeEventRecorder(target)).toBeNull();
+    recordRuntimeEventInto(target, { type: 'budget' });
+    expect(target.__costhubRuntimeEvents).toBeUndefined();
   });
 });

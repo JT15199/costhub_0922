@@ -1,16 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { handleRuntimeCommand, parseRuntimeCommand, runRuntimeCommand } from '../components/ai/runtimeDevSwitch';
 import { AGENT_RUNTIME_DEFAULT, isAgentRuntimeEnabled } from '../components/ai/runtimeFeatureFlag';
 
 /** 内存 storage（避免依赖 jsdom/happy-dom 的 localStorage）。 */
 function memoryStorage(initial: Record<string, string> = {}) {
-  const map = new Map(Object.entries(initial));
+  const map = new Map(Object.entries({ 'costhub-dev-tools': '1', ...initial }));
   return {
     getItem: (key: string) => (map.has(key) ? (map.get(key) as string) : null),
     setItem: (key: string, value: string) => { map.set(key, value); },
     raw: () => Object.fromEntries(map),
   };
 }
+
+beforeEach(() => vi.stubEnv('DEV', true));
+afterEach(() => vi.unstubAllEnvs());
 
 describe('Stage 3.5 — /runtime 开发开关：命令识别', () => {
   it('识别 on / off / status / help', () => {
@@ -69,7 +72,7 @@ describe('Stage 3.5 — /runtime 开发开关：开关读写', () => {
     expect(status?.target).toBe(true);
     expect(status?.changed).toBe(false);
     expect(status?.reply).toContain('runAgentTurn');
-    expect(storage.raw()).toEqual({ 'costhub-use-agent-runtime': '1' });
+    expect(storage.raw()).toEqual({ 'costhub-dev-tools': '1', 'costhub-use-agent-runtime': '1' });
   });
 
   it('status 在未设置时报告旧链路与"未设置，用默认"', () => {
@@ -81,7 +84,7 @@ describe('Stage 3.5 — /runtime 开发开关：开关读写', () => {
 
   it('storage 写入失败时如实报告未改变，不静默假装成功', () => {
     const broken = {
-      getItem: () => null,
+      getItem: (key: string) => key === 'costhub-dev-tools' ? '1' : null,
       setItem: () => { throw new Error('quota'); },
     };
     const result = runRuntimeCommand('/runtime on', broken);
@@ -101,18 +104,28 @@ describe('Stage 3.5 — /runtime 开发开关：开关读写', () => {
   });
 });
 
-describe('Stage 3.5 — /runtime 开发开关：生产环境零影响', () => {
-  it('生产构建（isDev=false）下命令被完全忽略', () => {
-    const storage = memoryStorage();
-    expect(handleRuntimeCommand('/runtime on', { storage, isDev: false })).toBeNull();
-    // 关键：不仅不响应，而且**没有写入**
+describe('Stage 3.5 — /runtime 开发开关：双重门禁', () => {
+  it('开发环境但 localStorage 开关关闭时命令被完全忽略', () => {
+    const storage = memoryStorage({ 'costhub-dev-tools': '0' });
+    for (const command of ['/runtime on', '/runtime off', '/runtime status']) {
+      expect(handleRuntimeCommand(command, { storage })).toBeNull();
+    }
     expect(isAgentRuntimeEnabled(storage)).toBe(false);
-    expect(storage.raw()).toEqual({});
   });
 
-  it('开发构建（isDev=true）下命令正常生效', () => {
+  it('生产构建中即使 localStorage 开关为 1 也拒绝命令', () => {
     const storage = memoryStorage();
-    const result = handleRuntimeCommand('/runtime on', { storage, isDev: true });
+    vi.stubEnv('DEV', false);
+    for (const command of ['/runtime on', '/runtime off', '/runtime status']) {
+      expect(handleRuntimeCommand(command, { storage })).toBeNull();
+      expect(runRuntimeCommand(command, storage)).toBeNull();
+    }
+    expect(isAgentRuntimeEnabled(storage)).toBe(false);
+  });
+
+  it('开发构建且 localStorage 开关打开时命令生效', () => {
+    const storage = memoryStorage();
+    const result = handleRuntimeCommand('/runtime on', { storage });
     expect(result?.action).toBe('on');
     expect(isAgentRuntimeEnabled(storage)).toBe(true);
   });
